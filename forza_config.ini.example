@@ -1,0 +1,56 @@
+# Forza Motorsport Screenshot Extractor - Configuration
+# SQLite DB vNext is the runtime source of truth.
+
+[paths]
+input_dir             = data/input
+pdf_file              = output/reports/forza_bestlaps.pdf
+log_file              = output/logs/forza_debug.log
+database_file         = data/forza.sqlite3
+
+[user]
+gamertag = Player
+
+[llm]
+workers = 1
+
+[prompt]
+active = user_header_shaped_v1
+
+# ============================================================
+# LM Studio native REST settings.
+# The model name must match exactly what appears in your
+# LM Studio model list.
+# ============================================================
+
+[lmstudio]
+url               = http://127.0.0.1:1234/api/v1/chat
+model             = qwen/qwen3.5-9b
+max_completion_tokens = 800
+temperature       = 0.0
+image_format          = png
+timeout_connect   = 10
+timeout_read      = 180
+max_retries       = 3
+context_length    = 5000
+reasoning_mode    = off
+eval_batch_size   = 1024
+physical_batch_size =
+flash_attention   = true
+offload_kv_cache_to_gpu = true
+performance_tps_floor = 20.0
+performance_reload_elapsed_s = 45.0
+performance_reload_streak = 3
+
+[image]
+# Default extraction image settings. Tune after validating results on your hardware.
+max_width      = 2560
+encode_quality = 100
+grayscale      = true
+
+[validation]
+temp_min_f = 40
+temp_max_f = 140
+
+[pdf]
+dirty_lap_symbol      = †
+show_dirty_lap_symbol = true

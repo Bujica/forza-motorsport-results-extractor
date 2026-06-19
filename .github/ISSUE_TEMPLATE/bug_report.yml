@@ -1,0 +1,69 @@
+name: Bug report
+description: Report a reproducible problem
+title: "Bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach private screenshots, local databases, logs with personal paths, or configuration files with sensitive data.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: App version, commit SHA, or beta build name.
+      placeholder: "0.20.0 / v0.20.0-beta.1 / commit SHA"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - GUI - Images
+        - GUI - Process
+        - GUI - Review
+        - GUI - Best Laps
+        - GUI - Records
+        - GUI - Diagnostics
+        - GUI - Settings
+        - CLI
+        - Packaging
+        - Database
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Minimal steps to reproduce the issue.
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation / diagnostics
+      description: Include sanitized command output if relevant.
+      placeholder: |
+        python -m forza maintenance db-doctor --json
+        pytest ...
+    validations:
+      required: false

@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtualenv
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Runtime data
+data/cache/
+data/calibration
+data/ground_truth/*.json
+data/gt_validation/
+data/*.sqlite3
+data/input
+data/processed/
+data/review/
+output/exports/
+output/logs/
+output/prompt_bench/
+output/prompt_diagnostics/
+output/reports/
+
+# User config
+forza_config.ini
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Temporary
+*.tmp
+*.bak
+data/external/UniqueFM.xlsx
+data/external/records.json
+/data/corrections
+/backup
+/debug
+data/external/DataFM.xlsx
+/output
+data/forza.sqlite3-shm
+data/forza.sqlite3-wal
+/scripts

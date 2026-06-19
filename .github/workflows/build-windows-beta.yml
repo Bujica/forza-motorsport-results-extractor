@@ -1,0 +1,30 @@
+name: Build Windows Beta
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows-beta:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install package
+        run: python -m pip install -e .[dev,gui,build]
+
+      - name: Validate packaging contracts
+        run: pytest tests\test_beta_packaging_static.py tests\test_open_source_readiness_static.py
+
+      - name: Build beta bundle
+        run: python tools\build_windows_beta.py
+
+      - name: Upload beta bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: forza-extractor-windows-beta
+          path: dist\ForzaMotorsportResultsExtractor-*-windows-x64.zip
