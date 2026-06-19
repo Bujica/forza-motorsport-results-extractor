@@ -1,37 +1,16 @@
-# Developer Tools
+# Tools
 
-Status: maintainer-only
-Audience: maintainer, developer, LLM
-Lifecycle: permanent index
+Status: public beta
+Audience: maintainers and release builders
 
-These tools are not product runtime surfaces. They exist to inspect repository
-health, diagnose local data, and prepare release evidence. A tool listed here may
-be changed or removed without preserving user-facing compatibility.
+This directory intentionally contains only public build tooling.
 
 ## Supported
 
-- `audit_db_vnext.py` - read-only SQLite runtime database inspection. DB Doctor
-  remains the authoritative integrity gate; this tool is for human-readable
-  drill-downs.
-- `audit_module_size.py` - reports oversized source, test, documentation, and
-  tool files by maintenance area.
-- `diagnose_car_imports.py` - read-only diagnostic for imported Community
-  Records car-name canonicalization.
-- `run_release_audit.py` - local release evidence orchestrator for the current
-  gates: compile, DB Doctor, module-size audit, pytest, targeted-test selection,
-  and dry-run.
-- `select_tests_for_changes.py` - focused pytest selector for local change sets.
+- `build_windows_beta.py` - builds the Windows beta distribution using the
+  PyInstaller spec under `packaging/`, writes `build_info.json`, stages the
+  portable application folder, and creates the release ZIP.
 
-## Temporary
-
-- `audit_database_service_callers.py` - inventory for the remaining
-  `DatabaseService` facade. Keep while service ownership is still being drained;
-  remove after callers are stable or the facade is no longer a meaningful
-  migration target.
-
-## Discarded
-
-The clean-break string audits and schema-drift helper were removed after the
-0.17.0 clean-break. Their useful checks now live in product tests and DB Doctor,
-and the old broad string scans produced false positives against negative tests
-and deliberate current API names.
+Internal audit, diagnosis, maintainer workflow, and local triage scripts are
+not part of the public beta baseline. They remain in the private development
+repository when needed.

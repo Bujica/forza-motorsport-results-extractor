@@ -51,6 +51,18 @@ def test_beta_distribution_policy_excludes_development_tools() -> None:
     assert "must not be copied into beta application bundles" in readme
 
 
+def test_public_baseline_tools_are_release_build_only() -> None:
+    public_tool_files = {
+        path.name for path in (ROOT / "tools").glob("*.py")
+    }
+    assert public_tool_files == {"build_windows_beta.py"}
+
+    tools_readme = _read("tools/README.md")
+    assert "public build tooling" in tools_readme
+    assert "Internal audit" in tools_readme
+    assert "audit_db_vnext.py" not in tools_readme
+
+
 def test_github_ci_uses_windows_and_project_validation() -> None:
     workflow = _read(".github/workflows/ci.yml")
     assert "windows-latest" in workflow
