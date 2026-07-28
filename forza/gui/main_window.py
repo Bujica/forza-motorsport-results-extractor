@@ -36,6 +36,7 @@ from ..app_info import (
 from ..version import APP_DISPLAY_VERSION, __version__
 from . import theme
 from .config_state import ConfigChangeSet, GuiConfigState, connect_config_aware, connect_many_config_aware
+from ..application.gui_write_service import GuiWriteService
 from .controllers.best_laps_controller import BestLapsController
 from .controllers.developer_overview_controller import DeveloperOverviewController
 from .controllers.db_doctor_controller import DbDoctorController
@@ -94,6 +95,13 @@ class MainWindow(QMainWindow):
         self._cfg = self._config_state.current
         self._config_path = config_path
         self._debug = debug
+        # Write service used for orchestration-level operations (e.g. best-lap
+        # recompute after a gamertag change).  Uses a live gamertag lambda so
+        # it always reflects the current config without needing a rebuild.
+        self._write_service = GuiWriteService(
+            self._cfg.database_file,
+            gamertag=lambda: str(getattr(self._cfg, "gamertag", "") or "").strip() or None,
+        )
         self._buttons: dict[str, QPushButton] = {}
         self._stack = QStackedWidget()
         self._section_title = QLabel()
@@ -159,6 +167,12 @@ class MainWindow(QMainWindow):
 
     def on_config_changed(self, cfg: Any, changes: ConfigChangeSet) -> None:
         self._cfg = cfg
+        if changes.affects("paths.database_file"):
+            self._write_service.close()
+            self._write_service = GuiWriteService(
+                cfg.database_file,
+                gamertag=lambda: str(getattr(self._cfg, "gamertag", "") or "").strip() or None,
+            )
         self._mark_sections_stale("review", "images", "diagnostics", "records", "best_laps")
         self._loaded_diagnostics_tabs.discard("debug")
         self._show_status_message("Configuration applied to open GUI components.")
@@ -539,8 +553,34 @@ class MainWindow(QMainWindow):
         self._settings_controller.settings_changed.connect(self._settings_view.show_settings)
         self._settings_controller.action_completed.connect(self._settings_view.show_message)
         self._settings_controller.action_failed.connect(self._settings_view.show_warning)
+        self._settings_controller.best_laps_recompute_needed.connect(self._on_best_laps_recompute_needed)
         self._settings_controller.refresh()
         return self._settings_view
+
+    def _on_best_laps_recompute_needed(self) -> None:
+        """Recompute the best-lap frontier after a gamertag change.
+
+        Called via the ``best_laps_recompute_needed`` signal from
+        SettingsController after a successful gamertag save.  The write service
+        lives here (not in SettingsController or BestLapsController) so both
+        of those controllers remain single-responsibility.
+
+        The recompute updates the database *before* refreshing the view cache,
+        so BestLapsController.reload() always reads correct persisted data.
+        """
+        try:
+            self._write_service.recompute_best_laps()
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "best-lap recompute after gamertag change failed; "
+                "use CLI rebuild to restore the frontier",
+                exc_info=True,
+            )
+            return
+        if "best_laps" in self._loaded_sections:
+            self._best_laps_controller.reload()
+            self._refresh_pending["best_laps"] = False
 
     def select_section(self, key: str) -> None:
         index = next((i for i, item in enumerate(NAV_ITEMS) if item.key == key), 0)
@@ -609,6 +649,7 @@ class MainWindow(QMainWindow):
             close = getattr(controller, "close", None)
             if callable(close):
                 close()
+        self._write_service.close()
         super().closeEvent(event)
 
     def _rename_images_with_confirmation(self, image_ids: list[str]) -> None:

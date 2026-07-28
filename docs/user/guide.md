@@ -4,7 +4,7 @@ Status: current
 Audience: user
 Lifecycle: permanent
 Scope: External behavior
-Last verified: 2026-06-18
+Last verified: 2026-07-27
 Supersedes: `docs/USER_GUIDE.md`
 Related tests: manual GUI workflow checks
 
@@ -305,3 +305,16 @@ troubleshooting conclusions. It is read-only and verifies run/input/result count
 schema state, artifact integrity, prompt snapshots, Review identity, and related
 runtime contracts. Review identity repair is no longer a public CLI workflow;
 maintainers should treat it as an internal service-level recovery path.
+
+### SQLite file size after cleanup
+
+Deleting screenshots and their relational records does not necessarily reduce
+the size shown for `data/forza.sqlite3`. SQLite normally keeps freed pages in
+the database for reuse. This is expected and is not, by itself, evidence of an
+incomplete deletion.
+
+Do not run `VACUUM` after every cleanup. For a large intentional deletion, make
+a backup, close the application, then have a maintainer run `VACUUM` only when
+the freelist is roughly 25–30% of the database or the reclaimed disk space is
+worth the exclusive rewrite. Run DB Doctor before and after the operation and
+keep the backup until the second check passes.

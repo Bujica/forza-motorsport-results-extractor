@@ -12,6 +12,14 @@ from ...application.gui_write_service import GuiWriteService, ReviewDecisionTarg
 from ..config_state import ConfigChangeSet
 
 
+# Statuses that are considered "resolved" for filter purposes.
+# ``auto_resolved`` is set by the system when it detects that the underlying
+# data condition that triggered a review case no longer exists (e.g. after a
+# Rebuild).  From the user's perspective it is a resolved case and should
+# appear under the "Resolved" filter tab, not disappear entirely.
+_RESOLVED_STATUSES: frozenset[str] = frozenset({"resolved", "auto_resolved"})
+
+
 class ReviewController(QObject):
     queue_changed = Signal(object)
     filter_options_changed = Signal(object)
@@ -25,7 +33,17 @@ class ReviewController(QObject):
         super().__init__(parent)
         self._cfg = cfg
         self._reader = GuiReadService(cfg.database_file)
-        self._writer = GuiWriteService(cfg.database_file, gamertag=getattr(cfg, "gamertag", None))
+        # Pass a live provider lambda instead of a frozen string.  The lambda
+        # closes over ``self._cfg`` (not the local ``cfg`` variable) so that
+        # every write operation — including best-lap recomputes triggered by
+        # review decisions — always resolves the gamertag from the *current*
+        # config object rather than a snapshot captured at construction time.
+        # This prevents stale-gamertag recomputes whenever the config is
+        # reloaded in the background without a full writer rebuild.
+        self._writer = GuiWriteService(
+            cfg.database_file,
+            gamertag=lambda: str(getattr(self._cfg, "gamertag", "") or "").strip() or None,
+        )
         self._all_cases: list[GuiReviewCase] = []
         self._cases: list[GuiReviewCase] = []
         self._current_case: GuiReviewCase | None = None
@@ -47,7 +65,10 @@ class ReviewController(QObject):
             self._writer.close()
             self._reader = GuiReadService(cfg.database_file)
             self._tracks = self._reader.list_reference_tracks()
-            self._writer = GuiWriteService(cfg.database_file, gamertag=getattr(cfg, "gamertag", None))
+            self._writer = GuiWriteService(
+                cfg.database_file,
+                gamertag=lambda: str(getattr(self._cfg, "gamertag", "") or "").strip() or None,
+            )
             self._all_cases = []
             self._cases = []
             self._current_case = None
@@ -183,8 +204,14 @@ class ReviewController(QObject):
             self.selection_changed.emit(None, None, [], None)
 
     def _case_matches(self, case: GuiReviewCase) -> bool:
-        if self._status and self._status != "all" and case.status != self._status:
-            return False
+        if self._status and self._status != "all":
+            # ``auto_resolved`` is a system-set variant of "resolved": treat it
+            # as belonging to the "resolved" bucket so it surfaces under the
+            # Resolved filter tab instead of being invisible everywhere except
+            # "All".
+            case_bucket = "resolved" if case.status in _RESOLVED_STATUSES else case.status
+            if case_bucket != self._status:
+                return False
         if self._reason and self._reason != "all" and case.reason != self._reason:
             return False
         if self._outcome and self._outcome != "all" and case.outcome != self._outcome:

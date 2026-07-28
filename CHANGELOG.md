@@ -16,7 +16,43 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-No unreleased changes.
+### Fixed
+
+- Fixed bulk image deletion recomputing the best-lap frontier once per image
+  and losing the configured gamertag on the Images path. Image deletion now
+  passes a live gamertag provider and removes a selected batch in one database
+  transaction with one frontier recomputation, avoiding long freezes and
+  fallback best-lap results. Added the SQLite file-size maintenance policy to
+  the database contract and user guide: freed pages are reusable, and
+  `VACUUM` is an explicit backed-up maintenance operation rather than a
+  per-delete action.
+
+- Fixed stale gamertag in the GUI Review write path causing all images to switch
+  to `non_contributing` after Review decisions. `GuiWriteService` previously
+  captured `user.gamertag` as a frozen string at construction time; a background
+  config reload without a full writer rebuild could silently introduce a mismatched
+  gamertag, causing `FrontierCalculator` to find zero player rows and mark every
+  image `non_contributing`. Write services now resolve the gamertag through a live
+  provider callable closed over the current config object so no recompute can use
+  a stale value. A `DEBUG` log line in `mark_best_laps` now records the effective
+  gamertag and winner count for every recompute, making regressions immediately
+  visible in `forza_debug.log`.
+
+- Fixed `auto_resolved` review cases being invisible in the Review Resolved filter
+  and silently visible only under All. `ReviewController._case_matches` previously
+  matched `status == "resolved"` literally; `auto_resolved` is a system-set
+  terminal state equivalent to resolved from the operator's perspective and must
+  appear in the Resolved bucket. Cases with `auto_resolved` status now appear
+  under the Resolved filter tab.
+
+- Fixed `user.gamertag` changes saved in Settings having no visible effect on the
+  Best Laps list. The frontier remained computed for the previous gamertag until a
+  new screenshot was processed or CLI `rebuild` was run manually.
+  `SettingsController` now emits `best_laps_recompute_needed` after a successful
+  gamertag save. `MainWindow` handles the signal by calling
+  `GuiWriteService.recompute_best_laps()` and then `BestLapsController.reload()`,
+  keeping both `SettingsController` and `BestLapsController` write-free and
+  read-only respectively.
 
 ---
 
