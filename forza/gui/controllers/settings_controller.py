@@ -35,6 +35,10 @@ class SettingsController(QObject):
     settings_changed = Signal(object)
     action_completed = Signal(str)
     action_failed = Signal(str)
+    # Emitted after a successful save that included a gamertag change.
+    # MainWindow listens to this and runs the best-lap recompute so that
+    # SettingsController stays write-free and BestLapsController stays read-only.
+    best_laps_recompute_needed = Signal()
 
     def __init__(
         self,
@@ -71,6 +75,11 @@ class SettingsController(QObject):
             self._pending_changes = {}
             self.action_completed.emit(result.message)
             self.settings_changed.emit(self._snapshot())
+            if "user.gamertag" in changes:
+                # The gamertag determines the best-lap frontier.  Signal that a
+                # recompute is needed; MainWindow owns the write service and
+                # will handle it so this controller stays write-free.
+                self.best_laps_recompute_needed.emit()
         else:
             self.action_failed.emit(result.message)
             self.settings_changed.emit(self._snapshot(dirty=bool(changes), validation_override=(False, result.message)))

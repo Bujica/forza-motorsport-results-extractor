@@ -4,7 +4,7 @@ Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: permanent
 Scope: GUI architecture, state ownership, threading, navigation, and usability
-Last verified: 2026-06-17
+Last verified: 2026-06-21
 Supersedes: GUI rules scattered across developer guide and workflow notes
 Related tests: `tests/test_gui_*`
 
@@ -67,6 +67,16 @@ surfaces:
   `ExportLap`/PDF-CSV export path.
 - database fixer surface is a controlled application-service surface for named database
   fixers. It must not become a generic SQLite table editor.
+- Read-only controllers must not own a `GuiWriteService`. Write operations that
+  must be coordinated across controllers belong to `MainWindow` or a dedicated
+  write controller. The approved pattern for cross-cutting write orchestration
+  is a named signal emitted by the originating controller and handled by
+  `MainWindow`, which owns the write service for that operation.
+- `GuiWriteService` instances must resolve `user.gamertag` via a live provider
+  callable — a zero-argument lambda closed over the current config object —
+  rather than a frozen string captured at construction time. This prevents a
+  stale gamertag from corrupting the best-lap frontier when the config is
+  reloaded in the background without rebuilding the service.
 
 ## Visible-Scope Refresh Contract
 
@@ -140,7 +150,12 @@ For Review specifically:
   a full DB reload;
 - the Review case queue must not expose internal `business_key` or source-file
   columns as primary table columns. Those diagnostic values may appear in the
-  selected case detail panel.
+  selected case detail panel;
+- Review filters that match on `status` must treat `auto_resolved` as belonging
+  to the `resolved` bucket. A filter that shows resolved cases must show
+  `auto_resolved` cases; a filter that shows open cases must not show
+  `auto_resolved` cases. Matching only on the literal string `"resolved"` and
+  silently hiding `auto_resolved` is a bug.
 
 For Image Debug specifically:
 
@@ -173,6 +188,16 @@ For Image Debug specifically:
 - Best Laps may show a top summary/action surface and an image-detail action
   for selected screenshot rows, but it must not duplicate the same table summary
   in a lower text panel.
+- `BestLapsController` is a read-only controller. It must not own a
+  `GuiWriteService` or trigger best-lap recomputes directly. Recomputes caused
+  by external events (gamertag change, rebuild) are orchestrated by `MainWindow`
+  or the relevant write controller, which calls `BestLapsController.reload()`
+  after the recompute commits.
+- Changing `user.gamertag` in Settings must trigger a best-lap recompute before
+  `BestLapsController` reloads its cache. The approved path is:
+  `SettingsController.best_laps_recompute_needed` signal → `MainWindow`
+  recomputes via `GuiWriteService.recompute_best_laps()` → calls
+  `BestLapsController.reload()`.
 
 ### Expensive-state policy
 

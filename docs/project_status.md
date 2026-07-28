@@ -4,7 +4,7 @@ Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: permanent
 Scope: current product state after the 0.20.0 diagnostics release
-Last verified: 2026-06-18
+Last verified: 2026-06-21
 Supersedes: scattered stage notes in implementation and history documents
 Related tests: `python -m compileall -q forza`, `pytest`, `python -m forza maintenance db-doctor --json`
 
@@ -117,6 +117,83 @@ docs/history/2026-06-16_images_first_schema_plan_completed.md
 docs/history/2026-06-18_0.19.2_stabilization_release.md
 ```
 
+## Post-0.20.0 Bugfixes
+
+The following bugs were identified and fixed during public beta validation after
+the 0.20.0 release. No schema changes were required.
+
+### Stale gamertag in GUI Review write path
+
+**Symptom:** After a Review session (correcting driver names or confirming dirty
+laps), all images switched to `non_contributing` and the Best Laps list emptied.
+Running CLI `rebuild` restored the frontier.
+
+**Root cause:** `GuiWriteService` captured `user.gamertag` as a frozen string at
+construction time. If the GUI config state was reloaded in the background before
+the write service was rebuilt (e.g. on a background refresh that did not change
+the database path), the frozen gamertag could diverge from the current config
+value. A mismatched gamertag causes `FrontierCalculator.clean_frontier_rows` to
+find zero player rows and mark every image `non_contributing`.
+
+**Fix:** `GuiWriteService` now accepts the gamertag as a zero-argument callable
+(live provider). Review and write controllers pass a lambda closed over
+`self._cfg` so every recompute reads the current config value. The
+`mark_best_laps` call in `LapRepository` now emits a `DEBUG` log line that
+records the effective gamertag and winner count, making future regressions
+immediately visible in `forza_debug.log` without forensic analysis.
+
+**Files changed:** `forza/application/gui_write_service.py`,
+`forza/gui/controllers/review_controller.py`,
+`forza/db/repositories/laps.py`.
+
+### `auto_resolved` review cases invisible in filter views
+
+**Symptom:** After a Rebuild following a Review session, `driver_name` cases
+disappeared from both the Open and Resolved filter views. They were only visible
+when the filter was set to All.
+
+**Root cause:** The Review filter matched `case.status == "resolved"` exactly.
+The Rebuild path sets cases whose triggering condition no longer exists to
+`auto_resolved` rather than `resolved`. `auto_resolved` is a system-set terminal
+state equivalent to resolved from the operator's perspective, but the literal
+string comparison silently excluded it from the Resolved bucket.
+
+**Fix:** `ReviewController._case_matches` now maps any status in
+`_RESOLVED_STATUSES = frozenset({"resolved", "auto_resolved"})` to the
+`"resolved"` filter bucket before comparison. `auto_resolved` cases now appear
+under the Resolved filter tab.
+
+**Files changed:** `forza/gui/controllers/review_controller.py`.
+
+### Gamertag change in Settings did not update Best Laps
+
+**Symptom:** Changing `user.gamertag` in Settings and saving had no visible
+effect on the Best Laps list. The frontier remained computed for the previous
+gamertag until a new screenshot was processed or CLI `rebuild` was run manually.
+
+**Root cause:** `BestLapsController.on_config_changed` re-applied in-memory
+filters when the gamertag changed but did not trigger a database recompute. The
+persisted `is_best_lap` flags remained stale, so any subsequent `reload()` would
+read the old frontier. Additionally, `SettingsController` and
+`BestLapsController` had no write path, so neither could initiate a recompute
+without violating their read-only and single-responsibility contracts (which are
+enforced by static tests).
+
+**Fix:** Three-part orchestration respecting all architectural constraints:
+
+1. `SettingsController` emits `best_laps_recompute_needed` after a successful
+   save that includes `user.gamertag`. The controller remains write-free.
+2. `MainWindow` connects this signal to `_on_best_laps_recompute_needed`, which
+   calls `GuiWriteService.recompute_best_laps()` (a new public method) and then
+   `BestLapsController.reload()` if the section is loaded.
+3. `BestLapsController` remains read-only. Its `on_config_changed` continues to
+   update the in-memory `_gamertag` value for the "Only Mine" filter; the actual
+   DB recompute and cache reload are driven by `MainWindow`.
+
+**Files changed:** `forza/application/gui_write_service.py`,
+`forza/gui/controllers/settings_controller.py`,
+`forza/gui/main_window.py`.
+
 ## Next Approved Work
 
 No active implementation plan is open after the 0.20.0 diagnostics release. New work
@@ -132,7 +209,8 @@ Candidate non-blocking follow-up areas:
 
 ## Known Issues
 
-- No release-blocking issues are known after the 0.20.0 validation gates.
+- No release-blocking issues are known after the 0.20.0 validation gates and
+  post-release bugfixes above.
 
 ## Validation Gates
 

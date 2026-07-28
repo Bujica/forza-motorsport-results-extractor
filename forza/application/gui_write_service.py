@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 from sqlalchemy import func, or_
 from sqlmodel import Session, select
@@ -83,12 +83,30 @@ class GuiWriteService:
         database_file: Path,
         *,
         event_sink: EventSink | None = None,
-        gamertag: str | None = None,
+        gamertag: str | None | Callable[[], str | None] = None,
     ):
         self.database_file = Path(database_file)
         self.event_sink = event_sink
-        self.gamertag = str(gamertag or "").strip() or None
+        # ``gamertag`` may be a plain string (frozen at construction) or a
+        # zero-argument callable that returns the *current* gamertag each time
+        # it is invoked.  The callable form lets ReviewController pass a live
+        # reference to its own ``_cfg`` so that any in-session config change is
+        # reflected in every subsequent recompute without rebuilding the writer.
+        if callable(gamertag):
+            self._gamertag_provider = gamertag
+        else:
+            _tag: str | None = str(gamertag or "").strip() or None
+            self._gamertag_provider = lambda: _tag
         self._engine = None
+
+    @property
+    def gamertag(self) -> str | None:
+        """Current gamertag used in best-lap recomputes.
+
+        Evaluated on every access so callers that passed a provider callable
+        always receive the latest value rather than a construction-time snapshot.
+        """
+        return self._gamertag_provider()
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -102,6 +120,22 @@ class GuiWriteService:
 
     def __exit__(self, *_args: object) -> None:
         self.close()
+
+    # ── Best-lap recompute ───────────────────────────────────────────────────
+
+    def recompute_best_laps(self) -> None:
+        """Recompute the best-lap frontier for the current gamertag and persist it.
+
+        This is a standalone operation for callers that need to refresh the
+        frontier after a change that affects its definition (e.g. the user
+        updating their gamertag in Settings) but that does not go through a
+        review action.  The database is updated atomically; the caller is
+        responsible for refreshing any cached data from the read layer
+        afterwards.
+        """
+        with self._session() as session:
+            _recompute_best_laps(session, self.gamertag)
+            session.commit()
 
     # ── Image state ────────────────────────────────────────────────────────────
 
@@ -122,56 +156,79 @@ class GuiWriteService:
         return schema
 
     def delete_image_file(self, image_file_id: str) -> bool:
+        return self.delete_image_files([image_file_id]) == 1
+
+    def delete_image_files(self, image_file_ids: list[str] | tuple[str, ...]) -> int:
+        """Delete image records in one transaction and recompute once.
+
+        Batch image deletion is used by the GUI so a large selection does not
+        repeatedly recompute the full best-lap frontier after every row.
+        """
+        requested = list(dict.fromkeys(str(image_id) for image_id in image_file_ids if image_id))
+        if not requested:
+            return 0
+
         with self._session() as session:
-            entity = session.get(ImageFileEntity, image_file_id)
-            if entity is None:
-                return False
+            entities = [
+                entity
+                for image_file_id in requested
+                if (entity := session.get(ImageFileEntity, image_file_id)) is not None
+            ]
+            if not entities:
+                return 0
 
-            result_ids = list(
-                session.exec(
-                    select(ExtractionResultEntity.id).where(
-                        ExtractionResultEntity.image_file_id == image_file_id
-                    )
-                ).all()
-            )
-            attempt_ids = list(
-                session.exec(
-                    select(ExtractionAttemptEntity.id).where(
-                        ExtractionAttemptEntity.image_file_id == image_file_id
-                    )
-                ).all()
-            )
-            run_ids = _image_run_ids(session, image_file_id)
+            run_ids: set[str] = set()
+            for entity in entities:
+                image_file_id = entity.id
 
-            _reconcile_duplicate_group_after_delete(session, entity)
+                result_ids = list(
+                    session.exec(
+                        select(ExtractionResultEntity.id).where(
+                            ExtractionResultEntity.image_file_id == image_file_id
+                        )
+                    ).all()
+                )
+                attempt_ids = list(
+                    session.exec(
+                        select(ExtractionAttemptEntity.id).where(
+                            ExtractionAttemptEntity.image_file_id == image_file_id
+                        )
+                    ).all()
+                )
+                run_ids.update(_image_run_ids(session, image_file_id))
 
-            for result in session.exec(
-                select(ExtractionResultEntity).where(ExtractionResultEntity.image_file_id == image_file_id)
-            ).all():
-                result.accepted_attempt_id = None
-                session.add(result)
+                _reconcile_duplicate_group_after_delete(session, entity)
+
+                for result in session.exec(
+                    select(ExtractionResultEntity).where(ExtractionResultEntity.image_file_id == image_file_id)
+                ).all():
+                    result.accepted_attempt_id = None
+                    session.add(result)
+                session.flush()
+
+                _delete_rows(
+                    session,
+                    ModelArtifactEntity,
+                    _artifact_delete_condition(image_file_id, result_ids, attempt_ids),
+                )
+                _delete_rows(session, ImageFlagEntity, ImageFlagEntity.image_file_id == image_file_id)
+                _delete_rows(session, ReviewCorrectionEntity, ReviewCorrectionEntity.image_file_id == image_file_id)
+                _delete_rows(session, ReviewCaseEntity, ReviewCaseEntity.image_file_id == image_file_id)
+                _delete_rows(session, LapRecordEntity, LapRecordEntity.image_file_id == image_file_id)
+                _delete_rows(session, ExtractionAttemptEntity, ExtractionAttemptEntity.image_file_id == image_file_id)
+                _delete_rows(session, ExtractionResultEntity, ExtractionResultEntity.image_file_id == image_file_id)
+                _delete_rows(session, RunInputEntity, RunInputEntity.image_file_id == image_file_id)
+
+                session.delete(entity)
+
             session.flush()
-
-            _delete_rows(
-                session,
-                ModelArtifactEntity,
-                _artifact_delete_condition(image_file_id, result_ids, attempt_ids),
-            )
-            _delete_rows(session, ImageFlagEntity, ImageFlagEntity.image_file_id == image_file_id)
-            _delete_rows(session, ReviewCorrectionEntity, ReviewCorrectionEntity.image_file_id == image_file_id)
-            _delete_rows(session, ReviewCaseEntity, ReviewCaseEntity.image_file_id == image_file_id)
-            _delete_rows(session, LapRecordEntity, LapRecordEntity.image_file_id == image_file_id)
-            _delete_rows(session, ExtractionAttemptEntity, ExtractionAttemptEntity.image_file_id == image_file_id)
-            _delete_rows(session, ExtractionResultEntity, ExtractionResultEntity.image_file_id == image_file_id)
-            _delete_rows(session, RunInputEntity, RunInputEntity.image_file_id == image_file_id)
-
-            session.delete(entity)
             _recompute_best_laps(session, self.gamertag)
             _refresh_run_metrics(session, run_ids)
             session.commit()
 
-        self._emit(EventType.IMAGE_STATUS_CHANGED, image_file_id=image_file_id, deleted=True)
-        return True
+        for entity in entities:
+            self._emit(EventType.IMAGE_STATUS_CHANGED, image_file_id=entity.id, deleted=True)
+        return len(entities)
 
     # ── Review cases ───────────────────────────────────────────────────────────
 

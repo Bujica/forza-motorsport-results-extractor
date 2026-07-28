@@ -48,7 +48,13 @@ class ImageController(QObject):
         super().__init__(parent)
         self._cfg = cfg
         self._reader = GuiReadService(cfg.database_file)
-        self._writer = GuiWriteService(cfg.database_file)
+        self._writer = GuiWriteService(
+            cfg.database_file,
+            # Image deletion recomputes the persisted best-lap frontier. Keep
+            # the same live gamertag contract used by the review controller so
+            # this path cannot fall back to simple_best_rows().
+            gamertag=lambda: str(getattr(self._cfg, "gamertag", "") or "").strip() or None,
+        )
         self._renamer = ImageRenameService(cfg.database_file)
         self._images: list[GuiImage] = []
         self._file_status: str | None = None
@@ -77,7 +83,10 @@ class ImageController(QObject):
         self._reader.close()
         self._writer.close()
         self._reader = GuiReadService(cfg.database_file)
-        self._writer = GuiWriteService(cfg.database_file)
+        self._writer = GuiWriteService(
+            cfg.database_file,
+            gamertag=lambda: str(getattr(self._cfg, "gamertag", "") or "").strip() or None,
+        )
         self._renamer = ImageRenameService(cfg.database_file)
         self._images = []
         self.images_changed.emit(self._images)
@@ -224,6 +233,7 @@ class ImageController(QObject):
         already_missing = 0
         skipped = 0
         errors: list[str] = []
+        database_candidates: list[str] = []
         for image in selected:
             path = self._resolved_image_path(image)
             if path is None and image.current_path:
@@ -236,10 +246,14 @@ class ImageController(QObject):
                     files_deleted += 1
                 elif path is not None:
                     already_missing += 1
-                if self._writer.delete_image_file(image.id):
-                    records_deleted += 1
+                database_candidates.append(image.id)
             except OSError as exc:
                 errors.append(f"{image.current_name or image.id}: {exc}")
+        if database_candidates:
+            try:
+                records_deleted = self._writer.delete_image_files(database_candidates)
+            except Exception as exc:
+                errors.append(f"database batch deletion failed: {exc}")
         self.refresh(self._file_status, self._best_lap_status, self._inventory_filter, self._track, self._run_id, self._processing_status)
         message = f"Deleted files: {files_deleted}; database records: {records_deleted}; already missing: {already_missing}; skipped: {skipped}"
         if errors:

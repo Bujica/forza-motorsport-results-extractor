@@ -4,7 +4,7 @@ Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: permanent
 Scope: human review cases, correction flow, and model-error evidence
-Last verified: 2026-06-15
+Last verified: 2026-06-21
 Supersedes: review rules embedded in history and developer-guide sections
 Related tests: `tests/test_gui_write_dirty_decisions.py`, `tests/test_gui_write_field_decisions.py`, `tests/test_review_controller_static.py`, `tests/test_raw_response_and_review_linkage.py`
 
@@ -63,6 +63,24 @@ When a review decision confirms the model:
 
 Ignoring a case is not a model confirmation. It records that the case should not
 block the operator workflow.
+
+## Case Status Vocabulary
+
+Valid `review_cases.status` values and their meaning:
+
+| Status | Set by | Meaning |
+| --- | --- | --- |
+| `open` | system | Case requires operator attention. |
+| `resolved` | operator | Operator made an explicit decision (correct/confirm/ignore). |
+| `ignored` | operator | Operator dismissed the case without a data correction. |
+| `auto_resolved` | system | The condition that triggered the case no longer exists in the data (e.g. after a Rebuild or recompute that applied persisted corrections). No operator decision was recorded. |
+
+`auto_resolved` is a system-set terminal state. It is functionally resolved: the
+underlying data is consistent and no operator action is pending. GUI filter
+surfaces must treat `auto_resolved` as belonging to the `resolved` bucket.
+Filters that show `resolved` cases must also show `auto_resolved` cases. A
+filter that matches only the literal string `"resolved"` and silently hides
+`auto_resolved` is a bug.
 
 ## Correction Persistence Contract
 

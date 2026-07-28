@@ -4,7 +4,7 @@ Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: permanent
 Scope: SQLite runtime source of truth and integrity contract
-Last verified: 2026-06-16
+Last verified: 2026-07-27
 Supersedes: database contract sections in `docs/DEVELOPER_GUIDE.md`
 Related tests: `tests/test_db_doctor_core_service.py`, `tests/test_db_repositories_core.py`, `tests/test_db_vnext_runtime_contracts.py`
 
@@ -76,6 +76,24 @@ not replace workflow-specific contract tests.
 DB Doctor must block release/rerun confidence when Review business keys are not
 canonical, when open Review cases lack matching active flags, or when relational
 runtime evidence no longer matches the frozen schema contract.
+
+## SQLite File-Size Maintenance
+
+`DELETE` removes relational rows but does not normally shrink the SQLite file.
+SQLite keeps the released pages in its freelist so later inserts can reuse them.
+The physical file size is therefore not expected to decrease after every image
+cleanup.
+
+Routine cleanup must not run `VACUUM` after each deletion. After a large,
+intentional deletion, a maintainer may reclaim unused pages with `VACUUM` only
+when the application is closed and an explicit backup has been created. The
+maintenance threshold is approximately 25–30% of pages on the freelist, or a
+cleanup large enough to justify the exclusive rewrite and temporary disk space.
+
+Before and after `VACUUM`, run `python -m forza maintenance db-doctor --json`
+and retain the backup until the post-maintenance checks pass. Do not delete the
+SQLite `-wal` or `-shm` sidecars independently, and do not treat file size alone
+as an integrity signal; use SQLite integrity checks and DB Doctor instead.
 
 Historical repair scripts are not product runtime surfaces. If a future
 database cleanup is needed, it must be implemented as a current, reviewed

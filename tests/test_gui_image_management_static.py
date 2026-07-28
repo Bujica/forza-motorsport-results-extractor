@@ -13,6 +13,7 @@ def test_image_controller_uses_public_services_and_no_session() -> None:
 
     assert "GuiReadService" in source
     assert "GuiWriteService" in source
+    assert "gamertag=lambda" in source
     assert "ImageRenameService" in source
     assert "def sync_input_folder" in source
     assert "ImageInventoryWorker" in source
@@ -26,6 +27,7 @@ def test_image_controller_uses_public_services_and_no_session() -> None:
     assert "export_images" in source
     assert "delete_images" in source
     assert "delete_image_file" in source
+    assert "delete_image_files" in source
     assert "rescan_images" in source
     assert "def set_hidden(" not in source
     assert "def exclude_from_best_laps(" not in source

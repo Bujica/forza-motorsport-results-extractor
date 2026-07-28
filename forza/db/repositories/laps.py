@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import uuid4
+
+log = logging.getLogger(__name__)
 
 from sqlalchemy import and_, func, or_
 from sqlmodel import Session, select
@@ -448,6 +451,12 @@ class LapRepository:
         track/class/driver/car tuple for low-level repository callers.
         """
         rows = self.list_export_rows(run_id=run_id)
+        log.debug(
+            "[best-laps] recompute start — gamertag=%r run_id=%r total_rows=%d",
+            gamertag,
+            run_id,
+            len(rows),
+        )
         for row in rows:
             row.is_best_lap = False
             self.session.add(row)
@@ -461,6 +470,12 @@ class LapRepository:
         winner_ids = {row.id for row in winners}
         winner_image_ids = {row.image_file_id for row in winners}
         all_image_ids = {row.image_file_id for row in rows}
+        log.debug(
+            "[best-laps] recompute done — winners=%d contributing_images=%d/%d",
+            len(winners),
+            len(winner_image_ids),
+            len(all_image_ids),
+        )
         for row in rows:
             if row.id in winner_ids:
                 row.is_best_lap = True
