@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-IMAGE_SERVICE = ROOT / "forza" / "application" / "image_service.py"
+IMAGE_SERVICE = ROOT / "forza" / "application" / "image" / "inventory.py"
 
 
 def _scan_input_folder_body() -> str:

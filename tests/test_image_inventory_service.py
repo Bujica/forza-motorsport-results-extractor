@@ -4,7 +4,7 @@ from pathlib import Path
 
 from sqlmodel import Session, select
 
-from forza.application import image_service as image_inventory_service
+from forza.application.image import inventory as image_inventory_service
 from forza.application.database_service import DatabaseService
 from forza.application.image_service import ImageInventoryResult, ImageInventoryService
 from forza.db import create_sqlite_engine

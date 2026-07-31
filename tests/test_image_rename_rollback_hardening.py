@@ -5,7 +5,7 @@ from pathlib import Path
 
 from forza.application.image_service import ImageRenameService, RenamePlan
 
-MODULE = importlib.import_module("forza.application.image_service")
+MODULE = importlib.import_module("forza.application.image.rename")
 
 
 def _plan(image_id: str, source: Path, target: Path) -> RenamePlan:
