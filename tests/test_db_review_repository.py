@@ -105,6 +105,30 @@ def test_review_case_number_uses_sql_column(tmp_path):
     assert rows[0].weather == "dry"
     assert rows[0].temp_f is None
 
+def test_review_repository_resolve_touches_updated_at(tmp_path):
+    """Regression for B-4: resolve() must not skip updated_at (dead in prod, but not a trap)."""
+    engine = make_engine(tmp_path)
+
+    with Session(engine) as session:
+        session.add(
+            ReviewCaseEntity(
+                id="case-to-resolve",
+                reason="dirty_lap",
+                business_key="dirty_lap:case-to-resolve",
+                case_number=1,
+            )
+        )
+        session.commit()
+
+        repo = ReviewRepository(session)
+        resolved = repo.resolve("case-to-resolve")
+        assert resolved is not None
+        assert resolved.status == "resolved"
+        assert resolved.updated_at is not None
+        assert resolved.updated_at == resolved.resolved_at
+        session.commit()
+
+
 def test_review_candidates_use_six_canonical_reasons_with_triggers(tmp_path):
     engine = make_engine(tmp_path)
     result = ExtractionResult(

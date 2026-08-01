@@ -122,11 +122,16 @@ class ReviewRepository:
         return inserted, kept, removed
 
     def resolve(self, case_id: str) -> ReviewCaseEntity | None:
+        # NOTE: confirmed via full-project grep (2026-07-31 audit, B-4) that this
+        # method is not called anywhere in production or in tests. The live
+        # resolve/ignore/reopen path is GuiWriteService._set_review_case_status().
+        # Kept in sync with updated_at anyway so it isn't a trap if reactivated.
         entity = self.session.get(ReviewCaseEntity, case_id)
         if entity is None:
             return None
         entity.status = "resolved"
         entity.resolved_at = datetime.now(timezone.utc)
+        entity.updated_at = entity.resolved_at
         self.session.add(entity)
         return entity
 

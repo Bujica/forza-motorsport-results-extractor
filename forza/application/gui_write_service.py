@@ -416,8 +416,10 @@ class GuiWriteService:
             entity = session.get(ReviewCaseEntity, case_id)
             if entity is None:
                 return None
+            now = datetime.now(timezone.utc)
             entity.status = status
-            entity.resolved_at = None if status == "open" else datetime.now(timezone.utc)
+            entity.resolved_at = None if status == "open" else now
+            entity.updated_at = now
             if status == "open":
                 entity.resolution_note = None
                 entity.outcome = "pending"
