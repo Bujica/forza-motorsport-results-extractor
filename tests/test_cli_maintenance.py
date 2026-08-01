@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
+import sqlite3
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -128,7 +129,7 @@ def test_cmd_db_reset_deletes_database_and_sqlite_sidecars(monkeypatch, tmp_path
     cfg, load_config_calls, _setup_calls = _patch_load_and_logging(monkeypatch)
     cfg.database_file = tmp_path / "data" / "forza.sqlite3"
     cfg.database_file.parent.mkdir(parents=True, exist_ok=True)
-    cfg.database_file.write_text("db", encoding="utf-8")
+    sqlite3.connect(str(cfg.database_file)).close()  # a real, valid, empty db
     Path(f"{cfg.database_file}-wal").write_text("wal", encoding="utf-8")
     Path(f"{cfg.database_file}-shm").write_text("shm", encoding="utf-8")
 
@@ -140,7 +141,40 @@ def test_cmd_db_reset_deletes_database_and_sqlite_sidecars(monkeypatch, tmp_path
     assert not Path(f"{cfg.database_file}-shm").exists()
     out = capsys.readouterr().out
     assert "Database reset" in out
-    assert "Removed: 3 file(s)" in out
+    assert "WARNING: WAL/SHM sidecar file(s) present" in out
+
+
+def test_cmd_db_reset_refuses_when_database_is_locked_by_another_connection(monkeypatch, tmp_path) -> None:
+    """Regression for C-2: db-reset must not delete a database another connection is using."""
+    cfg, _load_config_calls, _setup_calls = _patch_load_and_logging(monkeypatch)
+    cfg.database_file = tmp_path / "data" / "forza.sqlite3"
+    cfg.database_file.parent.mkdir(parents=True, exist_ok=True)
+
+    holder = sqlite3.connect(str(cfg.database_file))
+    holder.execute("CREATE TABLE t(x)")
+    holder.execute("BEGIN EXCLUSIVE")
+    holder.execute("INSERT INTO t VALUES (1)")  # exclusive lock held, not committed
+    try:
+        with pytest.raises(SystemExit, match="appears to be in use by another connection"):
+            cli_maintenance.cmd_db_reset(_args(yes=True))
+        assert cfg.database_file.exists()  # refused — nothing was deleted
+    finally:
+        holder.commit()
+        holder.close()
+
+
+def test_cmd_db_reset_proceeds_when_database_file_is_corrupted(monkeypatch, tmp_path, capsys) -> None:
+    """A file that isn't a valid SQLite database at all must not block db-reset —
+    fixing a corrupted database is exactly what db-reset is for."""
+    cfg, _load_config_calls, _setup_calls = _patch_load_and_logging(monkeypatch)
+    cfg.database_file = tmp_path / "data" / "forza.sqlite3"
+    cfg.database_file.parent.mkdir(parents=True, exist_ok=True)
+    cfg.database_file.write_text("not a real sqlite file", encoding="utf-8")
+
+    cli_maintenance.cmd_db_reset(_args(yes=True))
+
+    assert not cfg.database_file.exists()
+    assert "Removed: 1 file(s)" in capsys.readouterr().out
 
 
 def test_cmd_db_upgrade_runs_upgrade_and_seeds_initial_references(monkeypatch, capsys) -> None:

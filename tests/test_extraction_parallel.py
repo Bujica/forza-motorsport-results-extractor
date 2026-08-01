@@ -68,7 +68,7 @@ def test_one_worker_uses_single_backend(monkeypatch, tmp_path):
     _FakeBackend.close_count = 0
     _FakeBackend.instances = []
 
-    def fake_build_backend(cfg):
+    def fake_build_backend(cfg, run_control=None):
         return _FakeBackend()
 
     def fake_process_image(filename, hash_value, image_path, backend, refs, cfg, run_id):
@@ -99,7 +99,7 @@ def test_multiple_workers_use_parallel_backends(monkeypatch, tmp_path):
     _FakeBackend.close_count = 0
     _FakeBackend.instances = []
 
-    def fake_build_backend(cfg):
+    def fake_build_backend(cfg, run_control=None):
         return _FakeBackend()
 
     def fake_process_image(filename, hash_value, image_path, backend, refs, cfg, run_id):
@@ -133,7 +133,7 @@ def test_multiple_workers_use_parallel_backends(monkeypatch, tmp_path):
 
 
 def test_parallel_extraction_cancellation_keeps_durable_result_before_checkpoint(monkeypatch, tmp_path):
-    def fake_build_backend(cfg):
+    def fake_build_backend(cfg, run_control=None):
         return _FakeBackend()
 
     def fake_process_image(filename, hash_value, image_path, backend, refs, cfg, run_id):

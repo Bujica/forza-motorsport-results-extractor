@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 from pathlib import Path
 
 from ..config import load_config
@@ -45,7 +46,20 @@ def cmd_db_reset(args: argparse.Namespace) -> None:
 
     cfg = load_config(args.config)
     database_file = Path(cfg.database_file)
-    targets = [database_file, Path(f"{database_file}-wal"), Path(f"{database_file}-shm")]
+
+    if database_file.exists():
+        _ensure_exclusive_access(database_file)
+
+    wal_file = Path(f"{database_file}-wal")
+    shm_file = Path(f"{database_file}-shm")
+    if wal_file.exists() or shm_file.exists():
+        print(
+            "WARNING: WAL/SHM sidecar file(s) present — this can mean a "
+            "connection had the database open recently. Proceeding since no "
+            "connection currently holds an exclusive lock."
+        )
+
+    targets = [database_file, wal_file, shm_file]
     removed: list[Path] = []
     for target in targets:
         if target.exists():
@@ -56,6 +70,35 @@ def cmd_db_reset(args: argparse.Namespace) -> None:
     print(f"Removed: {len(removed)} file(s)")
     for target in removed:
         print(f"  - {target}")
+
+
+def _ensure_exclusive_access(database_file: Path) -> None:
+    """Abort instead of deleting if another connection currently holds the database.
+
+    Deleting a SQLite file out from under an open connection can corrupt
+    whatever that connection was mid-write on (see audit finding C-2).
+    Requesting an EXCLUSIVE lock surfaces an in-use database as a clear error
+    instead of a silent race. A file that fails to open because it isn't a
+    valid SQLite database at all (``sqlite3.DatabaseError``) is a legitimate
+    reason to run db-reset in the first place, so that case is not blocked —
+    only an actual lock held by another connection is (``sqlite3.OperationalError``).
+    """
+    conn = sqlite3.connect(str(database_file), timeout=0)
+    try:
+        conn.execute("PRAGMA locking_mode=EXCLUSIVE")
+        conn.execute("BEGIN EXCLUSIVE")
+        conn.execute("COMMIT")
+    except sqlite3.OperationalError as exc:
+        raise SystemExit(
+            f"Refusing to reset database: {database_file} appears to be in use by "
+            f"another connection ({exc}). Close any running Forza processes (GUI, "
+            "CLI runs, or scripts) and try again."
+        ) from exc
+    except sqlite3.DatabaseError:
+        # Not a valid SQLite file at all — resetting is the legitimate fix.
+        pass
+    finally:
+        conn.close()
 
 
 def cmd_db_upgrade(args: argparse.Namespace) -> None:

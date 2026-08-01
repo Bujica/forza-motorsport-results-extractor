@@ -4,6 +4,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
 import requests
 
 from forza.lmstudio import backend as extractor
@@ -131,8 +132,69 @@ def _native_backend(tmp_path: Path, session) -> LMStudioNativeBackend:
     return backend
 
 
+class _CancelAfterN(Exception):
+    """Stand-in for RunCancelled — proves the backoff is structural (any object
+    with a checkpoint() method works), without importing the application layer
+    into this lmstudio-focused test file."""
+
+
+class _FakeControl:
+    """Records checkpoint() calls; optionally raises after N calls."""
+
+    def __init__(self, cancel_after: int | None = None):
+        self.cancel_after = cancel_after
+        self.calls = 0
+
+    def checkpoint(self) -> None:
+        self.calls += 1
+        if self.cancel_after is not None and self.calls >= self.cancel_after:
+            raise _CancelAfterN()
+
+
+def test_runtime_backoff_checkpoints_repeatedly_not_just_once(monkeypatch) -> None:
+    """Regression for L-1: the backoff must check for cancellation between
+    sleep increments, not just once before or after the full ~4s wait."""
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(extractor.time, "sleep", lambda s: sleep_calls.append(s))
+
+    control = _FakeControl()
+    extractor._runtime_backoff(4, control)  # attempt 4 -> total = min(0.5*8, 4.0) = 4.0s
+
+    # 4.0s in 0.1s steps checkpoints ~40 times — clearly more than "once".
+    assert control.calls > 10
+    assert sum(sleep_calls) == pytest.approx(4.0)
+
+
+def test_runtime_backoff_stops_immediately_when_cancelled_mid_backoff(monkeypatch) -> None:
+    """Regression for L-1: cancellation must be honored well before the full
+    backoff duration elapses, not only at its start or its end."""
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(extractor.time, "sleep", lambda s: sleep_calls.append(s))
+
+    control = _FakeControl(cancel_after=3)
+    try:
+        extractor._runtime_backoff(4, control)
+        raise AssertionError("expected cancellation to interrupt the backoff")
+    except _CancelAfterN:
+        pass
+
+    # Cancelled on the 3rd checkpoint (~0.2s in), nowhere near the full 4.0s.
+    assert sum(sleep_calls) < 1.0
+
+
+def test_runtime_backoff_without_control_behaves_exactly_as_before(monkeypatch) -> None:
+    """No run_control supplied (default) must fall back to a single plain sleep,
+    identical to pre-L-1 behavior — the fix must not change unwired callers."""
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(extractor.time, "sleep", lambda s: sleep_calls.append(s))
+
+    extractor._runtime_backoff(3)  # no run_control passed
+
+    assert sleep_calls == [min(0.5 * (2 ** 2), 4.0)]
+
+
 def test_lmstudio_runtime_retries_transient_models_error(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(extractor, "_runtime_backoff", lambda _attempt: None)
+    monkeypatch.setattr(extractor, "_runtime_backoff", lambda _attempt, _run_control=None: None)
     session = _FakeSession(
         [
             _FakeResponse(500),
@@ -162,7 +224,7 @@ def test_lmstudio_runtime_retries_transient_models_error(monkeypatch, tmp_path) 
 
 def test_lmstudio_runtime_request_retries_connection_error_then_returns_response(monkeypatch, tmp_path) -> None:
     backoffs: list[int] = []
-    monkeypatch.setattr(extractor, "_runtime_backoff", backoffs.append)
+    monkeypatch.setattr(extractor, "_runtime_backoff", lambda attempt, run_control=None: backoffs.append(attempt))
     session = _FakeSession(
         [
             requests.ConnectionError("connection dropped"),
@@ -179,7 +241,7 @@ def test_lmstudio_runtime_request_retries_connection_error_then_returns_response
 
 
 def test_lmstudio_runtime_request_does_not_retry_non_transient_status(monkeypatch, tmp_path) -> None:
-    def fail_backoff(_attempt: int) -> None:
+    def fail_backoff(_attempt: int, _run_control=None) -> None:
         raise AssertionError("non-transient status must not back off or retry")
 
     monkeypatch.setattr(extractor, "_runtime_backoff", fail_backoff)
@@ -218,7 +280,7 @@ def test_lmstudio_load_config_compatible_normalizes_runtime_fields() -> None:
 
 
 def test_lmstudio_runtime_load_failure_is_operational_error(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(extractor, "_runtime_backoff", lambda _attempt: None)
+    monkeypatch.setattr(extractor, "_runtime_backoff", lambda _attempt, _run_control=None: None)
     session = _FakeSession(
         [_FakeResponse(200, {"models": [{"key": "qwen/qwen3.5-9b", "loaded_instances": []}]})]
         + [_FakeResponse(500) for _ in range(5)]

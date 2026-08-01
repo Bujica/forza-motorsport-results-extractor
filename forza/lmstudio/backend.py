@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Lock
-from typing import Any, Callable, ClassVar
+from typing import Any, Callable, ClassVar, Protocol
 
 from json_repair import repair_json
 import requests
@@ -22,6 +22,17 @@ from .protocol import LLMBackend, LMSTUDIO_BACKEND_NAME, ModelExtractionResult
 
 
 log = logging.getLogger("forza")
+
+
+class _CooperativeControl(Protocol):
+    """Structural protocol for cooperative cancellation during backoff.
+
+    Matches `forza.application.run_control.RunControl.checkpoint()` without
+    importing it — `lmstudio/` stays independent of the `application/` layer;
+    any object with a compatible `checkpoint()` satisfies this.
+    """
+
+    def checkpoint(self) -> None: ...
 
 _RUNTIME_TRANSIENT_STATUS = {409, 423, 429, 500, 502, 503, 504}
 _RUNTIME_MAX_ATTEMPTS = 5
@@ -125,6 +136,7 @@ class LMStudioNativeBackend:
     performance_tps_floor: float = 20.0
     performance_reload_elapsed_s: float = 45.0
     performance_reload_streak: int = 3
+    run_control: _CooperativeControl | None = None
     _session: requests.Session | None = None
     _instance_id: str | None = None
     _load_config: dict[str, Any] | None = None
@@ -597,7 +609,7 @@ class LMStudioNativeBackend:
                         f"{response.status_code} transient response from {url}",
                         response=response,
                     )
-                    _runtime_backoff(attempt)
+                    _runtime_backoff(attempt, self.run_control)
                     continue
                 response.raise_for_status()
                 return response
@@ -608,7 +620,7 @@ class LMStudioNativeBackend:
                 transient = status in _RUNTIME_TRANSIENT_STATUS or status is None
                 if not transient or attempt >= _RUNTIME_MAX_ATTEMPTS:
                     break
-                _runtime_backoff(attempt)
+                _runtime_backoff(attempt, self.run_control)
         raise LMStudioRuntimeError(
             "LM Studio runtime is not ready "
             f"(model={self.model}, endpoint={url}, desired_load_config={self._desired_load_config()}): {last_exc}"
@@ -670,8 +682,19 @@ def _model_lock(api_base: str, model: str) -> Lock:
         return lock
 
 
-def _runtime_backoff(attempt: int) -> None:
-    time.sleep(min(0.5 * (2 ** (attempt - 1)), 4.0))
+def _runtime_backoff(attempt: int, run_control: _CooperativeControl | None = None) -> None:
+    total = min(0.5 * (2 ** (attempt - 1)), 4.0)
+    if run_control is None:
+        time.sleep(total)
+        return
+    step = 0.1
+    remaining = total
+    while remaining > 0:
+        run_control.checkpoint()
+        chunk = min(step, remaining)
+        time.sleep(chunk)
+        remaining -= chunk
+    run_control.checkpoint()
 
 
 def _redacted_request_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -709,7 +732,7 @@ def _request_hash(
     )
 
 
-def build_backend(cfg) -> LLMBackend:
+def build_backend(cfg, run_control: _CooperativeControl | None = None) -> LLMBackend:
     """Instantiate the LM Studio native backend from AppConfig."""
     return LMStudioNativeBackend(
         url=cfg.llm.url,
@@ -729,4 +752,5 @@ def build_backend(cfg) -> LLMBackend:
         performance_tps_floor=getattr(cfg.llm, "performance_tps_floor", 20.0),
         performance_reload_elapsed_s=getattr(cfg.llm, "performance_reload_elapsed_s", 45.0),
         performance_reload_streak=getattr(cfg.llm, "performance_reload_streak", 3),
+        run_control=run_control,
     )

@@ -107,6 +107,33 @@ def test_config_file_service_preview_rejects_invalid_pending_change(tmp_path) ->
 
 
 
+def test_config_file_service_backup_disambiguates_when_timestamp_ties(tmp_path, monkeypatch) -> None:
+    """Regression: datetime.now() resolution isn't guaranteed better than a
+    few milliseconds on every platform (notably Windows) — force the exact
+    tie deterministically instead of depending on real clock resolution."""
+    import forza.application.config_service as config_service_module
+
+    config_path = tmp_path / "forza_config.ini"
+    _write_config(config_path)
+
+    real_datetime = config_service_module.datetime
+
+    class _FrozenDatetime:
+        @staticmethod
+        def now():
+            return real_datetime(2026, 8, 1, 11, 39, 1, 684269)
+
+    monkeypatch.setattr(config_service_module, "datetime", _FrozenDatetime)
+
+    service = ConfigFileService(config_path)
+    first = service.save_changes({"user.gamertag": "First"})
+    second = service.save_changes({"user.gamertag": "Second"})
+
+    assert first.backup_path is not None and first.backup_path.exists()
+    assert second.backup_path is not None and second.backup_path.exists()
+    assert first.backup_path != second.backup_path
+
+
 def test_config_file_service_save_uses_atomic_replace_and_creates_unique_backup(tmp_path) -> None:
     config_path = tmp_path / "forza_config.ini"
     _write_config(config_path)

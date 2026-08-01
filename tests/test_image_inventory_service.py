@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -10,7 +11,7 @@ from forza.application.image_service import ImageInventoryResult, ImageInventory
 from forza.db import create_sqlite_engine
 from forza.db.migrate import upgrade_database
 from forza.db.models import ImageFileEntity, ImageFlagEntity
-from forza.db.repositories import ImageFileRepository
+from forza.db.repositories import ImageFileRepository, ImageFlagRepository
 from forza.pipeline.image import DiscoveredImage, DuplicateImage, ExistingImage, ImageDiscoveryPlan
 
 
@@ -195,6 +196,58 @@ def test_scan_input_folder_marks_duplicate_files_before_processing(tmp_path) -> 
     assert len(duplicates) == 2
     assert duplicate_paths == expected_duplicate_paths
     assert [flag.flag_type for flag in flags] == ["duplicate", "duplicate"]
+
+
+def test_reconcile_duplicate_hashes_agrees_with_by_hash_canonical_when_created_at_ties(tmp_path) -> None:
+    """Regression: by_hash() orders by created_at only; the old reconciliation
+    query added an `id.asc()` tiebreaker. Under a created_at tie — routine on
+    platforms with coarser wall-clock resolution (notably Windows) — the two
+    queries could pick different canonicals, leaving a stray extra duplicate
+    flag behind (a "resolved" one on the old canonical, plus a new one).
+    """
+    db_path = tmp_path / "forza.sqlite3"
+    upgrade_database(db_path)
+    engine = create_sqlite_engine(db_path)
+    try:
+        with Session(engine) as session:
+            repo = ImageFileRepository(session)
+            flags = ImageFlagRepository(session)
+
+            # Same explicit created_at on all three — the exact tie condition.
+            tied_at = datetime(2026, 8, 1, 12, 0, 0, tzinfo=timezone.utc)
+            image_ids = []
+            for index in range(3):
+                image = ImageFileEntity(
+                    id=f"img-{index}",
+                    file_hash="same-hash",
+                    file_name=f"same-{index}.png",
+                    current_path=f"/input/same-{index}.png",
+                    current_name=f"same-{index}.png",
+                    file_status="available",
+                    created_at=tied_at,
+                    updated_at=tied_at,
+                )
+                session.add(image)
+                image_ids.append(image.id)
+            session.commit()
+
+            # Whichever row by_hash() would pick as canonical must end up
+            # with no flag; the other two must each end up with exactly one.
+            canonical = repo.by_hash("same-hash")
+            assert canonical is not None
+
+            image_inventory_service._reconcile_duplicate_hashes(session, flags, {"same-hash"})
+            session.commit()
+
+            rows = session.exec(select(ImageFileEntity).where(ImageFileEntity.file_hash == "same-hash")).all()
+            duplicates = [row for row in rows if row.duplicate_of_image_file_id == canonical.id]
+            assert len(duplicates) == 2
+
+            all_flags = session.exec(select(ImageFlagEntity)).all()
+            assert len(all_flags) == 2
+            assert {flag.image_file_id for flag in all_flags} == {row.id for row in duplicates}
+    finally:
+        engine.dispose()
 
 
 def test_scan_input_folder_does_not_anchor_available_duplicate_to_missing_source(tmp_path) -> None:

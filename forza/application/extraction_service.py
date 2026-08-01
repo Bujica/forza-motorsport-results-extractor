@@ -61,7 +61,7 @@ class ExtractionService:
         refs,
         run_id: str,
     ) -> None:
-        with build_backend(cfg) as backend:
+        with build_backend(cfg, self.run_control) as backend:
             for index, (path, file_hash) in enumerate(images, start=1):
                 self._checkpoint()
                 result = self._process_and_record(path, file_hash, backend, refs, cfg, run_id)
@@ -80,7 +80,7 @@ class ExtractionService:
         workers: int,
     ) -> None:
         _log.info(f"Parallel processing with {workers} worker(s)")
-        backend_pool = _ThreadBackendPool(cfg)
+        backend_pool = _ThreadBackendPool(cfg, self.run_control)
         executor = ThreadPoolExecutor(max_workers=workers)
         iterator = iter(images)
         in_flight: dict[Future[ExtractionResult], tuple[Path, str]] = {}
@@ -307,8 +307,9 @@ class ExtractionService:
 class _ThreadBackendPool:
     """Thread-local backend cache used by parallel extraction."""
 
-    def __init__(self, cfg) -> None:
+    def __init__(self, cfg, run_control=None) -> None:
         self._cfg = cfg
+        self._run_control = run_control
         self._local = local()
         self._lock = Lock()
         self._backends = []
@@ -316,7 +317,7 @@ class _ThreadBackendPool:
     def get(self):
         backend = getattr(self._local, "backend", None)
         if backend is None:
-            backend = build_backend(self._cfg)
+            backend = build_backend(self._cfg, self._run_control)
             self._local.backend = backend
             with self._lock:
                 self._backends.append(backend)

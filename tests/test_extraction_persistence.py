@@ -64,7 +64,7 @@ def _result(source_file: str, file_hash: str) -> ExtractionResult:
 def test_persistence_failure_aborts_batch_and_emits_event(monkeypatch, tmp_path) -> None:
     events: list[PipelineEvent] = []
 
-    monkeypatch.setattr("forza.application.extraction_service.build_backend", lambda cfg: _Backend())
+    monkeypatch.setattr("forza.application.extraction_service.build_backend", lambda cfg, run_control=None: _Backend())
     monkeypatch.setattr(
         "forza.application.extraction_service.process_image",
         lambda filename, hash_value, image_path, backend, refs, cfg, run_id: _result(filename, hash_value),
@@ -98,7 +98,7 @@ def test_attempt_persistence_failure_is_not_downgraded_to_result_error(monkeypat
 
     monkeypatch.setattr(
         "forza.application.extraction_service.build_backend",
-        lambda cfg: _CallbackBackend(),
+        lambda cfg, run_control=None: _CallbackBackend(),
     )
 
     def process_with_attempt(filename, hash_value, image_path, backend, refs, cfg, run_id):

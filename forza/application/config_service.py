@@ -155,6 +155,15 @@ class ConfigFileService:
             return None
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         backup_path = self.config_path.with_name(f"{self.config_path.name}.{stamp}.bak")
+        if backup_path.exists():
+            # datetime.now() resolution isn't guaranteed better than a few
+            # milliseconds on every platform (notably Windows) — two saves in
+            # quick succession can produce the same microsecond stamp. Add a
+            # counter suffix so the backup is still unique either way.
+            counter = 2
+            while backup_path.exists():
+                backup_path = self.config_path.with_name(f"{self.config_path.name}.{stamp}-{counter}.bak")
+                counter += 1
         shutil.copy2(self.config_path, backup_path)
         return backup_path
 

@@ -187,13 +187,22 @@ def _reconcile_duplicate_hashes(
     when the same bytes reappear at another path. Duplicate state is a
     property of simultaneously available physical files, so missing rows are
     detached and active duplicate flags are resolved.
+
+    Ordered by ``created_at`` only, deliberately matching
+    ``ImageFileRepository.by_hash()``'s ordering exactly (no extra ``id``
+    tiebreaker) — the inline scan loop above picks its canonical row via
+    ``by_hash()``, so this reconciliation pass must agree with it under a
+    ``created_at`` tie (timer resolution is coarser than a few milliseconds
+    on some platforms, notably Windows) or a row can flip from "no flag" to
+    "gets a duplicate flag" between the two passes, leaving a stale resolved
+    flag behind instead of none at all.
     """
     for file_hash_value in sorted(value for value in file_hashes if value):
         rows = list(
             session.exec(
                 select(ImageFileEntity)
                 .where(ImageFileEntity.file_hash == file_hash_value)
-                .order_by(ImageFileEntity.created_at.asc(), ImageFileEntity.id.asc())
+                .order_by(ImageFileEntity.created_at.asc())
             ).all()
         )
         if not rows:
