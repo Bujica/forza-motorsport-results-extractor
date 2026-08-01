@@ -20,11 +20,11 @@ class BestLapRecomputeService:
         self._session_provider = session_provider
         self.database_file = Path(database_file)
 
-    def recompute_best_laps(self, *, run_id: str | None = None, gamertag: str | None = None) -> int:
+    def recompute_best_laps(self, *, gamertag: str | None = None) -> int:
         if not self.database_file.exists():
             return 0
         with Session(self._session_provider.engine_for_db()) as session:
-            winners = LapRepository(session).mark_best_laps(run_id=run_id, gamertag=gamertag)
+            winners = LapRepository(session).mark_best_laps(gamertag=gamertag)
             session.commit()
             return len(winners)
 

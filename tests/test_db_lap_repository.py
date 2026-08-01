@@ -124,7 +124,7 @@ def test_relational_clean_uses_player_frontier_not_simple_best(tmp_path):
     )
 
     _seed_runtime_results(db, "clean-run", [slow, fast])
-    db.recompute_best_laps(run_id="clean-run", gamertag=REL_GAMERTAG)
+    db.recompute_best_laps(gamertag=REL_GAMERTAG)
     clean = db.list_clean_flat(run_id="clean-run")
 
     assert [result.source_file for result in clean] == ["fast.png"]
@@ -144,7 +144,7 @@ def test_relational_clean_keeps_only_opponents_faster_than_player(tmp_path):
     )
 
     _seed_runtime_results(db, "opponent-run", [result])
-    db.recompute_best_laps(run_id="opponent-run", gamertag=REL_GAMERTAG)
+    db.recompute_best_laps(gamertag=REL_GAMERTAG)
     clean = db.list_clean_flat(run_id="opponent-run")
 
     assert len(clean) == 2
@@ -166,7 +166,7 @@ def test_relational_clean_updates_image_file_best_lap_status(tmp_path):
     )
 
     _seed_runtime_results(db, "status-run", [slow, fast])
-    db.recompute_best_laps(run_id="status-run", gamertag=REL_GAMERTAG)
+    db.recompute_best_laps(gamertag=REL_GAMERTAG)
     db.list_clean_flat(run_id="status-run")
 
     with Session(db._engine_for_db()) as session:

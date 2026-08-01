@@ -42,7 +42,7 @@ def _seed_runtime_results(
                 ModelExtractionAttempt(attempt_number=1, status="ok", accepted=True)
             ]
         database.upsert_image_and_laps(result, run_id=run_id, gamertag=gamertag)
-    database.recompute_best_laps(run_id=run_id, gamertag=gamertag)
+    database.recompute_best_laps(gamertag=gamertag)
     database.complete_run(
         run_id,
         metrics={"processed": len(results), "succeeded": len(results)},

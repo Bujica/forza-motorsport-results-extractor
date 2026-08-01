@@ -250,7 +250,11 @@ class GuiWriteService:
             if not dirty:
                 entity.best_lap = strip_dirty_symbol(entity.best_lap)
             session.add(entity)
-            _recompute_best_laps(session, self.gamertag)
+            # track/race_class never change here, so there is only one group.
+            LapRepository(session).mark_best_laps_for_groups(
+                {(str(entity.track or ""), str(entity.race_class or ""))},
+                gamertag=self.gamertag,
+            )
             session.commit()
             session.refresh(entity)
         self._emit(
@@ -337,7 +341,7 @@ class GuiWriteService:
                     )
                 event_lap_id = target_lap_id or laps[0].id
                 model_value = _field_value(laps[0], field)
-                affected_groups = {_best_lap_group(lap) for lap in laps}
+                old_groups = {_best_lap_group(lap) for lap in laps}
                 if field == "weather":
                     value = normalize_weather(str(value))
                 for lap in laps:
@@ -349,7 +353,12 @@ class GuiWriteService:
                     else:
                         lap.weather = str(value)
                     session.add(lap)
-                _recompute_best_laps(session, self.gamertag)
+                # A track/race_class change moves the row into a different
+                # group — recompute both the group it left and the one it
+                # entered, or a stale winner can linger in the old group.
+                new_groups = {_best_lap_group(lap) for lap in laps}
+                scope = {(group.track, group.race_class) for group in old_groups | new_groups}
+                LapRepository(session).mark_best_laps_for_groups(scope, gamertag=self.gamertag)
             else:
                 lap = session.get(LapRecordEntity, target_lap_id) if target_lap_id else _find_case_lap(session, case)
                 if lap is None:
@@ -371,7 +380,11 @@ class GuiWriteService:
                     lap.driver = str(value)
                     lap.driver_normalized = str(value).casefold()
                 session.add(lap)
-                _recompute_best_laps(session, self.gamertag)
+                # dirty/car/driver never move the row to a different
+                # (track, race_class) group, so the pre-mutation group is
+                # already the full scope.
+                scope = {(group.track, group.race_class) for group in affected_groups}
+                LapRepository(session).mark_best_laps_for_groups(scope, gamertag=self.gamertag)
             corrected_value = _decision_value(value)
             case.lap_record_id = event_lap_id
             case.status = "resolved"

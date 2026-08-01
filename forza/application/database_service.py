@@ -212,8 +212,8 @@ class DatabaseService:
     def list_failed_images_for_retry(self) -> list[tuple[Path, str]]:
         return self._image_retry_registration.list_failed_images_for_retry()
 
-    def recompute_best_laps(self, *, run_id: str | None = None, gamertag: str | None = None) -> int:
-        return self._best_lap_recompute.recompute_best_laps(run_id=run_id, gamertag=gamertag)
+    def recompute_best_laps(self, *, gamertag: str | None = None) -> int:
+        return self._best_lap_recompute.recompute_best_laps(gamertag=gamertag)
 
     def register_image_file(
         self,

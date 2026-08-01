@@ -81,7 +81,7 @@ def _seed_database(db_path: Path, image_path: Path, *, raw_response_artifact_pat
                 image_file_id=image.id,
                 extraction_result_id=extraction.id,
             )
-            laps.mark_best_laps(run_id="run-1")
+            laps.mark_best_laps()
             flags.add_flag(image_file_id=image.id, run_id="run-1", flag=LAB_FLAG)
             if raw_response_artifact_path is not None:
                 raw_bytes = raw_response_artifact_path.read_bytes()

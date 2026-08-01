@@ -433,10 +433,9 @@ class LapRepository:
     def mark_best_laps(
         self,
         *,
-        run_id: str | None = None,
         gamertag: str | None = None,
     ) -> list[LapRecordEntity]:
-        """Mark the relational clean/best-lap frontier.
+        """Mark the relational clean/best-lap frontier across the entire database.
 
         When ``gamertag`` is supplied, this mirrors the legacy clean-cache
         semantics against ``lap_records`` instead of snapshots:
@@ -449,12 +448,17 @@ class LapRepository:
 
         Without ``gamertag`` this falls back to a simple best clean row per
         track/class/driver/car tuple for low-level repository callers.
+
+        This recomputes over every lap record in the database — for a single
+        edit affecting only one or a few ``(track, race_class)`` groups, use
+        ``mark_best_laps_for_groups`` instead (see B-5 in the 2026-07-31
+        audit). This method remains the right choice for genuine full-rebuild
+        callers (gamertag changes, ``RebuildService``).
         """
-        rows = self.list_export_rows(run_id=run_id)
+        rows = self.list_export_rows()
         log.debug(
-            "[best-laps] recompute start — gamertag=%r run_id=%r total_rows=%d",
+            "[best-laps] recompute start — gamertag=%r total_rows=%d",
             gamertag,
-            run_id,
             len(rows),
         )
         for row in rows:
@@ -481,12 +485,82 @@ class LapRepository:
                 row.is_best_lap = True
                 self.session.add(row)
 
-        for image_id in all_image_ids:
-            image = self.session.get(ImageFileEntity, image_id)
-            if image is None:
-                continue
-            image.best_lap_status = "contributing" if image_id in winner_image_ids else "non_contributing"
+        images = self.session.exec(
+            select(ImageFileEntity).where(ImageFileEntity.id.in_(all_image_ids))
+        ).all()
+        for image in images:
+            image.best_lap_status = "contributing" if image.id in winner_image_ids else "non_contributing"
             self.session.add(image)
+        return winners
+
+    def mark_best_laps_for_groups(
+        self,
+        groups: set[tuple[str, str]],
+        *,
+        gamertag: str | None = None,
+    ) -> list[LapRecordEntity]:
+        """Recompute the best-lap frontier restricted to ``(track, race_class)`` groups.
+
+        Equivalent to ``mark_best_laps()`` for the rows inside ``groups``: the
+        frontier algorithms in ``FrontierCalculator`` never compare rows
+        across different ``(track, race_class)`` pairs (see
+        tests/test_frontier_scoped_recompute.py), so restricting the input
+        rows to only those groups produces identical winners for the affected
+        rows without touching the rest of the database.
+
+        ``weather`` is deliberately excluded from the scope key even though
+        ``clean_frontier_rows`` sub-groups by it, because ``simple_best_rows``
+        (the no-gamertag fallback) does not include weather in its own
+        grouping key — a scope tighter than ``(track, race_class)`` would be
+        unsafe for that mode.
+
+        Callers that change a lap's ``track`` or ``race_class`` must pass the
+        union of the groups before and after the edit, since the row leaves
+        one group and enters another.
+        """
+        if not groups:
+            return []
+        conditions = [
+            and_(LapRecordEntity.track == track, LapRecordEntity.race_class == race_class)
+            for track, race_class in groups
+        ]
+        rows = list(self.session.exec(select(LapRecordEntity).where(or_(*conditions))))
+        log.debug(
+            "[best-laps] scoped recompute start — gamertag=%r groups=%d rows=%d",
+            gamertag,
+            len(groups),
+            len(rows),
+        )
+        for row in rows:
+            row.is_best_lap = False
+            self.session.add(row)
+
+        calculator = FrontierCalculator()
+        if gamertag:
+            winners = calculator.clean_frontier_rows(rows, gamertag)
+        else:
+            winners = calculator.simple_best_rows(rows)
+
+        winner_ids = {row.id for row in winners}
+        for row in rows:
+            if row.id in winner_ids:
+                row.is_best_lap = True
+                self.session.add(row)
+
+        all_image_ids = {row.image_file_id for row in rows}
+        winner_image_ids = {row.image_file_id for row in winners}
+        images = self.session.exec(
+            select(ImageFileEntity).where(ImageFileEntity.id.in_(all_image_ids))
+        ).all()
+        for image in images:
+            image.best_lap_status = "contributing" if image.id in winner_image_ids else "non_contributing"
+            self.session.add(image)
+        log.debug(
+            "[best-laps] scoped recompute done — winners=%d contributing_images=%d/%d",
+            len(winners),
+            len(winner_image_ids),
+            len(all_image_ids),
+        )
         return winners
 
     def list_best_laps(
