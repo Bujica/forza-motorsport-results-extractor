@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 
 from ..db.models import (
     ExtractionAttemptEntity,
+    ExtractionResultEntity,
     ExtractionRunEntity,
     ModelArtifactEntity,
     ModelRuntimeSnapshotEntity,
@@ -143,6 +144,7 @@ class ExtractionPersistenceService:
                 current_name=Path(result.current_path).name if result.current_path else result.source_file,
                 semantic_name=result.semantic_name,
             )
+            _retire_stale_extraction_results(session, image_file_id=image.id, current_run_id=run_id)
             extraction_result = model_results.add_result(
                 result,
                 run_id=run_id,
@@ -274,6 +276,39 @@ def register_model_artifact(
     )
     session.add(artifact)
     return artifact
+
+
+def _retire_stale_extraction_results(session: Session, *, image_file_id: str, current_run_id: str) -> None:
+    """Delete extraction results from *other* runs for this image.
+
+    Reprocessing an image (Force / retry-errors) creates a brand-new
+    ExtractionResultEntity, since ExtractionResultRepository.add_result()
+    upserts keyed by (run_id, image_file_id) — a new run_id never matches an
+    older one. Without this cleanup, the previous run's
+    ExtractionResultEntity/LapRecordEntity/attempts/artifacts for the same
+    image stay in the database forever, competing alongside the new ones in
+    the best-lap frontier calculation — the player's side of
+    FrontierCalculator.clean_frontier_rows() has no dedup against this (only
+    the opponent side does), so a reprocessed image's own lap could appear
+    twice in the best-laps list.
+
+    Deleting the stale ExtractionResultEntity is enough on its own:
+    LapRecordEntity, ExtractionAttemptEntity, and ModelArtifactEntity all
+    declare ON DELETE CASCADE on extraction_result_id, and
+    ReviewCaseEntity.lap_record_id is ON DELETE SET NULL — the normal
+    review-refresh pass after each run reconciles any review case left
+    pointing at a now-superseded lap.
+    """
+    stale_results = session.exec(
+        select(ExtractionResultEntity).where(
+            ExtractionResultEntity.image_file_id == image_file_id,
+            ExtractionResultEntity.run_id != current_run_id,
+        )
+    ).all()
+    for stale_result in stale_results:
+        session.delete(stale_result)
+    if stale_results:
+        session.flush()
 
 
 __all__ = ["ExtractionPersistenceService", "PreparedExtraction"]

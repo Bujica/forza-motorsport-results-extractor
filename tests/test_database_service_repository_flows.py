@@ -9,11 +9,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from forza.application import DatabaseService
-from forza.db import session_scope
+from forza.db import create_sqlite_engine, session_scope
 from forza.db.models import (
     ExportArtifactEntity,
     ExternalRecordImportEntity,
     ExtractionAttemptEntity,
+    ExtractionResultEntity,
     ExtractionRunEntity,
     ImageFlagEntity,
     LapRecordEntity,
@@ -217,6 +218,39 @@ def test_database_service_upsert_image_and_laps(tmp_path):
     # Second call with same data must not duplicate
     inserted_again = db.upsert_image_and_laps(make_result(), run_id="realtime_run")
     assert inserted_again == 0  # duplicates silently ignored
+
+    status = db.status()
+    assert status.lap_records == 2
+    db.close()
+
+def test_database_service_reprocessing_image_in_new_run_retires_stale_result(tmp_path):
+    """Regression: Force-reprocessing an already-processed image in a new run
+    must replace the previous extraction result, not leave it behind
+    competing alongside the new one. Before this fix, the player's own lap
+    (unlike the opponent's) had no dedup in FrontierCalculator, so a
+    reprocessed image's lap could appear twice in the best-laps list.
+    """
+    db = DatabaseService(tmp_path / "forza.sqlite3", auto_upgrade=True)
+    db.begin_run(run_id="first_run", backend="lmstudio", model="qwen", prompt_name="v1", input_dir="data/input")
+    db.upsert_image_and_laps(make_result(), run_id="first_run")
+    db.complete_run("first_run", metrics={"processed": 1, "succeeded": 1})
+
+    db.begin_run(run_id="second_run", backend="lmstudio", model="qwen", prompt_name="v1", input_dir="data/input")
+    # Same file_hash/source_file — this is what "Force" does: reprocess the
+    # same physical image, now under a brand-new run_id.
+    db.upsert_image_and_laps(make_result(), run_id="second_run")
+    db.complete_run("second_run", metrics={"processed": 1, "succeeded": 1})
+
+    with session_scope(create_sqlite_engine(db.database_file)) as session:
+        results = session.exec(select(ExtractionRunEntity)).all()
+        assert len(results) == 2  # both runs are kept — only the extraction result/laps are retired
+
+        extraction_results = session.exec(select(ExtractionResultEntity)).all()
+        assert [row.run_id for row in extraction_results] == ["second_run"]
+
+        laps = session.exec(select(LapRecordEntity)).all()
+        assert len(laps) == 2  # not 4 — the first run's lap records were cascade-deleted
+        assert {lap.run_id for lap in laps} == {"second_run"}
 
     status = db.status()
     assert status.lap_records == 2
