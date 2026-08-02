@@ -5,6 +5,8 @@ from typing import Any
 
 import requests
 
+from .load_config import UNCOMPARABLE_LOAD_CONFIG_KEYS, load_config_value_satisfies
+
 
 @dataclass(frozen=True)
 class LMStudioLoadedInstance:
@@ -149,10 +151,10 @@ class LMStudioRuntimeClient:
             warnings.append(f"Multiple loaded instances ({len(model.loaded_instances)})")
 
         for key, desired_value in desired.items():
-            if desired_value is None:
+            if desired_value is None or key in UNCOMPARABLE_LOAD_CONFIG_KEYS:
                 continue
             effective_value = effective.get(key)
-            if effective_value != desired_value:
+            if not load_config_value_satisfies(key, desired_value, effective_value):
                 warnings.append(
                     f"Loaded {key} mismatch: configured {desired_value}, loaded {_display_config_value(effective_value)}"
                 )

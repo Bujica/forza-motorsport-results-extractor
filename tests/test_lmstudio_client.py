@@ -123,6 +123,95 @@ def test_runtime_status_reports_loaded_compatible_model() -> None:
     assert "vision=yes" in status.capabilities_summary
 
 
+def test_runtime_status_ignores_physical_batch_size_the_server_never_echoes_back() -> None:
+    """Regression: Diagnostics showed a permanent false-positive
+    "physical_batch_size mismatch" warning because LM Studio's real
+    GET /api/v1/models response never includes physical_batch_size in
+    loaded_instances[].config, even when the model is loaded exactly as
+    configured. desired_load_config carrying physical_batch_size (as
+    build_backend always sends) must not produce a warning for it.
+    """
+    client, _session = _client({
+        "models": [
+            {
+                "key": "qwen/qwen3.5-9b",
+                "display_name": "Qwen 3.5 9B",
+                "max_context_length": 32768,
+                "capabilities": {"vision": True, "reasoning": {"allowed_options": ["off", "auto"]}},
+                "loaded_instances": [
+                    {
+                        "id": "instance-1",
+                        # Real server shape: no physical_batch_size key at all.
+                        "config": {
+                            "context_length": 5120,
+                            "eval_batch_size": 1024,
+                            "flash_attention": True,
+                            "offload_kv_cache_to_gpu": True,
+                        },
+                    }
+                ],
+            }
+        ]
+    })
+
+    status = client.runtime_status(
+        configured_model="qwen/qwen3.5-9b",
+        desired_load_config={
+            "context_length": 5120,
+            "eval_batch_size": 1024,
+            "physical_batch_size": 512,
+            "flash_attention": True,
+            "offload_kv_cache_to_gpu": True,
+        },
+        reasoning_mode="off",
+    )
+
+    assert status.level == "ok"
+    assert not any("physical_batch_size" in warning for warning in status.warnings)
+
+
+def test_runtime_status_does_not_warn_when_context_length_is_rounded_up(monkeypatch) -> None:
+    """Regression: reproduces the exact production case — configured 5000,
+    loaded 5120 (LM Studio's internal rounding). This must be reported as
+    "ok" with zero warnings, not a permanent false-positive mismatch."""
+    client, _session = _client({
+        "models": [
+            {
+                "key": "qwen/qwen3.5-9b",
+                "display_name": "Qwen 3.5 9B",
+                "max_context_length": 262144,
+                "capabilities": {"vision": True, "reasoning": {"allowed_options": ["off", "on"]}},
+                "loaded_instances": [
+                    {
+                        "id": "qwen/qwen3.5-9b",
+                        "config": {
+                            "context_length": 5120,
+                            "eval_batch_size": 1024,
+                            "flash_attention": True,
+                            "offload_kv_cache_to_gpu": True,
+                        },
+                    }
+                ],
+            }
+        ]
+    })
+
+    status = client.runtime_status(
+        configured_model="qwen/qwen3.5-9b",
+        desired_load_config={
+            "context_length": 5000,
+            "eval_batch_size": 1024,
+            "physical_batch_size": 512,
+            "flash_attention": True,
+            "offload_kv_cache_to_gpu": True,
+        },
+        reasoning_mode="off",
+    )
+
+    assert status.level == "ok"
+    assert status.warnings == ()
+
+
 def test_runtime_status_reports_not_found_and_not_loaded() -> None:
     missing_client, _session = _client({"models": [{"key": "other-model"}]})
     not_loaded_client, _session = _client({"models": [{"key": "qwen/qwen3.5-9b", "loaded_instances": []}]})

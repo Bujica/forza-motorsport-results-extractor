@@ -2,6 +2,19 @@ from __future__ import annotations
 
 from typing import Any
 
+# physical_batch_size is accepted by POST /models/load as a request
+# parameter, but LM Studio's GET /api/v1/models response never echoes it
+# back in loaded_instances[].config — the documented schema for a loaded
+# instance's config only includes context_length, eval_batch_size, parallel,
+# flash_attention, num_experts, and offload_kv_cache_to_gpu (see
+# https://lmstudio.ai/docs/developer/rest/list). Comparing physical_batch_size
+# against the server's reported config is therefore a comparison against a
+# field that's structurally never present, producing a false "mismatch"
+# every time — which forces a needless unload+reload on every extraction and
+# a permanent false-positive warning in DB Doctor/Diagnostics, even when the
+# model is genuinely already loaded with the requested settings.
+UNCOMPARABLE_LOAD_CONFIG_KEYS: frozenset[str] = frozenset({"physical_batch_size"})
+
 
 def desired_load_config(
     *,
@@ -43,12 +56,28 @@ def normalized_load_config(config: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def load_config_value_satisfies(key: str, desired_value: Any, effective_value: Any) -> bool:
+    """Return True if the currently-loaded value for `key` satisfies `desired_value`.
+
+    Most fields require exact equality. `context_length` is the one
+    exception: LM Studio / llama.cpp can round the effective context length
+    up to an internal alignment boundary rather than honoring the exact
+    requested value (observed in production: requesting 5000 loads as 5120).
+    A loaded context at least as large as requested is fully usable — only a
+    *smaller* effective context is a real incompatibility — so this is a
+    "at least as much" check rather than exact equality.
+    """
+    if key == "context_length":
+        return effective_value is not None and effective_value >= desired_value
+    return effective_value == desired_value
+
+
 def load_config_compatible(existing: dict[str, Any], desired: dict[str, Any]) -> bool:
     normalized_existing = normalized_load_config(existing)
     for key, value in desired.items():
-        if value is None:
+        if value is None or key in UNCOMPARABLE_LOAD_CONFIG_KEYS:
             continue
-        if normalized_existing.get(key) != value:
+        if not load_config_value_satisfies(key, value, normalized_existing.get(key)):
             return False
     return True
 
