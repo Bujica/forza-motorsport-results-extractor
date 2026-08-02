@@ -3,13 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 
 from ...config import AppConfig
 from ...events import EventType, PipelineEvent
 from ...application.gui_read_service import GuiLap, GuiReadService, GuiReviewCase
 from ...application.gui_write_service import GuiWriteService, ReviewDecisionTargetNotFound
 from ..config_state import ConfigChangeSet
+from ..workers.review_queue_worker import ReviewQueueWorker
 
 
 # Statuses that are considered "resolved" for filter purposes.
@@ -53,10 +54,18 @@ class ReviewController(QObject):
         self._run_id: str | None = None
         self._tracks = self._reader.list_reference_tracks()
         self._loaded = False
+        self._reload_thread: QThread | None = None
+        self._reload_worker: ReviewQueueWorker | None = None
+        self._current_reload_on_done = None
+        self._pending_reload_on_done = None
 
     @property
     def cases(self) -> list[GuiReviewCase]:
         return list(self._cases)
+
+    @property
+    def is_reloading(self) -> bool:
+        return self._reload_thread is not None and self._reload_thread.isRunning()
 
     def on_config_changed(self, cfg: AppConfig, changes: ConfigChangeSet) -> None:
         self._cfg = cfg
@@ -81,6 +90,11 @@ class ReviewController(QObject):
     def close(self) -> None:
         self._reader.close()
         self._writer.close()
+        if self._reload_thread is not None and self._reload_thread.isRunning():
+            self._reload_thread.quit()
+            if not self._reload_thread.wait(5000):
+                self._reload_thread.terminate()
+                self._reload_thread.wait(1000)
 
     def refresh(
         self,
@@ -93,10 +107,48 @@ class ReviewController(QObject):
         self.reload()
 
     def reload(self) -> None:
-        self._all_cases = self._reader.list_review_queue(status="all")
+        self._start_reload(lambda: self._apply_current_filters(select_first=True))
+
+    def _start_reload(self, on_done) -> None:
+        if self.is_reloading:
+            # Coalesce: only the latest requested follow-up runs once the
+            # in-flight fetch completes — the query itself (list_review_queue
+            # + list_run_options) never takes request-specific arguments, so
+            # there is nothing to lose by dropping the redundant intermediate
+            # requests, only their now-stale follow-up actions.
+            self._pending_reload_on_done = on_done
+            return
+        self._reload_thread = QThread(self)
+        self._reload_worker = ReviewQueueWorker(database_file=self._cfg.database_file)
+        self._reload_worker.moveToThread(self._reload_thread)
+        self._current_reload_on_done = on_done
+        self._reload_thread.started.connect(self._reload_worker.run)
+        self._reload_worker.finished.connect(self._on_reload_finished)
+        self._reload_worker.finished.connect(self._reload_thread.quit)
+        self._reload_worker.finished.connect(self._reload_worker.deleteLater)
+        self._reload_thread.finished.connect(self._reload_thread.deleteLater)
+        self._reload_thread.finished.connect(self._clear_reload_worker_refs)
+        self._reload_thread.start()
+
+    def _on_reload_finished(self, result) -> None:
+        on_done = self._current_reload_on_done
+        self._current_reload_on_done = None
+        if not result.ok:
+            self.action_failed.emit(result.message)
+            return
+        self._all_cases = result.all_cases
         self._loaded = True
-        self.run_options_changed.emit(self._reader.list_run_options())
-        self._apply_current_filters(select_first=True)
+        self.run_options_changed.emit(result.run_options)
+        if on_done is not None:
+            on_done()
+
+    def _clear_reload_worker_refs(self) -> None:
+        self._reload_thread = None
+        self._reload_worker = None
+        if self._pending_reload_on_done is not None:
+            pending = self._pending_reload_on_done
+            self._pending_reload_on_done = None
+            self._start_reload(pending)
 
     def apply_filters(
         self,
@@ -268,18 +320,20 @@ class ReviewController(QObject):
 
     def _advance_to_next(self, resolved_case_id: str) -> None:
         current_index = next((index for index, case in enumerate(self._cases) if case.id == resolved_case_id), 0)
-        self._all_cases = self._reader.list_review_queue(status="all")
-        self.run_options_changed.emit(self._reader.list_run_options())
-        self._apply_current_filters(select_first=False)
-        if not self._cases:
-            self.queue_empty.emit()
-            return
 
-        current_or_next = next((case for case in self._cases if case.id == resolved_case_id), None)
-        if current_or_next is None:
-            next_index = min(current_index, len(self._cases) - 1)
-            current_or_next = self._cases[next_index]
-        self.select_case(current_or_next.id)
+        def on_done() -> None:
+            self._apply_current_filters(select_first=False)
+            if not self._cases:
+                self.queue_empty.emit()
+                return
+
+            current_or_next = next((case for case in self._cases if case.id == resolved_case_id), None)
+            if current_or_next is None:
+                next_index = min(current_index, len(self._cases) - 1)
+                current_or_next = self._cases[next_index]
+            self.select_case(current_or_next.id)
+
+        self._start_reload(on_done)
 
     def _select_relative(self, offset: int) -> None:
         if not self._cases:

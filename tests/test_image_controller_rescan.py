@@ -81,6 +81,11 @@ def test_rescan_images_reconciles_missing_and_available_without_manual_marking(t
     controller._reader = _Reader(images)
     controller._writer = writer
     controller._images = images
+    # rescan_images() calls self.refresh() as a side effect to reload the
+    # list after reconciling; refresh() now runs on a QThread (G-2), which
+    # needs a running Qt event loop this lightweight unit test doesn't have.
+    # This test only cares about the reconciliation logic above, not refresh.
+    controller.refresh = lambda *args, **kwargs: None
 
     result = controller.rescan_images(["existing", "missing", "changed"])
 

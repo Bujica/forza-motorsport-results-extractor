@@ -14,6 +14,7 @@ from ...application import ImageRenameService, RenamePlan
 from ...pipeline import file_hash
 from ..config_state import ConfigChangeSet
 from ..workers.image_inventory_worker import ImageInventoryWorker, ImageInventoryWorkerResult
+from ..workers.image_refresh_worker import ImageRefreshWorker, ImageRefreshWorkerResult
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,9 @@ class ImageController(QObject):
         self._scan_worker: ImageInventoryWorker | None = None
         self._scan_announce = False
         self._scan_pending = False
+        self._refresh_thread: QThread | None = None
+        self._refresh_worker: ImageRefreshWorker | None = None
+        self._refresh_pending_args: tuple | None = None
 
     @property
     def images(self) -> list[GuiImage]:
@@ -75,6 +79,10 @@ class ImageController(QObject):
     @property
     def is_scanning(self) -> bool:
         return self._scan_thread is not None and self._scan_thread.isRunning()
+
+    @property
+    def is_refreshing(self) -> bool:
+        return self._refresh_thread is not None and self._refresh_thread.isRunning()
 
     def on_config_changed(self, cfg: AppConfig, changes: ConfigChangeSet) -> None:
         self._cfg = cfg
@@ -101,6 +109,11 @@ class ImageController(QObject):
             if not self._scan_thread.wait(5000):
                 self._scan_thread.terminate()
                 self._scan_thread.wait(1000)
+        if self._refresh_thread is not None and self._refresh_thread.isRunning():
+            self._refresh_thread.quit()
+            if not self._refresh_thread.wait(5000):
+                self._refresh_thread.terminate()
+                self._refresh_thread.wait(1000)
 
     def refresh(
         self,
@@ -111,13 +124,33 @@ class ImageController(QObject):
         run_id: str | None = None,
         processing_status: str | None = None,
     ) -> None:
-        self._file_status = _none_for_all(file_status)
-        self._best_lap_status = _none_for_all(best_lap_status)
-        self._inventory_filter = _none_for_all(inventory_filter)
-        self._track = _none_for_all(track)
-        self._run_id = _none_for_all(run_id)
-        self._processing_status = _none_for_all(processing_status)
-        self._images = self._reader.list_images(
+        args = (
+            _none_for_all(file_status),
+            _none_for_all(best_lap_status),
+            _none_for_all(inventory_filter),
+            _none_for_all(track),
+            _none_for_all(run_id),
+            _none_for_all(processing_status),
+        )
+        if self.is_refreshing:
+            # Coalesce rapid successive filter changes into one trailing
+            # refresh instead of piling up overlapping background threads.
+            self._refresh_pending_args = args
+            return
+        self._start_refresh(args)
+
+    def _start_refresh(self, args: tuple) -> None:
+        (
+            self._file_status,
+            self._best_lap_status,
+            self._inventory_filter,
+            self._track,
+            self._run_id,
+            self._processing_status,
+        ) = args
+        self._refresh_thread = QThread(self)
+        self._refresh_worker = ImageRefreshWorker(
+            database_file=self._cfg.database_file,
             file_status=self._file_status,
             best_lap_status=self._best_lap_status,
             inventory_filter=self._inventory_filter,
@@ -125,8 +158,32 @@ class ImageController(QObject):
             run_id=self._run_id,
             processing_status=self._processing_status,
         )
-        self.images_changed.emit(self._images)
-        self.filter_options_changed.emit(self._filter_options())
+        self._refresh_worker.moveToThread(self._refresh_thread)
+        self._refresh_thread.started.connect(self._refresh_worker.run)
+        self._refresh_worker.finished.connect(self._on_refresh_finished)
+        self._refresh_worker.finished.connect(self._refresh_thread.quit)
+        self._refresh_worker.finished.connect(self._refresh_worker.deleteLater)
+        self._refresh_thread.finished.connect(self._refresh_thread.deleteLater)
+        self._refresh_thread.finished.connect(self._clear_refresh_worker_refs)
+        self._refresh_thread.start()
+
+    def _on_refresh_finished(self, result: ImageRefreshWorkerResult) -> None:
+        if result.ok and result.images is not None and result.filter_options is not None:
+            self._images = result.images
+            self.images_changed.emit(self._images)
+            self.filter_options_changed.emit(
+                ImageFilterOptions(tracks=result.filter_options.tracks, runs=result.filter_options.runs)
+            )
+        else:
+            self.action_failed.emit(result.message)
+
+    def _clear_refresh_worker_refs(self) -> None:
+        self._refresh_thread = None
+        self._refresh_worker = None
+        if self._refresh_pending_args is not None:
+            pending = self._refresh_pending_args
+            self._refresh_pending_args = None
+            self._start_refresh(pending)
 
     def scan_input_folder(self) -> ImageActionResult:
         return self._start_input_folder_scan(announce=True)
@@ -320,18 +377,6 @@ class ImageController(QObject):
     def handle_event(self, event: PipelineEvent) -> None:
         if event.type in {EventType.IMAGE_STATUS_CHANGED, EventType.IMAGE_RENAMED, EventType.IMAGE_EXPORTED, EventType.RUN_FINISHED}:
             self.refresh(self._file_status, self._best_lap_status, self._inventory_filter, self._track, self._run_id, self._processing_status)
-
-    def _filter_options(self) -> ImageFilterOptions:
-        tracks, runs = self._reader.image_filter_values(
-            file_status=self._file_status,
-            best_lap_status=self._best_lap_status,
-            inventory_filter=self._inventory_filter,
-            track=self._track,
-            run_id=self._run_id,
-            processing_status=self._processing_status,
-        )
-        return ImageFilterOptions(tracks=tracks, runs=runs)
-
 
 def _scan_result_message(result) -> str:
     return (

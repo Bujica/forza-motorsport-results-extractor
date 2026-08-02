@@ -13,6 +13,7 @@ GUI_ROOT = Path(__file__).resolve().parents[1] / "forza" / "gui"
 CONTROLLER_SOURCE = (GUI_ROOT / "controllers" / "review_controller.py").read_text(encoding="utf-8")
 VIEW_SOURCE = (GUI_ROOT / "views" / "review_queue_view.py").read_text(encoding="utf-8")
 MAIN_WINDOW_SOURCE = (GUI_ROOT / "main_window.py").read_text(encoding="utf-8")
+REVIEW_QUEUE_WORKER_SOURCE = (GUI_ROOT / "workers" / "review_queue_worker.py").read_text(encoding="utf-8")
 
 
 # ── _advance_to_next structure ────────────────────────────────────────────────
@@ -22,12 +23,20 @@ def test_review_controller_has_advance_to_next_method() -> None:
 
 
 def test_review_controller_advance_reloads_cases_from_db_after_decision() -> None:
-    """Resolved cases must remain available when the user switches to resolved/all filters."""
+    """Resolved cases must remain available when the user switches to resolved/all filters.
+
+    As of G-2, the DB reload runs on a QThread via ReviewQueueWorker instead
+    of a direct self._reader call inside _advance_to_next — verify both ends
+    of that chain: the controller triggers a genuine reload (not a filter
+    over stale in-memory state), and the worker it delegates to actually
+    re-fetches from the DB.
+    """
     method_body = CONTROLLER_SOURCE.split("def _advance_to_next", 1)[1].split("\n    def ", 1)[0]
 
-    assert 'self._reader.list_review_queue(status="all")' in method_body
+    assert "self._start_reload(" in method_body
     assert "self._apply_current_filters(select_first=False)" in method_body
     assert "self._all_cases = [case for case in self._all_cases if" not in method_body
+    assert 'reader.list_review_queue(status="all")' in REVIEW_QUEUE_WORKER_SOURCE
 
 
 def test_review_controller_advance_does_not_call_public_refresh() -> None:

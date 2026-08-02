@@ -54,12 +54,14 @@ checks that every object-typed GUI signal has a documented entry.
 | `forza/gui/views/review_queue_view.py::filters_changed` | `Signal(str, object, object, object)` | updated controller/view model object for the corresponding GUI section. |
 | `forza/gui/views/settings_view.py::preview_requested` | `Signal(object)` | view intent/model object emitted to the owning controller. |
 | `forza/gui/views/settings_view.py::save_requested` | `Signal(object)` | view intent/model object emitted to the owning controller. |
+| `forza/gui/workers/db_doctor_worker.py::finished` | `Signal(object)` | `DbDoctorWorkerResult` emitted when the background DB Doctor check completes. |
 | `forza/gui/workers/developer_overview_worker.py::finished` | `Signal(object)` | worker result dataclass or service result object emitted when background work completes. |
 | `forza/gui/workers/event_bridge.py::event_received` | `Signal(object)` | `PipelineEvent` forwarded from worker thread to GUI thread. |
 | `forza/gui/workers/image_inventory_worker.py::finished` | `Signal(object)` | `ImageInventoryWorkerResult` emitted when the background Images input-folder sync completes. |
+| `forza/gui/workers/image_refresh_worker.py::finished` | `Signal(object)` | `ImageRefreshWorkerResult` emitted when the background Images list/filter refresh completes. |
 | `forza/gui/workers/performance_worker.py::finished` | `Signal(object)` | `PerformanceWorkerResult` emitted when the background Records/Performance refresh completes. |
-| `forza/gui/workers/model_list_worker.py::finished` | `Signal(object)` | worker result dataclass or service result object emitted when background work completes. |
 | `forza/gui/workers/rebuild_worker.py::finished` | `Signal(object)` | worker result dataclass or service result object emitted when background work completes. |
+| `forza/gui/workers/review_queue_worker.py::finished` | `Signal(object)` | `ReviewQueueWorkerResult` emitted when the background Review queue reload completes. |
 | `forza/gui/workers/run_worker.py::finished` | `Signal(object)` | worker result dataclass or service result object emitted when background work completes. |
 
 ## Maintenance rule
