@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,8 @@ from ...config import AppConfig
 from ...events import EventType, PipelineEvent
 from ..config_state import ConfigChangeSet
 from ..workers.performance_worker import PerformanceWorker, PerformanceWorkerResult
+
+_log = logging.getLogger("forza")
 
 
 class PerformanceController(QObject):
@@ -44,6 +47,9 @@ class PerformanceController(QObject):
             return
         self._thread.quit()
         if not self._thread.wait(5000):
+            _log.warning(
+                "[gui] PerformanceController: worker thread did not stop within 5s, forcing terminate()"
+            )
             self._thread.terminate()
             self._thread.wait(1000)
 

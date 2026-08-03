@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,8 @@ from ...pipeline import file_hash
 from ..config_state import ConfigChangeSet
 from ..workers.image_inventory_worker import ImageInventoryWorker, ImageInventoryWorkerResult
 from ..workers.image_refresh_worker import ImageRefreshWorker, ImageRefreshWorkerResult
+
+_log = logging.getLogger("forza")
 
 
 @dataclass(frozen=True)
@@ -107,11 +110,17 @@ class ImageController(QObject):
         if self._scan_thread is not None and self._scan_thread.isRunning():
             self._scan_thread.quit()
             if not self._scan_thread.wait(5000):
+                _log.warning(
+                    "[gui] ImageController: scan thread did not stop within 5s, forcing terminate()"
+                )
                 self._scan_thread.terminate()
                 self._scan_thread.wait(1000)
         if self._refresh_thread is not None and self._refresh_thread.isRunning():
             self._refresh_thread.quit()
             if not self._refresh_thread.wait(5000):
+                _log.warning(
+                    "[gui] ImageController: refresh thread did not stop within 5s, forcing terminate()"
+                )
                 self._refresh_thread.terminate()
                 self._refresh_thread.wait(1000)
 

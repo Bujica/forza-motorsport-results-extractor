@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QObject, QThread, Signal
 
 from ...config import AppConfig
 from ..config_state import ConfigChangeSet
 from ..workers.db_doctor_worker import DbDoctorWorker
+
+_log = logging.getLogger("forza")
 
 
 class DbDoctorController(QObject):
@@ -47,6 +51,9 @@ class DbDoctorController(QObject):
             return
         self._thread.quit()
         if not self._thread.wait(5000):
+            _log.warning(
+                "[gui] DbDoctorController: worker thread did not stop within 5s, forcing terminate()"
+            )
             self._thread.terminate()
             self._thread.wait(1000)
 

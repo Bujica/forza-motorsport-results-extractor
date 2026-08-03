@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,8 @@ from ...application.gui_read_service import GuiLap, GuiReadService, GuiReviewCas
 from ...application.gui_write_service import GuiWriteService, ReviewDecisionTargetNotFound
 from ..config_state import ConfigChangeSet
 from ..workers.review_queue_worker import ReviewQueueWorker
+
+_log = logging.getLogger("forza")
 
 
 # Statuses that are considered "resolved" for filter purposes.
@@ -93,6 +96,9 @@ class ReviewController(QObject):
         if self._reload_thread is not None and self._reload_thread.isRunning():
             self._reload_thread.quit()
             if not self._reload_thread.wait(5000):
+                _log.warning(
+                    "[gui] ReviewController: reload thread did not stop within 5s, forcing terminate()"
+                )
                 self._reload_thread.terminate()
                 self._reload_thread.wait(1000)
 

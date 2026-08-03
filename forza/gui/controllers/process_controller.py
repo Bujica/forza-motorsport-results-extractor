@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -11,6 +12,8 @@ from ...events import EventType, PipelineEvent
 from ..config_state import ConfigChangeSet, GuiConfigState
 from ..workers.event_bridge import QtEventBridge
 from ..workers.run_worker import RunRequest, RunWorker, RunWorkerResult
+
+_log = logging.getLogger("forza")
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,10 @@ class ProcessController(QObject):
             return
         self._thread.quit()
         if not self._thread.wait(5000):
+            _log.warning(
+                "[gui] ProcessController: worker thread did not stop within 5s after "
+                "request_cancel(), forcing terminate()"
+            )
             self._thread.terminate()
             self._thread.wait(1000)
 

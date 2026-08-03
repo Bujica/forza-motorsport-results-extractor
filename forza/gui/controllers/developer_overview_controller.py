@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QObject, QThread, Signal
 
 from ...config import AppConfig
 from ..config_state import ConfigChangeSet
 from ..workers.developer_overview_worker import DeveloperOverviewWorker
+
+_log = logging.getLogger("forza")
 
 
 class DeveloperOverviewController(QObject):
@@ -46,6 +50,9 @@ class DeveloperOverviewController(QObject):
             return
         self._thread.quit()
         if not self._thread.wait(5000):
+            _log.warning(
+                "[gui] DeveloperOverviewController: worker thread did not stop within 5s, forcing terminate()"
+            )
             self._thread.terminate()
             self._thread.wait(1000)
 

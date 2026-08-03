@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,8 @@ from ...config import AppConfig
 from ..config_state import ConfigChangeSet, GuiConfigState
 from ..workers.event_bridge import QtEventBridge
 from ..workers.rebuild_worker import RebuildWorker, RebuildWorkerResult
+
+_log = logging.getLogger("forza")
 
 
 class RebuildController(QObject):
@@ -54,6 +57,9 @@ class RebuildController(QObject):
             return
         self._thread.quit()
         if not self._thread.wait(5000):
+            _log.warning(
+                "[gui] RebuildController: worker thread did not stop within 5s, forcing terminate()"
+            )
             self._thread.terminate()
             self._thread.wait(1000)
 
