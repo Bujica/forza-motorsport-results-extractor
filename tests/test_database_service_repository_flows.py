@@ -223,12 +223,13 @@ def test_database_service_upsert_image_and_laps(tmp_path):
     assert status.lap_records == 2
     db.close()
 
-def test_database_service_reprocessing_image_in_new_run_retires_stale_result(tmp_path):
+def test_database_service_reprocessing_image_preserves_run_history(tmp_path):
     """Regression: Force-reprocessing an already-processed image in a new run
-    must replace the previous extraction result, not leave it behind
-    competing alongside the new one. Before this fix, the player's own lap
-    (unlike the opponent's) had no dedup in FrontierCalculator, so a
-    reprocessed image's lap could appear twice in the best-laps list.
+    must NOT delete the previous run's ExtractionResultEntity/LapRecordEntity —
+    each run's input/result pairing is an immutable historical record that
+    DB Doctor's run_counters_mismatch and run_inputs_process_without_one_result
+    checks depend on. (A first attempt at this fix deleted the old result and
+    broke exactly those two checks — this test guards against that regression.)
     """
     db = DatabaseService(tmp_path / "forza.sqlite3", auto_upgrade=True)
     db.begin_run(run_id="first_run", backend="lmstudio", model="qwen", prompt_name="v1", input_dir="data/input")
@@ -242,18 +243,56 @@ def test_database_service_reprocessing_image_in_new_run_retires_stale_result(tmp
     db.complete_run("second_run", metrics={"processed": 1, "succeeded": 1})
 
     with session_scope(create_sqlite_engine(db.database_file)) as session:
-        results = session.exec(select(ExtractionRunEntity)).all()
-        assert len(results) == 2  # both runs are kept — only the extraction result/laps are retired
+        runs = session.exec(select(ExtractionRunEntity)).all()
+        assert len(runs) == 2
 
         extraction_results = session.exec(select(ExtractionResultEntity)).all()
-        assert [row.run_id for row in extraction_results] == ["second_run"]
+        assert sorted(row.run_id for row in extraction_results) == ["first_run", "second_run"]
 
         laps = session.exec(select(LapRecordEntity)).all()
-        assert len(laps) == 2  # not 4 — the first run's lap records were cascade-deleted
-        assert {lap.run_id for lap in laps} == {"second_run"}
+        assert len(laps) == 4  # both runs' lap records remain — nothing was deleted
+
+        # Every run_input with decision=process still has exactly one
+        # extraction_result (DB Doctor's run_inputs_process_without_one_result).
+        run_inputs = session.exec(select(RunInputEntity)).all()
+        for run_input in run_inputs:
+            if run_input.decision != "process":
+                continue
+            matching = [r for r in extraction_results if r.run_input_id == run_input.id]
+            assert len(matching) == 1
 
     status = db.status()
-    assert status.lap_records == 2
+    assert status.lap_records == 4
+    db.close()
+
+
+def test_database_service_reprocessing_image_frontier_only_considers_latest_run(tmp_path):
+    """The best-lap frontier must only consider the most recent run's lap
+    records per image — old runs stay in the database (see the history test
+    above) but must not compete alongside the new ones, or a reprocessed
+    image's own lap appears twice in the best-laps list (the player's side
+    of FrontierCalculator.clean_frontier_rows() has no dedup against this,
+    unlike the opponent's side)."""
+    db = DatabaseService(tmp_path / "forza.sqlite3", auto_upgrade=True)
+    db.begin_run(run_id="first_run", backend="lmstudio", model="qwen", prompt_name="v1", input_dir="data/input")
+    db.upsert_image_and_laps(make_result(), run_id="first_run")
+    db.complete_run("first_run", metrics={"processed": 1, "succeeded": 1})
+
+    db.begin_run(run_id="second_run", backend="lmstudio", model="qwen", prompt_name="v1", input_dir="data/input")
+    db.upsert_image_and_laps(make_result(), run_id="second_run")
+    db.complete_run("second_run", metrics={"processed": 1, "succeeded": 1})
+
+    winners = db.recompute_best_laps()
+    assert winners >= 1
+
+    with session_scope(create_sqlite_engine(db.database_file)) as session:
+        best_laps = session.exec(select(LapRecordEntity).where(LapRecordEntity.is_best_lap.is_(True))).all()
+        # Only rows from the latest run may win — never the superseded first_run.
+        assert all(row.run_id == "second_run" for row in best_laps)
+        # And the player's own driver must not appear twice.
+        player_wins = [row for row in best_laps if row.driver == REL_GAMERTAG]
+        assert len(player_wins) <= 1
+
     db.close()
 
 def test_database_service_does_not_swallow_lap_integrity_errors(tmp_path, monkeypatch):

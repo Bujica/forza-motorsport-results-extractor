@@ -134,6 +134,37 @@ def _append_rain_time_review_candidates(
             append(row, "weather", trigger="rain_time_suspicious", model_value=row.weather, per_image=True)
 
 
+def _latest_rows_per_image(rows: list[LapRecordEntity]) -> list[LapRecordEntity]:
+    """Keep only the most recent run's lap rows per image.
+
+    Reprocessing an image (Force / retry-errors) creates a new
+    ExtractionResultEntity + LapRecordEntity set for that image under a new
+    run_id, while the previous run's rows for the same image_file_id remain
+    in the database on purpose — each run's input/result pairing is an
+    immutable historical record that DB Doctor's run_counters_mismatch and
+    run_inputs_process_without_one_result checks depend on staying intact
+    (an earlier version of this fix deleted the old ExtractionResultEntity
+    instead and broke exactly those two checks).
+
+    Without this filter, an image's older, superseded lap(s) would compete
+    alongside the new ones in the frontier calculation — and the player's
+    side of FrontierCalculator.clean_frontier_rows() has no dedup against
+    this (only the opponent side does, via its ``claimed`` set), so a
+    reprocessed image's own lap could appear twice in the best-laps list.
+
+    ``run_id`` is timestamp-prefixed (``YYYYMMDD_HHMMSS_...``, see
+    ``run_service.py``'s run id generation), so the lexicographically
+    greatest run_id per image is reliably the most recent one — no join to
+    ``extraction_runs`` needed.
+    """
+    latest_run_by_image: dict[str, str] = {}
+    for row in rows:
+        current = latest_run_by_image.get(row.image_file_id)
+        if current is None or row.run_id > current:
+            latest_run_by_image[row.image_file_id] = row.run_id
+    return [row for row in rows if row.run_id == latest_run_by_image[row.image_file_id]]
+
+
 class LapRepository:
     def __init__(self, session: Session):
         self.session = session
@@ -465,11 +496,12 @@ class LapRepository:
             row.is_best_lap = False
             self.session.add(row)
 
+        candidate_rows = _latest_rows_per_image(rows)
         calculator = FrontierCalculator()
         if gamertag:
-            winners = calculator.clean_frontier_rows(rows, gamertag)
+            winners = calculator.clean_frontier_rows(candidate_rows, gamertag)
         else:
-            winners = calculator.simple_best_rows(rows)
+            winners = calculator.simple_best_rows(candidate_rows)
 
         winner_ids = {row.id for row in winners}
         winner_image_ids = {row.image_file_id for row in winners}
@@ -480,7 +512,7 @@ class LapRepository:
             len(winner_image_ids),
             len(all_image_ids),
         )
-        for row in rows:
+        for row in candidate_rows:
             if row.id in winner_ids:
                 row.is_best_lap = True
                 self.session.add(row)
@@ -535,14 +567,15 @@ class LapRepository:
             row.is_best_lap = False
             self.session.add(row)
 
+        candidate_rows = _latest_rows_per_image(rows)
         calculator = FrontierCalculator()
         if gamertag:
-            winners = calculator.clean_frontier_rows(rows, gamertag)
+            winners = calculator.clean_frontier_rows(candidate_rows, gamertag)
         else:
-            winners = calculator.simple_best_rows(rows)
+            winners = calculator.simple_best_rows(candidate_rows)
 
         winner_ids = {row.id for row in winners}
-        for row in rows:
+        for row in candidate_rows:
             if row.id in winner_ids:
                 row.is_best_lap = True
                 self.session.add(row)
