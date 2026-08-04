@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 from uuid import uuid4
 
 from ..config import validate_config as _validate_config
@@ -39,6 +40,109 @@ class _LMStudioPreflightContext:
     model: str
     endpoint: str
     desired_load_config: dict[str, object]
+
+
+@dataclass
+class _DiscoveryOutcome:
+    discovery: ImageDiscoveryPlan
+    new_images: list[tuple[Path, str]]
+    input_files: list[Path]
+    input_images: list[Path]
+    selected_files: list[tuple[Path, str]] | None
+    all_images: list[Path]
+    inventory_result: object | None
+    inventory: object | None
+
+
+@runtime_checkable
+class RunServiceDatabase(Protocol):
+    """The subset of ``DatabaseService`` that ``RunService`` actually calls.
+
+    ``DatabaseService`` itself implements every method here — this Protocol
+    exists so the contract is explicit and documented in one place, instead
+    of scattered ``getattr``/``hasattr`` probes with no single source of
+    truth for what ``RunService`` needs (S-1/S-4 in the 2026-07-31 audit).
+
+    Two methods below are marked "optional": ``RunService`` still guards
+    calls to them with ``getattr(database, name, None)``/``hasattr`` rather
+    than calling them directly, because the project's own lightweight test
+    doubles (e.g. ``tests/_run_service_helpers.py::_FakeDatabase``)
+    deliberately implement only a subset of this interface. Removing the
+    guards would make those doubles a breaking change across many tests for
+    no runtime benefit, since real ``DatabaseService`` always has them.
+    """
+
+    def close(self) -> None: ...
+
+    def begin_run(
+        self,
+        *,
+        run_id: str,
+        backend: str,
+        model: str,
+        prompt_name: str,
+        input_dir: str,
+        mode: str = "normal",
+        config: dict | None = None,
+        workers: int | None = None,
+        image_format: str | None = None,
+        max_width: int | None = None,
+        encode_quality: int | None = None,
+        grayscale: bool | None = None,
+        context_length: int | None = None,
+        reasoning_mode: str | None = None,
+        eval_batch_size: int | None = None,
+        physical_batch_size: int | None = None,
+        flash_attention: bool | None = None,
+        offload_kv_cache_to_gpu: bool | None = None,
+        max_completion_tokens: int | None = None,
+        temperature: float | None = None,
+        max_retries: int | None = None,
+        timeout_connect: int | None = None,
+        timeout_read: int | None = None,
+        performance_tps_floor: float | None = None,
+        performance_reload_elapsed_s: float | None = None,
+        performance_reload_streak: int | None = None,
+    ) -> None: ...
+
+    def complete_run(
+        self, run_id: str, *, metrics: dict | None = None, status: RunStatus | str = RunStatus.COMPLETED
+    ) -> None: ...
+
+    def fail_run(self, run_id: str, *, error: str, error_code: str | None = None) -> None: ...
+
+    def list_failed_images_for_retry(self) -> list[tuple[Path, str]]: ...
+
+    def count_lap_records(self) -> int: ...
+
+    def count_best_laps(self) -> int: ...
+
+    def count_review_cases(self, *, run_id: str | None = None, status: str | None = None) -> int: ...
+
+    # ── Optional (feature-detected via getattr/hasattr; see docstring) ──────
+
+    def reconcile_abandoned_runs(self) -> int: ...
+
+    def reconcile_interrupted_run(
+        self, run_id: str, *, status: RunStatus | str, error: str
+    ) -> None: ...
+
+    def record_discovery_inputs(
+        self,
+        *,
+        run_id: str,
+        discovery,
+        process_reason: str = "full_run",
+        dry_run: bool = False,
+    ) -> None: ...
+
+    def fail_preflight_run(self, run_id: str, *, error: str) -> None: ...
+
+    def record_runtime_snapshot(
+        self, *, run_id: str, diagnostic, snapshot_kind: str = "preflight"
+    ) -> str: ...
+
+    def selected_image_files(self, image_file_ids: list[str] | tuple[str, ...]) -> list[tuple[Path, str]]: ...
 
 
 class RunService:
@@ -112,7 +216,7 @@ class RunService:
         finally:
             database.close()
 
-    def _run_body(self, cfg, refs, log, options, run_id, database) -> str:
+    def _run_body(self, cfg, refs, log, options, run_id, database: RunServiceDatabase) -> str:
         emit_event(self.event_sink, EventType.RUN_STARTED, run_id=run_id)
         t_start = time.monotonic()
         current_results: list = []
@@ -151,95 +255,13 @@ class RunService:
                 )
                 return "failed"
 
-            input_files = sorted(find_input_files(cfg.input_dir), key=_mtime_sort_key)
-            input_images = [
-                path for path in input_files
-                if path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
-            ]
-            selected_files = _selected_files(database, options)
-            all_files = [path for path, _hash in selected_files] if selected_files is not None else input_files
-            all_images = [
-                path for path in all_files
-                if path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
-            ]
-            inventory_result = None
-            if options.retry_errors:
-                discovery, _retry_images = self._retry_error_discovery(database, all_images, log)
-                discovery = _limit_discovery_processable(
-                    discovery,
-                    options.max_images,
-                    log,
-                    label="retry image",
-                )
-            else:
-                from .image_service import ImageInventoryResult, ImageInventoryService
+            outcome = self._discover_images(cfg, log, options, database)
+            discovery = outcome.discovery
+            new_images = outcome.new_images
+            inventory_result = outcome.inventory_result
+            inventory = outcome.inventory
 
-                inventory = ImageInventoryService(database)
-                inventory_result = inventory.classify(all_images, force=options.force)
-                limited_discovery = _limit_discovery_processable(
-                    inventory_result.plan,
-                    options.max_images,
-                    log,
-                    label="processable image",
-                )
-                if limited_discovery is not inventory_result.plan:
-                    inventory_result = ImageInventoryResult(
-                        plan=limited_discovery,
-                        new_count=limited_discovery.process_count,
-                        existing_count=len(limited_discovery.existing_images),
-                        duplicate_count=limited_discovery.duplicate_count,
-                    )
-                discovery = limited_discovery
-            new_images = [(item.path, item.file_hash) for item in discovery.new_images]
-            discovery = _account_for_unselected_files(
-                discovery,
-                all_files=all_files,
-                selected_images=all_images,
-            )
-
-            event_data = _selection_payload(
-                total=discovery.total,
-                input_total=len(input_files),
-                selection_limit=options.max_images,
-                selected_count=len(selected_files) if selected_files is not None else None,
-                existing=len(discovery.existing_images),
-                duplicates=discovery.duplicate_count,
-                to_process=discovery.process_count,
-                dry_run=options.dry_run,
-                retry_errors=options.retry_errors,
-            )
-            emit_event(self.event_sink, EventType.IMAGES_DISCOVERED, run_id=run_id, **event_data)
-            limit_note = (
-                f", selection limit={options.max_images} of {len(all_images)} supported image(s)"
-                if options.max_images is not None
-                else ""
-            )
-            if options.max_images is None:
-                log.info(
-                    f"Input: {discovery.total} total, "
-                    f"{len(discovery.existing_images)} existing, "
-                    f"{discovery.duplicate_count} duplicate(s) skipped, "
-                    f"{discovery.process_count} to process"
-                )
-            else:
-                log.info(
-                    f"Input: {discovery.process_count} selected to process of {len(all_images)} supported image(s){limit_note}, "
-                    f"{len(discovery.existing_images)} existing, "
-                    f"{discovery.duplicate_count} duplicate(s) skipped, "
-                    f"{discovery.process_count} to process"
-                )
-            if selected_files is not None:
-                log.info(
-                    f"[selection] using {len(selected_files)} selected image(s) "
-                    f"from Images out of {len(input_images)} supported input image(s)"
-                )
-            if not options.dry_run and hasattr(database, "record_discovery_inputs"):
-                database.record_discovery_inputs(
-                    run_id=run_id,
-                    discovery=discovery,
-                    process_reason="retry_errors" if options.retry_errors else "force" if options.force else "full_run",
-                    dry_run=options.dry_run,
-                )
+            self._announce_discovery(log, run_id, options, database, outcome)
 
             if options.dry_run:
                 self._checkpoint()
@@ -278,56 +300,9 @@ class RunService:
             fail_count = sum(1 for result in current_results if result.status == "error")
             log.info(f"Processing complete: {ok_count} OK, {fail_count} failed")
 
-            review_result = self._rebuild(database).rebuild_outputs(
-                cfg,
-                refs,
-                log,
-                run_id=run_id,
+            return self._complete_run(
+                cfg, refs, log, options, run_id, database, discovery, ok_count, fail_count, t_start
             )
-
-            elapsed = self._elapsed_since(t_start)
-            cleaned_len = database.count_best_laps()
-            global_review_cases = len(review_result) if isinstance(review_result, list) else 0
-            review_cases = database.count_review_cases(run_id=run_id, status="open")
-
-            database.complete_run(
-                run_id,
-                metrics=_with_selection_limit(
-                    {
-                        "processed": ok_count + fail_count,
-                        "succeeded": ok_count,
-                        "failed": fail_count,
-                        "review_case_count": review_cases,
-                        "elapsed_s": round(elapsed, 2),
-                    },
-                    options,
-                ),
-            )
-
-            log.info(
-                f"[run] completed run={run_id} ok={ok_count} err={fail_count} "
-                f"dup={discovery.duplicate_count} review={review_cases} "
-                f"review_global={global_review_cases} best={cleaned_len} elapsed={elapsed:.1f}s"
-            )
-            emit_event(
-                self.event_sink,
-                EventType.RUN_FINISHED,
-                run_id=run_id,
-                **_with_selection_limit(
-                    {
-                        "status": "completed",
-                        "processed": ok_count + fail_count,
-                        "errors": fail_count,
-                        "duplicates": discovery.duplicate_count,
-                        "review_cases": review_cases,
-                        "global_review_cases": global_review_cases,
-                        "clean_snapshot": cleaned_len,
-                        "elapsed_s": elapsed,
-                    },
-                    options,
-                ),
-            )
-            return "completed"
         except RunCancelled:
             log.warning("Run cancelled by user after current safe checkpoint.")
             reconcile = getattr(database, "reconcile_interrupted_run", None)
@@ -358,6 +333,189 @@ class RunService:
             pass
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _complete_run(
+        self, cfg, refs, log, options, run_id: str, database: RunServiceDatabase,
+        discovery, ok_count: int, fail_count: int, t_start: float,
+    ) -> str:
+        """Rebuild outputs, persist final metrics, and emit RUN_FINISHED.
+
+        Extracted from `_run_body` (A-1 in the 2026-07-31 audit) — same
+        logic, no behavior change.
+        """
+        review_result = self._rebuild(database).rebuild_outputs(
+            cfg,
+            refs,
+            log,
+            run_id=run_id,
+        )
+
+        elapsed = self._elapsed_since(t_start)
+        cleaned_len = database.count_best_laps()
+        global_review_cases = len(review_result) if isinstance(review_result, list) else 0
+        review_cases = database.count_review_cases(run_id=run_id, status="open")
+
+        database.complete_run(
+            run_id,
+            metrics=_with_selection_limit(
+                {
+                    "processed": ok_count + fail_count,
+                    "succeeded": ok_count,
+                    "failed": fail_count,
+                    "review_case_count": review_cases,
+                    "elapsed_s": round(elapsed, 2),
+                },
+                options,
+            ),
+        )
+
+        log.info(
+            f"[run] completed run={run_id} ok={ok_count} err={fail_count} "
+            f"dup={discovery.duplicate_count} review={review_cases} "
+            f"review_global={global_review_cases} best={cleaned_len} elapsed={elapsed:.1f}s"
+        )
+        emit_event(
+            self.event_sink,
+            EventType.RUN_FINISHED,
+            run_id=run_id,
+            **_with_selection_limit(
+                {
+                    "status": "completed",
+                    "processed": ok_count + fail_count,
+                    "errors": fail_count,
+                    "duplicates": discovery.duplicate_count,
+                    "review_cases": review_cases,
+                    "global_review_cases": global_review_cases,
+                    "clean_snapshot": cleaned_len,
+                    "elapsed_s": elapsed,
+                },
+                options,
+            ),
+        )
+        return "completed"
+
+    def _discover_images(self, cfg, log, options, database: RunServiceDatabase) -> _DiscoveryOutcome:
+        """Determine which images to process this run.
+
+        Extracted from `_run_body` (A-1 in the 2026-07-31 audit) — same
+        logic, same variable names, no behavior change. Isolating this here
+        keeps `_run_body` focused on orchestration (log/emit/dispatch)
+        instead of also owning the discovery/inventory decision tree.
+        """
+        input_files = sorted(find_input_files(cfg.input_dir), key=_mtime_sort_key)
+        input_images = [
+            path for path in input_files
+            if path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+        ]
+        selected_files = _selected_files(database, options)
+        all_files = [path for path, _hash in selected_files] if selected_files is not None else input_files
+        all_images = [
+            path for path in all_files
+            if path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+        ]
+        inventory_result = None
+        inventory = None
+        if options.retry_errors:
+            discovery, _retry_images = self._retry_error_discovery(database, all_images, log)
+            discovery = _limit_discovery_processable(
+                discovery,
+                options.max_images,
+                log,
+                label="retry image",
+            )
+        else:
+            from .image_service import ImageInventoryResult, ImageInventoryService
+
+            inventory = ImageInventoryService(database)
+            inventory_result = inventory.classify(all_images, force=options.force)
+            limited_discovery = _limit_discovery_processable(
+                inventory_result.plan,
+                options.max_images,
+                log,
+                label="processable image",
+            )
+            if limited_discovery is not inventory_result.plan:
+                inventory_result = ImageInventoryResult(
+                    plan=limited_discovery,
+                    new_count=limited_discovery.process_count,
+                    existing_count=len(limited_discovery.existing_images),
+                    duplicate_count=limited_discovery.duplicate_count,
+                )
+            discovery = limited_discovery
+        new_images = [(item.path, item.file_hash) for item in discovery.new_images]
+        discovery = _account_for_unselected_files(
+            discovery,
+            all_files=all_files,
+            selected_images=all_images,
+        )
+        return _DiscoveryOutcome(
+            discovery=discovery,
+            new_images=new_images,
+            input_files=input_files,
+            input_images=input_images,
+            selected_files=selected_files,
+            all_images=all_images,
+            inventory_result=inventory_result,
+            inventory=inventory,
+        )
+
+    def _announce_discovery(
+        self, log, run_id: str, options, database: RunServiceDatabase, outcome: _DiscoveryOutcome
+    ) -> None:
+        """Emit the discovery event and log lines, and persist run inputs.
+
+        Extracted from `_run_body` (A-1 in the 2026-07-31 audit) — same
+        logic, no behavior change.
+        """
+        discovery = outcome.discovery
+        input_files = outcome.input_files
+        input_images = outcome.input_images
+        selected_files = outcome.selected_files
+        all_images = outcome.all_images
+
+        event_data = _selection_payload(
+            total=discovery.total,
+            input_total=len(input_files),
+            selection_limit=options.max_images,
+            selected_count=len(selected_files) if selected_files is not None else None,
+            existing=len(discovery.existing_images),
+            duplicates=discovery.duplicate_count,
+            to_process=discovery.process_count,
+            dry_run=options.dry_run,
+            retry_errors=options.retry_errors,
+        )
+        emit_event(self.event_sink, EventType.IMAGES_DISCOVERED, run_id=run_id, **event_data)
+        limit_note = (
+            f", selection limit={options.max_images} of {len(all_images)} supported image(s)"
+            if options.max_images is not None
+            else ""
+        )
+        if options.max_images is None:
+            log.info(
+                f"Input: {discovery.total} total, "
+                f"{len(discovery.existing_images)} existing, "
+                f"{discovery.duplicate_count} duplicate(s) skipped, "
+                f"{discovery.process_count} to process"
+            )
+        else:
+            log.info(
+                f"Input: {discovery.process_count} selected to process of {len(all_images)} supported image(s){limit_note}, "
+                f"{len(discovery.existing_images)} existing, "
+                f"{discovery.duplicate_count} duplicate(s) skipped, "
+                f"{discovery.process_count} to process"
+            )
+        if selected_files is not None:
+            log.info(
+                f"[selection] using {len(selected_files)} selected image(s) "
+                f"from Images out of {len(input_images)} supported input image(s)"
+            )
+        if not options.dry_run and hasattr(database, "record_discovery_inputs"):
+            database.record_discovery_inputs(
+                run_id=run_id,
+                discovery=discovery,
+                process_reason="retry_errors" if options.retry_errors else "force" if options.force else "full_run",
+                dry_run=options.dry_run,
+            )
 
     def _log_discovery_preview(self, log, discovery, new_images) -> None:
         for duplicate in discovery.duplicates:
@@ -423,7 +581,7 @@ class RunService:
         )
         return discovery, retry_images
 
-    def _preflight_lmstudio(self, cfg, log, run_id: str, database) -> bool:
+    def _preflight_lmstudio(self, cfg, log, run_id: str, database: RunServiceDatabase) -> bool:
         context = _lmstudio_preflight_context(cfg)
         try:
             log.info(
