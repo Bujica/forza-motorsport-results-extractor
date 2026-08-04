@@ -4,6 +4,7 @@ import logging
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 from threading import Lock, local
+from typing import Protocol, runtime_checkable
 
 from ..events import EventSink, EventType, emit_event
 from ..exceptions import PersistenceError
@@ -13,6 +14,44 @@ from ..schemas import ExtractionResult
 from .run_control import RunCancelled, RunControl
 
 _log = logging.getLogger("forza")
+
+
+@runtime_checkable
+class ExtractionServiceDatabase(Protocol):
+    """The subset of ``DatabaseService`` that ``ExtractionService`` actually calls.
+
+    ``DatabaseService`` itself implements every method here — this Protocol
+    exists to make the contract explicit (S-1 in the 2026-07-31 audit,
+    extending the same pattern already applied to ``RunServiceDatabase`` in
+    ``run_service.py``).
+
+    ``prepare_extraction_result`` is marked "optional" below: ``_prepare_result``
+    still guards it with ``getattr(self.database_service, name, None)`` rather
+    than calling it directly, because ``tests/test_extraction_persistence.py::
+    _FailingDb`` — a deliberately minimal test double that implements only
+    ``upsert_image_and_laps`` — relies on that guard to reach the failure
+    scenario it's actually testing without an unrelated AttributeError first.
+    The other three methods below are called directly (no guard) once
+    ``database_service`` is not ``None``, since every real caller either
+    passes a full ``DatabaseService`` or nothing at all.
+
+    Unlike ``RunServiceDatabase``, ``ExtractionService.database_service`` can
+    legitimately be ``None`` (extraction without persistence) — callers check
+    ``self.database_service is None`` explicitly before use; this Protocol
+    only describes the shape once it's present.
+    """
+
+    def upsert_image_and_laps(
+        self, result: ExtractionResult, *, run_id: str, gamertag: str | None = None
+    ) -> int: ...
+
+    def record_extraction_attempt(self, *, prepared, attempt, run_id: str) -> str: ...
+
+    def record_runtime_snapshot(self, *, run_id: str, diagnostic, snapshot_kind: str = "preflight") -> str: ...
+
+    # ── Optional (feature-detected via getattr; see docstring) ─────────
+
+    def prepare_extraction_result(self, *, run_id: str, file_hash: str, path: Path): ...
 
 
 class ExtractionService:
@@ -27,7 +66,7 @@ class ExtractionService:
     def __init__(
         self,
         *,
-        database_service=None,   # DatabaseService | None — avoids circular import
+        database_service: ExtractionServiceDatabase | None = None,
         event_sink: EventSink | None = None,
         run_control: RunControl | None = None,
     ):

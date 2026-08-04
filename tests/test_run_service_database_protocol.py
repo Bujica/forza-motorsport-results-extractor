@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from forza.application.database_service import DatabaseService
+from forza.application.extraction_service import ExtractionServiceDatabase
 from forza.application.run_service import RunServiceDatabase
 
 
@@ -14,5 +15,15 @@ def test_database_service_satisfies_run_service_database_protocol(tmp_path) -> N
     db = DatabaseService(tmp_path / "forza.sqlite3", auto_upgrade=True)
     try:
         assert isinstance(db, RunServiceDatabase)
+    finally:
+        db.close()
+
+
+def test_database_service_satisfies_extraction_service_database_protocol(tmp_path) -> None:
+    """Same contract check for ExtractionServiceDatabase (S-1), the analogous
+    Protocol for what ExtractionService needs from `database_service`."""
+    db = DatabaseService(tmp_path / "forza.sqlite3", auto_upgrade=True)
+    try:
+        assert isinstance(db, ExtractionServiceDatabase)
     finally:
         db.close()
