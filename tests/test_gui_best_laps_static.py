@@ -239,7 +239,11 @@ def test_best_laps_view_has_required_filters_and_actions() -> None:
     assert "\"mine\"" not in source
     assert "(\"Lap\", self.dirty_filter)" in source
     assert "QLabel(\"Best Laps\")" not in source
-    assert "ResizeToContents" in source
+    assert "Interactive" in source
+    assert "col_widths = {" in source
+    assert "# Driver — gamertags vary in length" in source
+    assert "# Car — car names like \"Ford Mustang '68\"" in source
+    assert "# Best Lap — lap times (MM:SS.mmm)" in source
     assert "resizeColumnsToContents" not in source
     assert "combo.currentTextChanged.connect(lambda _text: self._emit_filters_changed())" in source
     assert "changed |= self._sync_combo(self.driver_filter" in source

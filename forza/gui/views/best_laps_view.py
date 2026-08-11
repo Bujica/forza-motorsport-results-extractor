@@ -153,7 +153,18 @@ class BestLapsView(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        # Set column widths tuned to typical data sizes.
+        col_widths = {
+            0: 140,   # Driver — gamertags vary in length
+            1: 150,   # Car — car names like "Ford Mustang '68"
+            2: 95,    # Best Lap — lap times (MM:SS.mmm)
+            3: 75,    # Weather — short labels ("Dry", "Rain")
+            4: 80,    # Temp — temperature values ("66°F")
+            5: 120,   # Source — source file names or labels
+        }
+        for col, width in col_widths.items():
+            self.table.setColumnWidth(col, width)
         self.table.clicked.connect(self._handle_table_click)
         layout.addWidget(self.table, 1)
         return card

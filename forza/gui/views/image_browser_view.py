@@ -142,7 +142,19 @@ class ImageBrowserView(QWidget):
         self.table.setSortingEnabled(True)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        # Set column widths tuned to typical data sizes.
+        col_widths = {
+            0: 320,   # Name — file names can be long
+            1: 95,    # Race Date — ISO dates (YYYY-MM-DD)
+            2: 320,   # Semantic — semantic names similar to file names
+            3: 85,    # File — short status labels
+            4: 100,   # Duplicate — "Duplicate" / "Canonical" / empty
+            5: 95,    # Process — short status labels
+            6: 120,   # Best laps — short status labels
+        }
+        for col, width in col_widths.items():
+            self.table.setColumnWidth(col, width)
         self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
         layout.addWidget(self.table, 1)
         return card
@@ -175,7 +187,7 @@ class ImageBrowserView(QWidget):
     def set_images(self, images: list[ImageFile]) -> None:
         self._images = list(images)
         self._model.set_images(self._images)
-        self.table.resizeColumnsToContents()
+        # Don't call resizeColumnsToContents() — Interactive mode with default widths is much faster.
         self._selected_ids = []
         self.action_bar.set_selection([])
         self._render_selection([], None)
