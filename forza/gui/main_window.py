@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, QRect
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -18,6 +18,34 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+def _main_window_size() -> tuple[int, int]:
+    """Return (width, height) for the main window based on screen geometry."""
+    screen = QApplication.primaryScreen()
+    if screen is not None:
+        geo: QRect = screen.availableGeometry()
+        avail_w = geo.width()
+        avail_h = geo.height()
+        win_w = min(int(avail_w * 0.92), 1600)
+        win_h = min(int(avail_h * 0.88), 950)
+    else:
+        win_w = 1280
+        win_h = 820
+    return (win_w, win_h)
+
+
+def _main_window_min_size() -> tuple[int, int]:
+    """Return minimum (width, height) for the main window."""
+    screen = QApplication.primaryScreen()
+    if screen is not None:
+        geo: QRect = screen.availableGeometry()
+        min_w = max(int(geo.width() * 0.55), 960)
+        min_h = max(int(geo.height() * 0.45), 600)
+    else:
+        min_w = 1024
+        min_h = 700
+    return (min_w, min_h)
 
 from ..app_info import (
     APP_NAME,
@@ -89,7 +117,10 @@ class MainWindow(QMainWindow):
     def __init__(self, *, cfg: Any, config_path: str, debug: bool, database_path: str, schema_state: str) -> None:
         super().__init__()
         self.setWindowTitle(APP_DISPLAY_VERSION)
-        self.resize(1280, 820)
+        win_w, win_h = _main_window_size()
+        self.resize(win_w, win_h)
+        min_w, min_h = _main_window_min_size()
+        self.setMinimumSize(min_w, min_h)
 
         self._config_state = GuiConfigState(cfg=cfg, config_path=config_path, parent=self)
         self._cfg = self._config_state.current

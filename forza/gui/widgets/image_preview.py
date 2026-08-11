@@ -2,9 +2,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QRect
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+
+
+def _preview_min_size() -> tuple[int, int]:
+    """Return (min_width, min_height) for the preview label based on screen geometry."""
+    screen = QApplication.primaryScreen()
+    if screen is not None:
+        geo: QRect = screen.availableGeometry()
+        avail_h = geo.height()
+        avail_w = geo.width()
+        min_h = max(180, int(avail_h * 0.25))
+        min_w = max(240, int(avail_w * 0.30))
+    else:
+        min_h = 360
+        min_w = 420
+    return (min_w, min_h)
 
 
 class ImagePreview(QWidget):
@@ -15,7 +30,8 @@ class ImagePreview(QWidget):
         self._label = QLabel("Select a case to preview the image.")
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._label.setObjectName("imagePreview")
-        self._label.setMinimumSize(420, 360)
+        min_w, min_h = _preview_min_size()
+        self._label.setMinimumSize(min_w, min_h)
         self._label.setWordWrap(True)
 
         layout = QVBoxLayout(self)

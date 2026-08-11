@@ -66,8 +66,11 @@ def test_review_view_matches_approved_three_panel_layout_and_actions() -> None:
     assert "QTableWidget(0, 6)" in source
     assert "ResizeToContents" in source
     assert "setDefaultSectionSize(24)" in source
-    assert "setMinimumHeight(_lap_table_height(self.laps, rows=13))" in source
-    assert "def _lap_table_height(table: QTableWidget, *, rows: int)" in source
+    assert "QScrollArea()" in source
+    assert "scroll.setWidgetResizable(True)" in source
+    assert "def _review_split_sizes() -> tuple[tuple[int, int], tuple[int, int]]" in source
+    assert "left.setSizes(list(left_sizes))" in source
+    assert "main.setSizes(list(main_sizes))" in source
     assert "QShortcut(QKeySequence(key), self)" in source
     assert "\"Up\", self.previous_requested.emit" in source
     assert "\"Down\", self.next_requested.emit" in source

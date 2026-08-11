@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QRect
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QApplication,
     QAbstractItemView,
     QDialog,
     QDialogButtonBox,
@@ -13,6 +15,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -28,6 +31,31 @@ from ..widgets.image_preview import ImagePreview
 from ..widgets.status_badge import StatusBadge
 
 
+def _image_detail_dialog_size() -> tuple[int, int]:
+    """Return (width, height) for the image detail dialog based on screen geometry."""
+    screen = QApplication.primaryScreen()
+    if screen is not None:
+        geo: QRect = screen.availableGeometry()
+        win_w = min(int(geo.width() * 0.85), 1400)
+        win_h = min(int(geo.height() * 0.82), 900)
+    else:
+        win_w, win_h = 1180, 760
+    return (win_w, win_h)
+
+
+def _image_detail_split_sizes() -> tuple[int, int]:
+    """Return preview/detail splitter sizes proportional to window width."""
+    screen = QApplication.primaryScreen()
+    if screen is not None:
+        geo: QRect = screen.availableGeometry()
+        content_w = int(geo.width() * 0.85)
+        preview = int(content_w * 0.42)
+        detail = content_w - preview
+    else:
+        preview, detail = 520, 620
+    return (preview, detail)
+
+
 class ImageDetailDialog(QDialog):
     open_debug_requested = Signal(str)
     previous_image_requested = Signal()
@@ -36,7 +64,8 @@ class ImageDetailDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Image Details")
-        self.resize(1180, 760)
+        win_w, win_h = _image_detail_dialog_size()
+        self.resize(win_w, win_h)
         self._extraction_result_ids: list[str] = []
         self._selected_extraction_result_id: str | None = None
         self._build_ui()
@@ -59,7 +88,8 @@ class ImageDetailDialog(QDialog):
         splitter = QSplitter()
         splitter.addWidget(self._build_preview_panel())
         splitter.addWidget(self._build_detail_tabs())
-        splitter.setSizes([520, 620])
+        preview_w, detail_w = _image_detail_split_sizes()
+        splitter.setSizes([preview_w, detail_w])
         root.addWidget(splitter, 1)
 
         buttons = QHBoxLayout()
@@ -109,7 +139,15 @@ class ImageDetailDialog(QDialog):
     def _build_metadata_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        scroll_layout.setContentsMargins(12, 12, 12, 12)
+
         self.metadata_grid = QGridLayout()
         self.metadata_grid.setHorizontalSpacing(10)
         self.metadata_grid.setVerticalSpacing(8)
@@ -135,8 +173,11 @@ class ImageDetailDialog(QDialog):
             self.metadata_labels[field] = value
             self.metadata_grid.addWidget(key, row, 0)
             self.metadata_grid.addWidget(value, row, 1)
-        layout.addLayout(self.metadata_grid)
-        layout.addStretch(1)
+        scroll_layout.addLayout(self.metadata_grid)
+        scroll_layout.addStretch(1)
+
+        scroll.setWidget(scroll_widget)
+        layout.addWidget(scroll, 1)
         return page
 
     def _build_laps_tab(self) -> QWidget:
@@ -164,7 +205,15 @@ class ImageDetailDialog(QDialog):
     def _build_extractions_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        scroll_layout.setContentsMargins(12, 12, 12, 12)
+
         self.extractions_table = QTableWidget(0, 8)
         self.extractions_table.setHorizontalHeaderLabels([
             "Created", "Status", "Run", "Backend", "Model", "Prompt", "Raw", "Parsed"
@@ -175,13 +224,24 @@ class ImageDetailDialog(QDialog):
         self.extractions_table.horizontalHeader().setStretchLastSection(True)
         self.extractions_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.extractions_table.clicked.connect(self._on_extraction_selected)
-        layout.addWidget(self.extractions_table, 1)
+        scroll_layout.addWidget(self.extractions_table, 1)
+
+        scroll.setWidget(scroll_widget)
+        layout.addWidget(scroll, 1)
         return page
 
     def _build_attempts_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        scroll_layout.setContentsMargins(12, 12, 12, 12)
+
         self.attempts_table = QTableWidget(0, 12)
         self.attempts_table.setHorizontalHeaderLabels([
             "#", "Reason", "Status", "Accepted", "Rejected", "Model", "Instance",
@@ -190,7 +250,10 @@ class ImageDetailDialog(QDialog):
         self.attempts_table.verticalHeader().setVisible(False)
         self.attempts_table.horizontalHeader().setStretchLastSection(True)
         self.attempts_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        layout.addWidget(self.attempts_table, 1)
+        scroll_layout.addWidget(self.attempts_table, 1)
+
+        scroll.setWidget(scroll_widget)
+        layout.addWidget(scroll, 1)
         return page
 
     def set_navigation_state(self, *, has_previous: bool, has_next: bool) -> None:

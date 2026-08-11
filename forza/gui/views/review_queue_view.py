@@ -3,9 +3,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QRect
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QAbstractItemView,
     QComboBox,
     QFrame,
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QStackedWidget,
     QSplitter,
@@ -31,6 +33,28 @@ from ..models.review_table_model import ReviewTableModel
 from ..widgets.card import make_card
 from ..widgets.filter_controls import fit_combo_to_contents, resize_combo_to_contents
 from ..widgets.image_preview import ImagePreview
+
+
+def _review_split_sizes() -> tuple[tuple[int, int], tuple[int, int]]:
+    """Return (main_horizontal_sizes, left_vertical_sizes) proportional to screen."""
+    from ..theme import SIDEBAR_WIDTH
+
+    screen = QApplication.primaryScreen()
+    if screen is not None:
+        geo: QRect = screen.availableGeometry()
+        content_w = max(geo.width() - SIDEBAR_WIDTH, 800)
+        # Main horizontal: left (preview+queue) gets ~58%, right (detail) gets ~42%
+        main_left = int(content_w * 0.58)
+        main_right = content_w - main_left
+        # Inner vertical: preview gets ~60%, queue gets ~40%
+        avail_h = max(geo.height() - 100, 400)  # subtract filter bar + margins
+        left_preview = int(avail_h * 0.60)
+        left_queue = avail_h - left_preview
+    else:
+        main_left, main_right = 760, 520
+        left_preview, left_queue = 520, 300
+
+    return ((main_left, main_right), (left_preview, left_queue))
 
 
 class ReviewQueueView(QWidget):
@@ -71,10 +95,11 @@ class ReviewQueueView(QWidget):
         left = QSplitter(Qt.Orientation.Vertical)
         left.addWidget(self._build_preview_panel())
         left.addWidget(self._build_queue_panel())
-        left.setSizes([520, 300])
+        (main_sizes, left_sizes) = _review_split_sizes()
+        left.setSizes(list(left_sizes))
         main.addWidget(left)
         main.addWidget(self._build_detail_panel())
-        main.setSizes([760, 520])
+        main.setSizes(list(main_sizes))
         root.addWidget(main, 1)
 
     def _build_filter_bar(self) -> QFrame:
@@ -159,6 +184,14 @@ class ReviewQueueView(QWidget):
         title.setObjectName("cardTitle")
         layout.addWidget(title)
 
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(8)
+
         self.detail_grid = QGridLayout()
         self.detail_grid.setHorizontalSpacing(10)
         self.detail_grid.setVerticalSpacing(8)
@@ -171,24 +204,24 @@ class ReviewQueueView(QWidget):
             self.detail_labels[field] = value
             self.detail_grid.addWidget(key, row, 0)
             self.detail_grid.addWidget(value, row, 1)
-        layout.addLayout(self.detail_grid)
+        scroll_layout.addLayout(self.detail_grid)
 
         self.reason_note = QLabel("")
         self.reason_note.setObjectName("mutedLabel")
         self.reason_note.setWordWrap(True)
-        layout.addWidget(self.reason_note)
+        scroll_layout.addWidget(self.reason_note)
 
         suggestions_label = QLabel("Suggestions")
         suggestions_label.setObjectName("mutedLabel")
-        layout.addWidget(suggestions_label)
+        scroll_layout.addWidget(suggestions_label)
         self.suggestions = QTextEdit()
         self.suggestions.setReadOnly(True)
         self.suggestions.setMaximumHeight(120)
-        layout.addWidget(self.suggestions)
+        scroll_layout.addWidget(self.suggestions)
 
         laps_label = QLabel("Laps extracted from image")
         laps_label.setObjectName("mutedLabel")
-        layout.addWidget(laps_label)
+        scroll_layout.addWidget(laps_label)
         self.laps = QTableWidget(0, 6)
         self.laps.setHorizontalHeaderLabels(["#", "Driver", "Car", "Class", "Best lap", "Flags"])
         self.laps.verticalHeader().setVisible(False)
@@ -196,8 +229,7 @@ class ReviewQueueView(QWidget):
         self.laps.horizontalHeader().setStretchLastSection(True)
         self.laps.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.laps.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
-        self.laps.setMinimumHeight(_lap_table_height(self.laps, rows=13))
-        layout.addWidget(self.laps)
+        scroll_layout.addWidget(self.laps)
 
         self.action_stack = QStackedWidget()
         self.action_stack.addWidget(self._build_dirty_actions())
@@ -207,11 +239,14 @@ class ReviewQueueView(QWidget):
         self.action_stack.addWidget(self._build_car_actions())
         self.action_stack.addWidget(self._build_driver_name_actions())
         self.action_stack.addWidget(self._build_generic_actions())
-        layout.addWidget(self.action_stack)
+        scroll_layout.addWidget(self.action_stack)
         self.primary_hint = QLabel("")
         self.primary_hint.setObjectName("mutedLabel")
         self.primary_hint.setWordWrap(True)
-        layout.addWidget(self.primary_hint)
+        scroll_layout.addWidget(self.primary_hint)
+
+        scroll.setWidget(scroll_widget)
+        layout.addWidget(scroll, 1)
 
         footer = QHBoxLayout()
         self.ignore_button = QPushButton("Ignore case")
