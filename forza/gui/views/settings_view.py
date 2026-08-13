@@ -124,7 +124,11 @@ class SettingsView(QWidget):
         self.settings_table.setAlternatingRowColors(True)
         self.settings_table.verticalHeader().setVisible(False)
         self.settings_table.horizontalHeader().setStretchLastSection(True)
-        self.settings_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # Mixed modes: Field fixed, Value ResizeToContents (variável), Status fixed.
+        self.settings_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.settings_table.setColumnWidth(0, 160)
+        self.settings_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.settings_table.setColumnWidth(2, 75)
         self.settings_table.verticalHeader().setDefaultSectionSize(24)
         layout.addWidget(self.settings_table, 1)
         return card

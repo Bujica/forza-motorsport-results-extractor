@@ -158,7 +158,29 @@ class ReviewQueueView(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # Mixed modes: #, Outcome, Reason, Trigger fixed; Decision ResizeToContents (variável); Driver Interactive.
+        for col in range(self._model.columnCount()):
+            if col == 0:
+                self.table.setColumnWidth(col, 35)
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 1:
+                self.table.setColumnWidth(col, 90)
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 2:
+                self.table.setColumnWidth(col, 95)
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 3:
+                self.table.setColumnWidth(col, 100)
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 4:
+                # Decision — variável (ex: "Track: X -> Y")
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+            elif col == 5:
+                self.table.setColumnWidth(col, 140)
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+            elif col == 6:
+                self.table.setColumnWidth(col, 105)
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
         self.table.clicked.connect(self._on_table_clicked)
         layout.addWidget(self.table, 1)
         return card
@@ -227,7 +249,26 @@ class ReviewQueueView(QWidget):
         self.laps.verticalHeader().setVisible(False)
         self.laps.verticalHeader().setDefaultSectionSize(24)
         self.laps.horizontalHeader().setStretchLastSection(True)
-        self.laps.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # Mixed modes: quase tudo Fixed; Driver Interactive.
+        for col in range(self.laps.columnCount()):
+            if col == 0:
+                self.laps.setColumnWidth(col, 35)
+                self.laps.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 1:
+                self.laps.setColumnWidth(col, 140)
+                self.laps.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+            elif col == 2:
+                self.laps.setColumnWidth(col, 150)
+                self.laps.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 3:
+                self.laps.setColumnWidth(col, 70)
+                self.laps.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 4:
+                self.laps.setColumnWidth(col, 105)
+                self.laps.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 5:
+                self.laps.setColumnWidth(col, 80)
+                self.laps.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
         self.laps.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         scroll_layout.addWidget(self.laps)
 

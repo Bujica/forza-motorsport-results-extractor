@@ -188,7 +188,29 @@ class ImageDetailDialog(QDialog):
         self.laps_table.setHorizontalHeaderLabels(["#", "Track", "Class", "Driver", "Car", "Best Lap", "Flags"])
         self.laps_table.verticalHeader().setVisible(False)
         self.laps_table.horizontalHeader().setStretchLastSection(True)
-        self.laps_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        # Mixed modes: #, Class, Car, Best Lap, Flags fixed; Track ResizeToContents (variável); Driver Interactive.
+        for col in range(self.laps_table.columnCount()):
+            if col == 0:
+                self.laps_table.setColumnWidth(col, 35)
+                self.laps_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 1:
+                # Track — nome de pista longo e variável
+                self.laps_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+            elif col == 2:
+                self.laps_table.setColumnWidth(col, 70)
+                self.laps_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 3:
+                self.laps_table.setColumnWidth(col, 140)
+                self.laps_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+            elif col == 4:
+                self.laps_table.setColumnWidth(col, 150)
+                self.laps_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 5:
+                self.laps_table.setColumnWidth(col, 105)
+                self.laps_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 6:
+                self.laps_table.setColumnWidth(col, 80)
+                self.laps_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
         layout.addWidget(self.laps_table, 1)
         return page
 
@@ -222,7 +244,32 @@ class ImageDetailDialog(QDialog):
         self.extractions_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.extractions_table.verticalHeader().setVisible(False)
         self.extractions_table.horizontalHeader().setStretchLastSection(True)
-        self.extractions_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # Mixed modes: Created, Status, Run, Backend, Model, Raw, Parsed fixed; Prompt ResizeToContents (variável).
+        for col in range(self.extractions_table.columnCount()):
+            if col == 0:
+                self.extractions_table.setColumnWidth(col, 140)
+                self.extractions_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 1:
+                self.extractions_table.setColumnWidth(col, 75)
+                self.extractions_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 2:
+                self.extractions_table.setColumnWidth(col, 90)
+                self.extractions_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 3:
+                self.extractions_table.setColumnWidth(col, 85)
+                self.extractions_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 4:
+                self.extractions_table.setColumnWidth(col, 85)
+                self.extractions_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 5:
+                # Prompt — nome de prompt variável, pode ser longo
+                self.extractions_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+            elif col == 6:
+                self.extractions_table.setColumnWidth(col, 70)
+                self.extractions_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 7:
+                self.extractions_table.setColumnWidth(col, 85)
+                self.extractions_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
         self.extractions_table.clicked.connect(self._on_extraction_selected)
         scroll_layout.addWidget(self.extractions_table, 1)
 
@@ -249,7 +296,44 @@ class ImageDetailDialog(QDialog):
         ])
         self.attempts_table.verticalHeader().setVisible(False)
         self.attempts_table.horizontalHeader().setStretchLastSection(True)
-        self.attempts_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # Mixed modes: quase tudo Fixed; Issues ResizeToContents (variável, pode ser longa).
+        for col in range(self.attempts_table.columnCount()):
+            if col == 0:
+                self.attempts_table.setColumnWidth(col, 35)
+                self.attempts_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 1:
+                self.attempts_table.setColumnWidth(col, 100)
+                self.attempts_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 2:
+                self.attempts_table.setColumnWidth(col, 75)
+                self.attempts_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 3:
+                self.attempts_table.setColumnWidth(col, 65)
+                self.attempts_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 4:
+                self.attempts_table.setColumnWidth(col, 65)
+                self.attempts_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 5:
+                self.attempts_table.setColumnWidth(col, 85)
+                self.attempts_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 6:
+                self.attempts_table.setColumnWidth(col, 100)
+                self.attempts_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 7:
+                self.attempts_table.setColumnWidth(col, 75)
+                self.attempts_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 8:
+                self.attempts_table.setColumnWidth(col, 65)
+                self.attempts_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 9:
+                self.attempts_table.setColumnWidth(col, 90)
+                self.attempts_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 10:
+                self.attempts_table.setColumnWidth(col, 70)
+                self.attempts_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 11:
+                # Issues — descrição variável, pode ser longa
+                self.attempts_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         scroll_layout.addWidget(self.attempts_table, 1)
 
         scroll.setWidget(scroll_widget)

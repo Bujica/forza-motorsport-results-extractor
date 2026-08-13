@@ -48,7 +48,20 @@ class DbDoctorView(QWidget):
         self.table.setHorizontalHeaderLabels(["Result", "Count", "Check", "Description"])
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # Mixed modes: Result, Count, Check fixed; Description ResizeToContents (variável).
+        for col in range(self.table.columnCount()):
+            if col == 0:
+                self.table.setColumnWidth(col, 80)
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 1:
+                self.table.setColumnWidth(col, 65)
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 2:
+                self.table.setColumnWidth(col, 200)
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif col == 3:
+                # Description — explicação variável, pode ser longa
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         root.addWidget(self.table, 1)
 
     def _build_header(self) -> QFrame:

@@ -84,7 +84,26 @@ class ImageDebugView(QWidget):
         self.table.setSortingEnabled(True)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # Mixed modes: Image Interactive (nomes longos); Race Date, File, Process fixed; Best/Latest/Run/Model fixed; Attempts/Laps/Reviews fixed.
+        col_widths = {
+            0: 280,   # Image — nomes de arquivo longos
+            1: 95,    # Race Date — ISO dates
+            2: 85,    # File — status curto
+            3: 85,    # Process — status curto
+            4: 100,   # Best — status curto
+            5: 100,   # Latest — status curto
+            6: 90,    # Run — ID curto
+            7: 85,    # Model — nome curto
+            8: 65,    # Attempts — número
+            9: 55,    # Laps — número
+            10: 60,   # Reviews — número
+        }
+        for col in range(self._model.columnCount()):
+            self.table.setColumnWidth(col, col_widths[col])
+            if col == 0:
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+            else:
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
         self.table.clicked.connect(self._on_table_clicked)
         layout.addWidget(self.table, 1)
         return card
