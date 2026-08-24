@@ -20,7 +20,7 @@ Fields:
         cl: Class (PI Number+Letter). If the class letter is in a small separate box, include it, e.g. "PI 400 D".
         bl: Best lap ("MM:SS.mmm" | null). Read only the BEST LAP cell. If that cell shows a time, return that time. If another column such as TOTAL says DNF, still return the BEST LAP time. Return null only when the BEST LAP cell itself is empty, --, ---, DNF, or DNQ.
 Rules:
-    1. The warning-shaped dirty-lap icon is the ONLY dirty indicator. It must be immediately beside that driver's best lap time in the same best-lap cell. Do not use row color, text color, penalties, position, car/class columns, or icons elsewhere as dirty evidence.
+    1. The warning-shaped dirty-lap icon is the ONLY dirty indicator. It appears as a triangle pointing upwards, located immediately to the right of the time digits within the BEST LAP cell. Do not assume a lap is dirty based on text color changes or row highlighting; only append ▲ if this specific triangular icon is visually present.
     2. If the BEST LAP cell has a warning icon beside its time, append ▲ (e.g., "07:23.097▲"), including rows where TOTAL is DNF. Otherwise, return only the time (e.g., "00:34.149")
     3. Include all drivers, even if DNF
 """,
