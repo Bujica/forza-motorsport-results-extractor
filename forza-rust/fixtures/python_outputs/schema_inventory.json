@@ -1,0 +1,3416 @@
+{
+  "tables": {
+    "alembic_version": {
+      "columns": [
+        {
+          "name": "version_num",
+          "type": "VARCHAR(32)",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        }
+      ],
+      "indexes": [
+        {
+          "name": "sqlite_autoindex_alembic_version_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "version_num"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [],
+      "checks": [],
+      "create_sql": "CREATE TABLE alembic_version (\n\tversion_num VARCHAR(32) NOT NULL, \n\tCONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)\n)"
+    },
+    "export_artifacts": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "artifact_type",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "file_path",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "relative_path",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "sha256",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "size_bytes",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "sqlite_autoindex_export_artifacts_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "run_id",
+          "table": "extraction_runs",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "SET NULL"
+        }
+      ],
+      "checks": [
+        "CONSTRAINT ck_export_artifacts_size_nonnegative CHECK (size_bytes IS NULL OR size_bytes >= 0),"
+      ],
+      "create_sql": "CREATE TABLE export_artifacts (\n\tid VARCHAR NOT NULL, \n\trun_id VARCHAR, \n\tartifact_type VARCHAR NOT NULL, \n\tfile_path VARCHAR NOT NULL, \n\trelative_path VARCHAR, \n\tsha256 VARCHAR, \n\tsize_bytes INTEGER, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tCONSTRAINT ck_export_artifacts_size_nonnegative CHECK (size_bytes IS NULL OR size_bytes >= 0), \n\tFOREIGN KEY(run_id) REFERENCES extraction_runs (id) ON DELETE SET NULL\n)"
+    },
+    "external_lap_records": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "import_id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "track",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "track_normalized",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "race_class",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "driver",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "driver_normalized",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "car",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "car_normalized",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "weather",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "best_lap",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "best_lap_ms",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "active",
+          "type": "BOOLEAN",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_external_lap_records_active_order",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "track",
+            "race_class",
+            "best_lap_ms"
+          ],
+          "partial_where": "WHERE active = 1"
+        },
+        {
+          "name": "sqlite_autoindex_external_lap_records_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "import_id",
+          "table": "external_record_imports",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "CASCADE"
+        }
+      ],
+      "checks": [
+        "CONSTRAINT ck_external_lap_records_weather_vocab CHECK (weather IN ('dry', 'rain', 'unknown')),",
+        "CONSTRAINT ck_external_lap_records_best_lap_ms CHECK (best_lap_ms >= 0))"
+      ],
+      "create_sql": "CREATE TABLE external_lap_records (\n\tid VARCHAR NOT NULL, \n\timport_id VARCHAR NOT NULL, \n\ttrack VARCHAR NOT NULL, \n\ttrack_normalized VARCHAR, \n\trace_class VARCHAR NOT NULL, \n\tdriver VARCHAR NOT NULL, \n\tdriver_normalized VARCHAR, \n\tcar VARCHAR NOT NULL, \n\tcar_normalized VARCHAR, \n\tweather VARCHAR NOT NULL, \n\tbest_lap VARCHAR NOT NULL, \n\tbest_lap_ms INTEGER NOT NULL, \n\tactive BOOLEAN NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(import_id) REFERENCES external_record_imports (id) ON DELETE CASCADE\n,\n\tCONSTRAINT ck_external_lap_records_weather_vocab CHECK (weather IN ('dry', 'rain', 'unknown')),\n\tCONSTRAINT ck_external_lap_records_best_lap_ms CHECK (best_lap_ms >= 0))"
+    },
+    "external_record_imports": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "source_path",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_hash",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "active",
+          "type": "BOOLEAN",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "total_rows",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "accepted_rows",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "rejected_rows",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "issue_count",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "issues_json",
+          "type": "JSON",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "imported_at",
+          "type": "DATETIME",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "activated_at",
+          "type": "DATETIME",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "sqlite_autoindex_external_record_imports_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [],
+      "checks": [
+        "CONSTRAINT ck_external_record_imports_total_rows CHECK (total_rows >= 0),",
+        "CONSTRAINT ck_external_record_imports_accepted_rows CHECK (accepted_rows >= 0),",
+        "CONSTRAINT ck_external_record_imports_rejected_rows CHECK (rejected_rows >= 0),",
+        "CONSTRAINT ck_external_record_imports_issue_count CHECK (issue_count >= 0)",
+        "CONSTRAINT ck_external_record_imports_status_vocab CHECK (status IN ('pending', 'active', 'failed')))"
+      ],
+      "create_sql": "CREATE TABLE external_record_imports (\n\tid VARCHAR NOT NULL, \n\tsource_path VARCHAR NOT NULL, \n\tsource_hash VARCHAR, \n\tstatus VARCHAR NOT NULL, \n\tactive BOOLEAN NOT NULL, \n\ttotal_rows INTEGER DEFAULT 0 NOT NULL, \n\taccepted_rows INTEGER DEFAULT 0 NOT NULL, \n\trejected_rows INTEGER DEFAULT 0 NOT NULL, \n\tissue_count INTEGER DEFAULT 0 NOT NULL, \n\tissues_json JSON, \n\tcreated_at DATETIME NOT NULL, \n\timported_at DATETIME, \n\tactivated_at DATETIME, \n\tPRIMARY KEY (id), \n\tCONSTRAINT ck_external_record_imports_total_rows CHECK (total_rows >= 0), \n\tCONSTRAINT ck_external_record_imports_accepted_rows CHECK (accepted_rows >= 0), \n\tCONSTRAINT ck_external_record_imports_rejected_rows CHECK (rejected_rows >= 0), \n\tCONSTRAINT ck_external_record_imports_issue_count CHECK (issue_count >= 0)\n,\n\tCONSTRAINT ck_external_record_imports_status_vocab CHECK (status IN ('pending', 'active', 'failed')))"
+    },
+    "extraction_attempts": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "extraction_result_id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "image_file_id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "runtime_snapshot_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "attempt_number",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "attempt_reason",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "accepted",
+          "type": "BOOLEAN",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "rejected_reason",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "http_status",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "error_code",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "error_message",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "model",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "model_instance_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "request_image_format",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "request_image_mime_type",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "request_image_width",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "request_image_height",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "request_image_bytes",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "context_length",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reasoning_mode",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "request_config_json",
+          "type": "JSON",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "request_messages_json",
+          "type": "JSON",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "request_hash",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "retry_instruction_text",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "raw_response",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "parsed_json",
+          "type": "JSON",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "parse_error",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "validation_status",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "validation_issues_json",
+          "type": "JSON",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "response_stats_json",
+          "type": "JSON",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "model_load_config_json",
+          "type": "JSON",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "input_tokens",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "output_tokens",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reasoning_tokens",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "total_tokens",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "time_to_first_token_s",
+          "type": "FLOAT",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "duration_ms",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "tokens_per_second",
+          "type": "FLOAT",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "model_load_time_s",
+          "type": "FLOAT",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_attempts_run_status",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "run_id",
+            "status"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_attempts_reason",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "attempt_reason"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_attempts_one_accepted_per_result",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "extraction_result_id"
+          ],
+          "partial_where": "WHERE accepted = 1"
+        },
+        {
+          "name": "sqlite_autoindex_extraction_attempts_2",
+          "unique": true,
+          "origin": "u",
+          "columns": [
+            "extraction_result_id",
+            "attempt_number"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_extraction_attempts_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "runtime_snapshot_id",
+          "table": "model_runtime_snapshots",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "SET NULL"
+        },
+        {
+          "from": "image_file_id",
+          "table": "image_files",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "RESTRICT"
+        },
+        {
+          "from": "run_id",
+          "table": "extraction_runs",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "CASCADE"
+        },
+        {
+          "from": "extraction_result_id",
+          "table": "extraction_results",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "CASCADE"
+        }
+      ],
+      "checks": [
+        "CONSTRAINT ck_attempt_acceptance_status CHECK ((accepted = 1 AND status = 'ok') OR (accepted = 0 AND status <> 'ok')),",
+        "CONSTRAINT ck_attempt_number_positive CHECK (attempt_number >= 1),",
+        "CONSTRAINT ck_attempt_image_width CHECK (request_image_width IS NULL OR request_image_width > 0),",
+        "CONSTRAINT ck_attempt_image_height CHECK (request_image_height IS NULL OR request_image_height > 0),",
+        "CONSTRAINT ck_attempt_image_bytes CHECK (request_image_bytes IS NULL OR request_image_bytes >= 0),",
+        "CONSTRAINT ck_extraction_attempts_status_vocab CHECK (status IN ('ok', 'error', 'cancelled'))"
+      ],
+      "create_sql": "CREATE TABLE extraction_attempts (\n\tid VARCHAR NOT NULL, \n\textraction_result_id VARCHAR NOT NULL, \n\trun_id VARCHAR NOT NULL, \n\timage_file_id VARCHAR NOT NULL, \n\truntime_snapshot_id VARCHAR, \n\tattempt_number INTEGER NOT NULL, \n\tattempt_reason VARCHAR NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\taccepted BOOLEAN DEFAULT 0 NOT NULL, \n\trejected_reason VARCHAR, \n\thttp_status INTEGER, \n\terror_code VARCHAR, \n\terror_message VARCHAR, \n\tmodel VARCHAR, \n\tmodel_instance_id VARCHAR, \n\trequest_image_format VARCHAR, \n\trequest_image_mime_type VARCHAR, \n\trequest_image_width INTEGER, \n\trequest_image_height INTEGER, \n\trequest_image_bytes INTEGER, \n\tcontext_length INTEGER, \n\treasoning_mode VARCHAR, \n\trequest_config_json JSON, \n\trequest_messages_json JSON, \n\trequest_hash VARCHAR, \n\tretry_instruction_text VARCHAR, \n\traw_response VARCHAR, \n\tparsed_json JSON, \n\tparse_error VARCHAR, \n\tvalidation_status VARCHAR, \n\tvalidation_issues_json JSON, \n\tresponse_stats_json JSON, \n\tmodel_load_config_json JSON, \n\tinput_tokens INTEGER, \n\toutput_tokens INTEGER, \n\treasoning_tokens INTEGER, \n\ttotal_tokens INTEGER, \n\ttime_to_first_token_s FLOAT, \n\tduration_ms INTEGER, \n\ttokens_per_second FLOAT, \n\tmodel_load_time_s FLOAT, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tCONSTRAINT uq_extraction_attempts_result_attempt UNIQUE (extraction_result_id, attempt_number), \n\tCONSTRAINT ck_attempt_acceptance_status CHECK ((accepted = 1 AND status = 'ok') OR (accepted = 0 AND status <> 'ok')), \n\tCONSTRAINT ck_attempt_number_positive CHECK (attempt_number >= 1), \n\tCONSTRAINT ck_attempt_image_width CHECK (request_image_width IS NULL OR request_image_width > 0), \n\tCONSTRAINT ck_attempt_image_height CHECK (request_image_height IS NULL OR request_image_height > 0), \n\tCONSTRAINT ck_attempt_image_bytes CHECK (request_image_bytes IS NULL OR request_image_bytes >= 0), \n\tFOREIGN KEY(extraction_result_id) REFERENCES extraction_results (id) ON DELETE CASCADE, \n\tFOREIGN KEY(run_id) REFERENCES extraction_runs (id) ON DELETE CASCADE, \n\tFOREIGN KEY(image_file_id) REFERENCES image_files (id) ON DELETE RESTRICT, \n\tFOREIGN KEY(runtime_snapshot_id) REFERENCES model_runtime_snapshots (id) ON DELETE SET NULL\n,\n\tCONSTRAINT ck_extraction_attempts_status_vocab CHECK (status IN ('ok', 'error', 'cancelled'))\n)"
+    },
+    "extraction_results": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "run_input_id",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "image_file_id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "error_type",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "error_message",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "accepted_attempt_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "attempt_count",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "model",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "model_instance_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "prompt_snapshot_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "input_tokens",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "output_tokens",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reasoning_tokens",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "total_tokens",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "tokens_per_second",
+          "type": "FLOAT",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "time_to_first_token_s",
+          "type": "FLOAT",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "model_load_time_s",
+          "type": "FLOAT",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "request_image_format",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "request_image_mime_type",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "request_image_width",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "request_image_height",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "request_image_bytes",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "duration_ms",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_extraction_results_status",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "status"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_extraction_results_image_file",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "image_file_id"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_extraction_results_3",
+          "unique": true,
+          "origin": "u",
+          "columns": [
+            "run_input_id"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_extraction_results_2",
+          "unique": true,
+          "origin": "u",
+          "columns": [
+            "run_id",
+            "image_file_id"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_extraction_results_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "prompt_snapshot_id",
+          "table": "prompt_snapshots",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "RESTRICT"
+        },
+        {
+          "from": "accepted_attempt_id",
+          "table": "extraction_attempts",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "RESTRICT"
+        },
+        {
+          "from": "image_file_id",
+          "table": "image_files",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "RESTRICT"
+        },
+        {
+          "from": "run_input_id",
+          "table": "run_inputs",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "CASCADE"
+        },
+        {
+          "from": "run_id",
+          "table": "extraction_runs",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "CASCADE"
+        }
+      ],
+      "checks": [
+        "CONSTRAINT ck_extraction_results_attempt_count CHECK (attempt_count >= 0),",
+        "CONSTRAINT ck_extraction_results_image_width CHECK (request_image_width IS NULL OR request_image_width > 0),",
+        "CONSTRAINT ck_extraction_results_image_height CHECK (request_image_height IS NULL OR request_image_height > 0),",
+        "CONSTRAINT ck_extraction_results_image_bytes CHECK (request_image_bytes IS NULL OR request_image_bytes >= 0),",
+        "CONSTRAINT ck_extraction_results_status_vocab CHECK (status IN ('pending', 'running', 'ok', 'error', 'cancelled'))"
+      ],
+      "create_sql": "CREATE TABLE extraction_results (\n\tid VARCHAR NOT NULL, \n\trun_id VARCHAR NOT NULL, \n\trun_input_id INTEGER NOT NULL, \n\timage_file_id VARCHAR NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\terror_type VARCHAR, \n\terror_message VARCHAR, \n\taccepted_attempt_id VARCHAR, \n\tattempt_count INTEGER DEFAULT 0 NOT NULL, \n\tmodel VARCHAR, \n\tmodel_instance_id VARCHAR, \n\tprompt_snapshot_id VARCHAR, \n\tinput_tokens INTEGER, \n\toutput_tokens INTEGER, \n\treasoning_tokens INTEGER, \n\ttotal_tokens INTEGER, \n\ttokens_per_second FLOAT, \n\ttime_to_first_token_s FLOAT, \n\tmodel_load_time_s FLOAT, \n\trequest_image_format VARCHAR, \n\trequest_image_mime_type VARCHAR, \n\trequest_image_width INTEGER, \n\trequest_image_height INTEGER, \n\trequest_image_bytes INTEGER, \n\tduration_ms INTEGER, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME, \n\tPRIMARY KEY (id), \n\tCONSTRAINT uq_extraction_results_run_image UNIQUE (run_id, image_file_id), \n\tCONSTRAINT uq_extraction_results_run_input UNIQUE (run_input_id), \n\tCONSTRAINT ck_extraction_results_attempt_count CHECK (attempt_count >= 0), \n\tCONSTRAINT ck_extraction_results_image_width CHECK (request_image_width IS NULL OR request_image_width > 0), \n\tCONSTRAINT ck_extraction_results_image_height CHECK (request_image_height IS NULL OR request_image_height > 0), \n\tCONSTRAINT ck_extraction_results_image_bytes CHECK (request_image_bytes IS NULL OR request_image_bytes >= 0), \n\tFOREIGN KEY(run_id) REFERENCES extraction_runs (id) ON DELETE CASCADE, \n\tFOREIGN KEY(run_input_id) REFERENCES run_inputs (id) ON DELETE CASCADE, \n\tFOREIGN KEY(image_file_id) REFERENCES image_files (id) ON DELETE RESTRICT, \n\tFOREIGN KEY(accepted_attempt_id) REFERENCES extraction_attempts (id) ON DELETE RESTRICT, \n\tFOREIGN KEY(prompt_snapshot_id) REFERENCES prompt_snapshots (id) ON DELETE RESTRICT\n,\n\tCONSTRAINT ck_extraction_results_status_vocab CHECK (status IN ('pending', 'running', 'ok', 'error', 'cancelled'))\n)"
+    },
+    "extraction_runs": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "'pending'",
+          "pk": 0
+        },
+        {
+          "name": "mode",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "'normal'",
+          "pk": 0
+        },
+        {
+          "name": "backend",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "'lmstudio'",
+          "pk": 0
+        },
+        {
+          "name": "model",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "prompt_snapshot_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "prompt_name",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "prompt_hash",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "input_dir",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "workers",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "1",
+          "pk": 0
+        },
+        {
+          "name": "image_format",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "max_width",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "encode_quality",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "grayscale",
+          "type": "BOOLEAN",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "context_length",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reasoning_mode",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "eval_batch_size",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "physical_batch_size",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "flash_attention",
+          "type": "BOOLEAN",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "offload_kv_cache_to_gpu",
+          "type": "BOOLEAN",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "max_completion_tokens",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "temperature",
+          "type": "FLOAT",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "max_retries",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "timeout_connect",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "timeout_read",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "performance_tps_floor",
+          "type": "FLOAT",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "performance_reload_elapsed_s",
+          "type": "FLOAT",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "performance_reload_streak",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "config_extra_json",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "total_inputs",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "to_process",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "processed",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "succeeded",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "failed",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "skipped",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "duplicate_count",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "review_case_count",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "operational_error_code",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "operational_error_message",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "started_at",
+          "type": "DATETIME",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "finished_at",
+          "type": "DATETIME",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_extraction_runs_status",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "status"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_extraction_runs_created",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "created_at"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_extraction_runs_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "prompt_snapshot_id",
+          "table": "prompt_snapshots",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "RESTRICT"
+        }
+      ],
+      "checks": [
+        "CONSTRAINT ck_extraction_runs_workers CHECK (workers >= 1),",
+        "CONSTRAINT ck_extraction_runs_total_inputs CHECK (total_inputs >= 0),",
+        "CONSTRAINT ck_extraction_runs_to_process CHECK (to_process >= 0),",
+        "CONSTRAINT ck_extraction_runs_processed CHECK (processed >= 0),",
+        "CONSTRAINT ck_extraction_runs_succeeded CHECK (succeeded >= 0),",
+        "CONSTRAINT ck_extraction_runs_failed CHECK (failed >= 0),",
+        "CONSTRAINT ck_extraction_runs_skipped CHECK (skipped >= 0),",
+        "CONSTRAINT ck_extraction_runs_duplicate_count CHECK (duplicate_count >= 0),",
+        "CONSTRAINT ck_extraction_runs_status_vocab CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),",
+        "CONSTRAINT ck_extraction_runs_mode_vocab CHECK (mode IN ('normal', 'dry_run'))"
+      ],
+      "create_sql": "CREATE TABLE extraction_runs (\n\tid VARCHAR NOT NULL, \n\tstatus VARCHAR DEFAULT 'pending' NOT NULL, \n\tmode VARCHAR DEFAULT 'normal' NOT NULL, \n\tbackend VARCHAR DEFAULT 'lmstudio' NOT NULL, \n\tmodel VARCHAR NOT NULL, \n\tprompt_snapshot_id VARCHAR, \n\tprompt_name VARCHAR, \n\tprompt_hash VARCHAR, \n\tinput_dir VARCHAR, \n\tworkers INTEGER DEFAULT 1 NOT NULL, \n\timage_format VARCHAR, \n\tmax_width INTEGER, \n\tencode_quality INTEGER, \n\tgrayscale BOOLEAN DEFAULT 0 NOT NULL, \n\tcontext_length INTEGER, \n\treasoning_mode VARCHAR, \n\teval_batch_size INTEGER, \n\tphysical_batch_size INTEGER, \n\tflash_attention BOOLEAN, \n\toffload_kv_cache_to_gpu BOOLEAN, \n\tmax_completion_tokens INTEGER, \n\ttemperature FLOAT, \n\tmax_retries INTEGER, \n\ttimeout_connect INTEGER, \n\ttimeout_read INTEGER, \n\tperformance_tps_floor FLOAT, \n\tperformance_reload_elapsed_s FLOAT, \n\tperformance_reload_streak INTEGER, \n\tconfig_extra_json VARCHAR, \n\ttotal_inputs INTEGER DEFAULT 0 NOT NULL, \n\tto_process INTEGER DEFAULT 0 NOT NULL, \n\tprocessed INTEGER DEFAULT 0 NOT NULL, \n\tsucceeded INTEGER DEFAULT 0 NOT NULL, \n\tfailed INTEGER DEFAULT 0 NOT NULL, \n\tskipped INTEGER DEFAULT 0 NOT NULL, \n\tduplicate_count INTEGER DEFAULT 0 NOT NULL, \n\treview_case_count INTEGER DEFAULT 0 NOT NULL, \n\toperational_error_code VARCHAR, \n\toperational_error_message VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tstarted_at DATETIME, \n\tfinished_at DATETIME, \n\tPRIMARY KEY (id), \n\tCONSTRAINT ck_extraction_runs_workers CHECK (workers >= 1), \n\tCONSTRAINT ck_extraction_runs_total_inputs CHECK (total_inputs >= 0), \n\tCONSTRAINT ck_extraction_runs_to_process CHECK (to_process >= 0), \n\tCONSTRAINT ck_extraction_runs_processed CHECK (processed >= 0), \n\tCONSTRAINT ck_extraction_runs_succeeded CHECK (succeeded >= 0), \n\tCONSTRAINT ck_extraction_runs_failed CHECK (failed >= 0), \n\tCONSTRAINT ck_extraction_runs_skipped CHECK (skipped >= 0), \n\tCONSTRAINT ck_extraction_runs_duplicate_count CHECK (duplicate_count >= 0), \n\tFOREIGN KEY(prompt_snapshot_id) REFERENCES prompt_snapshots (id) ON DELETE RESTRICT\n,\n\tCONSTRAINT ck_extraction_runs_status_vocab CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),\n\tCONSTRAINT ck_extraction_runs_mode_vocab CHECK (mode IN ('normal', 'dry_run'))\n)"
+    },
+    "image_files": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "file_hash",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "duplicate_of_image_file_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "size_bytes",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "width_px",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "height_px",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "bit_depth",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "color_mode",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "mime_type",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "image_format",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "image_metadata_json",
+          "type": "JSON",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "current_name",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "current_path",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "semantic_name",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "file_modified_at",
+          "type": "DATETIME",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "race_datetime",
+          "type": "DATETIME",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "race_date",
+          "type": "DATE",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "race_datetime_source",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "'file_modified_at'",
+          "pk": 0
+        },
+        {
+          "name": "file_status",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "'available'",
+          "pk": 0
+        },
+        {
+          "name": "best_lap_status",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "'pending'",
+          "pk": 0
+        },
+        {
+          "name": "first_seen_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "last_seen_at",
+          "type": "DATETIME",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "missing_at",
+          "type": "DATETIME",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_image_files_status",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "file_status"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_image_files_best_lap_status",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "best_lap_status"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_image_files_file_modified_at",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "file_modified_at"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_image_files_duplicate_of",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "duplicate_of_image_file_id"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_image_files_hash",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "file_hash"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_image_files_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "duplicate_of_image_file_id",
+          "table": "image_files",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "SET NULL"
+        }
+      ],
+      "checks": [
+        "CONSTRAINT ck_image_files_size_nonnegative CHECK (size_bytes IS NULL OR size_bytes >= 0),",
+        "CONSTRAINT ck_image_files_width_positive CHECK (width_px IS NULL OR width_px > 0),",
+        "CONSTRAINT ck_image_files_height_positive CHECK (height_px IS NULL OR height_px > 0),",
+        "CONSTRAINT ck_image_files_file_status_vocab CHECK (file_status IN ('available', 'missing')),",
+        "CONSTRAINT ck_image_files_best_lap_status_vocab CHECK (best_lap_status IN ('pending', 'contributing', 'non_contributing'))"
+      ],
+      "create_sql": "CREATE TABLE image_files (\n\tid VARCHAR NOT NULL, \n\tfile_hash VARCHAR NOT NULL, \n\tduplicate_of_image_file_id VARCHAR, \n\tsize_bytes INTEGER, \n\twidth_px INTEGER, \n\theight_px INTEGER, \n\tbit_depth INTEGER, \n\tcolor_mode VARCHAR, \n\tmime_type VARCHAR, \n\timage_format VARCHAR, \n\timage_metadata_json JSON, \n\tcurrent_name VARCHAR, \n\tcurrent_path VARCHAR, \n\tsemantic_name VARCHAR, \n\tfile_modified_at DATETIME, \n\trace_datetime DATETIME, \n\trace_date DATE, \n\trace_datetime_source VARCHAR DEFAULT 'file_modified_at' NOT NULL, \n\tfile_status VARCHAR DEFAULT 'available' NOT NULL, \n\tbest_lap_status VARCHAR DEFAULT 'pending' NOT NULL, \n\tfirst_seen_at DATETIME NOT NULL, \n\tlast_seen_at DATETIME, \n\tmissing_at DATETIME, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tCONSTRAINT ck_image_files_size_nonnegative CHECK (size_bytes IS NULL OR size_bytes >= 0), \n\tCONSTRAINT ck_image_files_width_positive CHECK (width_px IS NULL OR width_px > 0), \n\tCONSTRAINT ck_image_files_height_positive CHECK (height_px IS NULL OR height_px > 0), \n\tFOREIGN KEY(duplicate_of_image_file_id) REFERENCES image_files (id) ON DELETE SET NULL, \n\tCONSTRAINT ck_image_files_file_status_vocab CHECK (file_status IN ('available', 'missing')),\n\tCONSTRAINT ck_image_files_best_lap_status_vocab CHECK (best_lap_status IN ('pending', 'contributing', 'non_contributing'))\n)"
+    },
+    "image_flags": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "image_file_id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "extraction_result_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "lap_record_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "flag_key",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "flag_scope",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "'image'",
+          "pk": 0
+        },
+        {
+          "name": "lap_index",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "driver_normalized",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "track_normalized",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "race_class",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "flag_type",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "'active'",
+          "pk": 0
+        },
+        {
+          "name": "created_by",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "'system'",
+          "pk": 0
+        },
+        {
+          "name": "reason",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "note",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "resolved_at",
+          "type": "DATETIME",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_image_flags_image_file_type_status",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "image_file_id",
+            "flag_type",
+            "status"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_image_flags_2",
+          "unique": true,
+          "origin": "u",
+          "columns": [
+            "flag_key"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_image_flags_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "lap_record_id",
+          "table": "lap_records",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "SET NULL"
+        },
+        {
+          "from": "extraction_result_id",
+          "table": "extraction_results",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "SET NULL"
+        },
+        {
+          "from": "run_id",
+          "table": "extraction_runs",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "SET NULL"
+        },
+        {
+          "from": "image_file_id",
+          "table": "image_files",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "RESTRICT"
+        }
+      ],
+      "checks": [
+        "CONSTRAINT ck_image_flags_status_vocab CHECK (status IN ('active', 'resolved', 'ignored')),",
+        "CONSTRAINT ck_image_flags_scope_vocab CHECK (flag_scope IN ('image', 'lap')),",
+        "CONSTRAINT ck_image_flags_flag_type_vocab CHECK (flag_type IN ('duplicate', 'dirty_lap', 'track', 'weather', 'race_class', 'car', 'driver_name'))"
+      ],
+      "create_sql": "CREATE TABLE image_flags (\n\tid VARCHAR NOT NULL, \n\timage_file_id VARCHAR NOT NULL, \n\trun_id VARCHAR, \n\textraction_result_id VARCHAR, \n\tlap_record_id VARCHAR, \n\tflag_key VARCHAR NOT NULL, \n\tflag_scope VARCHAR DEFAULT 'image' NOT NULL, \n\tlap_index INTEGER, \n\tdriver_normalized VARCHAR, \n\ttrack_normalized VARCHAR, \n\trace_class VARCHAR, \n\tflag_type VARCHAR NOT NULL, \n\tstatus VARCHAR DEFAULT 'active' NOT NULL, \n\tcreated_by VARCHAR DEFAULT 'system' NOT NULL, \n\treason VARCHAR, \n\tnote VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tresolved_at DATETIME, \n\tPRIMARY KEY (id), \n\tCONSTRAINT uq_image_flags_flag_key UNIQUE (flag_key), \n\tFOREIGN KEY(image_file_id) REFERENCES image_files (id) ON DELETE RESTRICT, \n\tFOREIGN KEY(run_id) REFERENCES extraction_runs (id) ON DELETE SET NULL, \n\tFOREIGN KEY(extraction_result_id) REFERENCES extraction_results (id) ON DELETE SET NULL, \n\tFOREIGN KEY(lap_record_id) REFERENCES lap_records (id) ON DELETE SET NULL\n,\n\tCONSTRAINT ck_image_flags_status_vocab CHECK (status IN ('active', 'resolved', 'ignored')),\n\tCONSTRAINT ck_image_flags_scope_vocab CHECK (flag_scope IN ('image', 'lap')),\n\tCONSTRAINT ck_image_flags_flag_type_vocab CHECK (flag_type IN ('duplicate', 'dirty_lap', 'track', 'weather', 'race_class', 'car', 'driver_name'))\n)"
+    },
+    "lap_records": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "image_file_id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "extraction_result_id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "lap_index",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_file",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "''",
+          "pk": 0
+        },
+        {
+          "name": "driver",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "''",
+          "pk": 0
+        },
+        {
+          "name": "driver_normalized",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "''",
+          "pk": 0
+        },
+        {
+          "name": "car",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "''",
+          "pk": 0
+        },
+        {
+          "name": "car_normalized",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "''",
+          "pk": 0
+        },
+        {
+          "name": "race_class",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "''",
+          "pk": 0
+        },
+        {
+          "name": "track",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "''",
+          "pk": 0
+        },
+        {
+          "name": "track_normalized",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "''",
+          "pk": 0
+        },
+        {
+          "name": "weather",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "'unknown'",
+          "pk": 0
+        },
+        {
+          "name": "temp_f",
+          "type": "FLOAT",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "temp_c",
+          "type": "FLOAT",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "best_lap",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "''",
+          "pk": 0
+        },
+        {
+          "name": "best_lap_ms",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "dirty",
+          "type": "BOOLEAN",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "raw_lap_json",
+          "type": "JSON",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "is_best_lap",
+          "type": "BOOLEAN",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_lap_records_track_class_driver",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "track_normalized",
+            "race_class",
+            "driver_normalized"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_lap_records_track_class_car",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "track_normalized",
+            "race_class",
+            "car_normalized"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_lap_records_image_file",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "image_file_id"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_lap_records_best_gui_order",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "track",
+            "race_class",
+            "weather",
+            "best_lap_ms",
+            "driver",
+            "car"
+          ],
+          "partial_where": "WHERE is_best_lap = 1"
+        },
+        {
+          "name": "idx_lap_records_best_track_class_driver",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "track_normalized",
+            "race_class",
+            "driver_normalized"
+          ],
+          "partial_where": "WHERE is_best_lap = 1"
+        },
+        {
+          "name": "idx_lap_records_best_track_class_car",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "track_normalized",
+            "race_class",
+            "car_normalized"
+          ],
+          "partial_where": "WHERE is_best_lap = 1"
+        },
+        {
+          "name": "sqlite_autoindex_lap_records_3",
+          "unique": true,
+          "origin": "u",
+          "columns": [
+            "image_file_id",
+            "run_id",
+            "lap_index"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_lap_records_2",
+          "unique": true,
+          "origin": "u",
+          "columns": [
+            "extraction_result_id",
+            "lap_index"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_lap_records_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "extraction_result_id",
+          "table": "extraction_results",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "CASCADE"
+        },
+        {
+          "from": "image_file_id",
+          "table": "image_files",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "RESTRICT"
+        },
+        {
+          "from": "run_id",
+          "table": "extraction_runs",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "CASCADE"
+        }
+      ],
+      "checks": [
+        "CONSTRAINT ck_lap_records_index CHECK (lap_index >= 0),",
+        "CONSTRAINT ck_lap_records_best_lap_ms CHECK (best_lap_ms >= 0),"
+      ],
+      "create_sql": "CREATE TABLE lap_records (\n\tid VARCHAR NOT NULL, \n\trun_id VARCHAR NOT NULL, \n\timage_file_id VARCHAR NOT NULL, \n\textraction_result_id VARCHAR NOT NULL, \n\tlap_index INTEGER NOT NULL,\n\tsource_file VARCHAR DEFAULT '' NOT NULL, \n\tdriver VARCHAR DEFAULT '' NOT NULL, \n\tdriver_normalized VARCHAR DEFAULT '' NOT NULL, \n\tcar VARCHAR DEFAULT '' NOT NULL, \n\tcar_normalized VARCHAR DEFAULT '' NOT NULL, \n\trace_class VARCHAR DEFAULT '' NOT NULL, \n\ttrack VARCHAR DEFAULT '' NOT NULL, \n\ttrack_normalized VARCHAR DEFAULT '' NOT NULL, \n\tweather VARCHAR DEFAULT 'unknown' NOT NULL, \n\ttemp_f FLOAT, \n\ttemp_c FLOAT, \n\tbest_lap VARCHAR DEFAULT '' NOT NULL, \n\tbest_lap_ms INTEGER DEFAULT 0 NOT NULL, \n\tdirty BOOLEAN DEFAULT 0 NOT NULL, \n\traw_lap_json JSON, \n\tis_best_lap BOOLEAN DEFAULT 0 NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tCONSTRAINT uq_lap_records_result_index UNIQUE (extraction_result_id, lap_index), \n\tCONSTRAINT uq_lap_records_image_file_run_index UNIQUE (image_file_id, run_id, lap_index), \n\tCONSTRAINT ck_lap_records_index CHECK (lap_index >= 0), \n\tCONSTRAINT ck_lap_records_best_lap_ms CHECK (best_lap_ms >= 0), \n\tFOREIGN KEY(run_id) REFERENCES extraction_runs (id) ON DELETE CASCADE, \n\tFOREIGN KEY(image_file_id) REFERENCES image_files (id) ON DELETE RESTRICT, \n\tFOREIGN KEY(extraction_result_id) REFERENCES extraction_results (id) ON DELETE CASCADE\n)"
+    },
+    "model_artifacts": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "image_file_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "extraction_result_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "attempt_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "artifact_type",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "file_path",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "relative_path",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "sha256",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "size_bytes",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "media_type",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "is_canonical",
+          "type": "BOOLEAN",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_model_artifacts_run_image_file",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "run_id",
+            "image_file_id"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_model_artifacts_attempt",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "attempt_id"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_model_artifacts_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "attempt_id",
+          "table": "extraction_attempts",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "CASCADE"
+        },
+        {
+          "from": "extraction_result_id",
+          "table": "extraction_results",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "CASCADE"
+        },
+        {
+          "from": "image_file_id",
+          "table": "image_files",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "SET NULL"
+        },
+        {
+          "from": "run_id",
+          "table": "extraction_runs",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "CASCADE"
+        }
+      ],
+      "checks": [
+        "CONSTRAINT ck_model_artifacts_size_nonnegative CHECK (size_bytes >= 0),"
+      ],
+      "create_sql": "CREATE TABLE model_artifacts (\n\tid VARCHAR NOT NULL, \n\trun_id VARCHAR NOT NULL, \n\timage_file_id VARCHAR, \n\textraction_result_id VARCHAR, \n\tattempt_id VARCHAR, \n\tartifact_type VARCHAR NOT NULL, \n\tfile_path VARCHAR NOT NULL, \n\trelative_path VARCHAR, \n\tsha256 VARCHAR NOT NULL, \n\tsize_bytes INTEGER NOT NULL, \n\tmedia_type VARCHAR, \n\tis_canonical BOOLEAN DEFAULT 0 NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tCONSTRAINT ck_model_artifacts_size_nonnegative CHECK (size_bytes >= 0), \n\tFOREIGN KEY(run_id) REFERENCES extraction_runs (id) ON DELETE CASCADE, \n\tFOREIGN KEY(image_file_id) REFERENCES image_files (id) ON DELETE SET NULL, \n\tFOREIGN KEY(extraction_result_id) REFERENCES extraction_results (id) ON DELETE CASCADE, \n\tFOREIGN KEY(attempt_id) REFERENCES extraction_attempts (id) ON DELETE CASCADE\n)"
+    },
+    "model_runtime_snapshots": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "snapshot_kind",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "'preflight'",
+          "pk": 0
+        },
+        {
+          "name": "endpoint",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "configured_model",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "matched_model",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "loaded_model",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "instance_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "display_name",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "publisher",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "architecture",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "format",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "params_string",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "quantization",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "selected_variant",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "size_bytes",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "max_context_length",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "capabilities_json",
+          "type": "JSON",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "desired_load_config_json",
+          "type": "JSON",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "effective_load_config_json",
+          "type": "JSON",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "load_time_seconds",
+          "type": "FLOAT",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "health_ok",
+          "type": "BOOLEAN",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "health_message",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "model_matches_config",
+          "type": "BOOLEAN",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "captured_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_runtime_one_preflight_per_run",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "run_id"
+          ],
+          "partial_where": "WHERE snapshot_kind = 'preflight'"
+        },
+        {
+          "name": "idx_model_runtime_run_kind",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "run_id",
+            "snapshot_kind"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_model_runtime_snapshots_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "run_id",
+          "table": "extraction_runs",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "CASCADE"
+        }
+      ],
+      "checks": [
+        "CONSTRAINT ck_runtime_size_nonnegative CHECK (size_bytes IS NULL OR size_bytes >= 0),"
+      ],
+      "create_sql": "CREATE TABLE model_runtime_snapshots (\n\tid VARCHAR NOT NULL, \n\trun_id VARCHAR NOT NULL, \n\tsnapshot_kind VARCHAR DEFAULT 'preflight' NOT NULL, \n\tendpoint VARCHAR NOT NULL, \n\tconfigured_model VARCHAR, \n\tmatched_model VARCHAR, \n\tloaded_model VARCHAR, \n\tinstance_id VARCHAR, \n\tdisplay_name VARCHAR, \n\tpublisher VARCHAR, \n\tarchitecture VARCHAR, \n\tformat VARCHAR, \n\tparams_string VARCHAR, \n\tquantization VARCHAR, \n\tselected_variant VARCHAR, \n\tsize_bytes INTEGER, \n\tmax_context_length INTEGER, \n\tcapabilities_json JSON, \n\tdesired_load_config_json JSON, \n\teffective_load_config_json JSON, \n\tload_time_seconds FLOAT, \n\thealth_ok BOOLEAN DEFAULT 0 NOT NULL, \n\thealth_message VARCHAR, \n\tmodel_matches_config BOOLEAN, \n\tcaptured_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tCONSTRAINT ck_runtime_size_nonnegative CHECK (size_bytes IS NULL OR size_bytes >= 0), \n\tFOREIGN KEY(run_id) REFERENCES extraction_runs (id) ON DELETE CASCADE\n)"
+    },
+    "prompt_snapshots": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "prompt_name",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "version_label",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "content_hash",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "system_text",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "user_text_template",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "response_schema_json",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "sqlite_autoindex_prompt_snapshots_2",
+          "unique": true,
+          "origin": "u",
+          "columns": [
+            "prompt_name",
+            "content_hash"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_prompt_snapshots_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [],
+      "checks": [],
+      "create_sql": "CREATE TABLE prompt_snapshots (\n\tid VARCHAR NOT NULL, \n\tprompt_name VARCHAR NOT NULL, \n\tversion_label VARCHAR, \n\tcontent_hash VARCHAR NOT NULL, \n\tsystem_text VARCHAR NOT NULL, \n\tuser_text_template VARCHAR, \n\tresponse_schema_json VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tCONSTRAINT uq_prompt_snapshots_name_hash UNIQUE (prompt_name, content_hash)\n)"
+    },
+    "reference_cars": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "normalized_name",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "race_class",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "aliases_json",
+          "type": "JSON",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "active",
+          "type": "BOOLEAN",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "sqlite_autoindex_reference_cars_2",
+          "unique": true,
+          "origin": "u",
+          "columns": [
+            "name"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_reference_cars_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [],
+      "checks": [],
+      "create_sql": "CREATE TABLE reference_cars (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tnormalized_name VARCHAR, \n\trace_class VARCHAR, \n\taliases_json JSON, \n\tactive BOOLEAN NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tUNIQUE (name)\n)"
+    },
+    "reference_tracks": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "normalized_name",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "aliases_json",
+          "type": "JSON",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "active",
+          "type": "BOOLEAN",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "sqlite_autoindex_reference_tracks_2",
+          "unique": true,
+          "origin": "u",
+          "columns": [
+            "name"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_reference_tracks_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [],
+      "checks": [],
+      "create_sql": "CREATE TABLE reference_tracks (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tnormalized_name VARCHAR, \n\taliases_json JSON, \n\tactive BOOLEAN NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tUNIQUE (name)\n)"
+    },
+    "review_cases": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "image_file_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "extraction_result_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "lap_record_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "'open'",
+          "pk": 0
+        },
+        {
+          "name": "reason",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "business_key",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "driver",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "driver_normalized",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "track",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "track_normalized",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "race_class",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "car",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "car_normalized",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "lap_index",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "best_lap",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "message",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "track_suggestions_json",
+          "type": "JSON",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "resolved_at",
+          "type": "DATETIME",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "resolution_note",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "trigger",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "outcome",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "'pending'",
+          "pk": 0
+        },
+        {
+          "name": "decision_field",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "model_value",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "corrected_value",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "error_type",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "case_number",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "source_file",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "''",
+          "pk": 0
+        },
+        {
+          "name": "weather",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "'unknown'",
+          "pk": 0
+        },
+        {
+          "name": "temp_f",
+          "type": "FLOAT",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_review_cases_status_reason",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "status",
+            "reason"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_review_cases_reason_trigger",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "reason",
+            "trigger"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_review_cases_outcome",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "outcome"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_review_cases_3",
+          "unique": true,
+          "origin": "u",
+          "columns": [
+            "case_number"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_review_cases_2",
+          "unique": true,
+          "origin": "u",
+          "columns": [
+            "business_key"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_review_cases_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "lap_record_id",
+          "table": "lap_records",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "SET NULL"
+        },
+        {
+          "from": "extraction_result_id",
+          "table": "extraction_results",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "SET NULL"
+        },
+        {
+          "from": "image_file_id",
+          "table": "image_files",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "RESTRICT"
+        },
+        {
+          "from": "run_id",
+          "table": "extraction_runs",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "SET NULL"
+        }
+      ],
+      "checks": [
+        "CONSTRAINT ck_review_cases_status_vocab CHECK (status IN ('open', 'resolved', 'ignored', 'auto_resolved')),",
+        "CONSTRAINT ck_review_cases_outcome_vocab CHECK (outcome IN ('pending', 'confirmed', 'model_error', 'ignored')),",
+        "CONSTRAINT ck_review_cases_reason_vocab CHECK (reason IN ('dirty_lap', 'track', 'weather', 'race_class', 'car', 'driver_name')),",
+        "CONSTRAINT ck_review_cases_trigger_vocab CHECK (\"trigger\" IS NULL OR \"trigger\" IN ('model_marked_dirty', 'weather_unknown', 'rain_time_suspicious', 'track_unknown', 'track_unresolved', 'track_not_in_reference', 'class_unknown', 'class_invalid', 'car_empty', 'car_not_in_reference', 'driver_name_empty', 'numeric_prefix', 'invalid_symbol')),",
+        "CONSTRAINT ck_review_cases_decision_field_vocab CHECK (decision_field IS NULL OR decision_field IN ('dirty', 'track', 'weather', 'race_class', 'car', 'driver'))"
+      ],
+      "create_sql": "CREATE TABLE review_cases (\n\tid VARCHAR NOT NULL, \n\trun_id VARCHAR, \n\timage_file_id VARCHAR, \n\textraction_result_id VARCHAR, \n\tlap_record_id VARCHAR, \n\tstatus VARCHAR DEFAULT 'open' NOT NULL, \n\treason VARCHAR NOT NULL, \n\tbusiness_key VARCHAR NOT NULL, \n\tdriver VARCHAR, \n\tdriver_normalized VARCHAR, \n\ttrack VARCHAR, \n\ttrack_normalized VARCHAR, \n\trace_class VARCHAR, \n\tcar VARCHAR, \n\tcar_normalized VARCHAR, \n\tlap_index INTEGER, \n\tbest_lap VARCHAR, \n\tmessage VARCHAR, \n\ttrack_suggestions_json JSON, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME, \n\tresolved_at DATETIME, \n\tresolution_note VARCHAR, \"trigger\" VARCHAR, outcome VARCHAR DEFAULT 'pending' NOT NULL, decision_field VARCHAR, model_value VARCHAR, corrected_value VARCHAR, error_type VARCHAR, case_number INTEGER DEFAULT 0 NOT NULL, source_file VARCHAR DEFAULT '' NOT NULL, weather VARCHAR DEFAULT 'unknown' NOT NULL, temp_f FLOAT, \n\tPRIMARY KEY (id), \n\tCONSTRAINT uq_review_cases_business_key UNIQUE (business_key), \n\tCONSTRAINT uq_review_cases_case_number UNIQUE (case_number), \n\tFOREIGN KEY(run_id) REFERENCES extraction_runs (id) ON DELETE SET NULL, \n\tFOREIGN KEY(image_file_id) REFERENCES image_files (id) ON DELETE RESTRICT, \n\tFOREIGN KEY(extraction_result_id) REFERENCES extraction_results (id) ON DELETE SET NULL, \n\tFOREIGN KEY(lap_record_id) REFERENCES lap_records (id) ON DELETE SET NULL\n,\n\tCONSTRAINT ck_review_cases_status_vocab CHECK (status IN ('open', 'resolved', 'ignored', 'auto_resolved')),\n\tCONSTRAINT ck_review_cases_outcome_vocab CHECK (outcome IN ('pending', 'confirmed', 'model_error', 'ignored')),\n\tCONSTRAINT ck_review_cases_reason_vocab CHECK (reason IN ('dirty_lap', 'track', 'weather', 'race_class', 'car', 'driver_name')),\n\tCONSTRAINT ck_review_cases_trigger_vocab CHECK (\"trigger\" IS NULL OR \"trigger\" IN ('model_marked_dirty', 'weather_unknown', 'rain_time_suspicious', 'track_unknown', 'track_unresolved', 'track_not_in_reference', 'class_unknown', 'class_invalid', 'car_empty', 'car_not_in_reference', 'driver_name_empty', 'numeric_prefix', 'invalid_symbol')),\n\tCONSTRAINT ck_review_cases_decision_field_vocab CHECK (decision_field IS NULL OR decision_field IN ('dirty', 'track', 'weather', 'race_class', 'car', 'driver'))\n)"
+    },
+    "review_corrections": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "stable_key",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "image_file_id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "lap_index",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "field",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "model_value",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "corrected_value",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "error_type",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "cause",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": "'unknown'",
+          "pk": 0
+        },
+        {
+          "name": "review_case_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_review_corrections_image_file_field",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "image_file_id",
+            "field"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_review_corrections_2",
+          "unique": true,
+          "origin": "u",
+          "columns": [
+            "stable_key"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "sqlite_autoindex_review_corrections_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "image_file_id",
+          "table": "image_files",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "RESTRICT"
+        },
+        {
+          "from": "review_case_id",
+          "table": "review_cases",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "SET NULL"
+        }
+      ],
+      "checks": [
+        "CONSTRAINT ck_review_corrections_field_vocab CHECK (field IN ('dirty', 'track', 'weather', 'race_class', 'car', 'driver')),",
+        "CONSTRAINT ck_review_corrections_cause_vocab CHECK (cause IN ('review', 'rebuild', 'auto', 'unknown')),"
+      ],
+      "create_sql": "CREATE TABLE review_corrections (\n            id VARCHAR NOT NULL,\n            stable_key VARCHAR NOT NULL,\n            image_file_id VARCHAR NOT NULL,\n            lap_index INTEGER,\n            field VARCHAR NOT NULL,\n            model_value VARCHAR,\n            corrected_value VARCHAR NOT NULL,\n            error_type VARCHAR,\n            cause VARCHAR DEFAULT 'unknown' NOT NULL,\n            review_case_id VARCHAR,\n            created_at DATETIME NOT NULL,\n            updated_at DATETIME NOT NULL,\n            PRIMARY KEY (id),\n            FOREIGN KEY(review_case_id) REFERENCES review_cases (id) ON DELETE SET NULL,\n            FOREIGN KEY(image_file_id) REFERENCES image_files (id) ON DELETE RESTRICT,\n            CONSTRAINT ck_review_corrections_field_vocab CHECK (field IN ('dirty', 'track', 'weather', 'race_class', 'car', 'driver')),\n            CONSTRAINT ck_review_corrections_cause_vocab CHECK (cause IN ('review', 'rebuild', 'auto', 'unknown')),\n            CONSTRAINT uq_review_corrections_stable_key UNIQUE (stable_key)\n        )"
+    },
+    "run_inputs": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "image_file_id",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "input_order",
+          "type": "INTEGER",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "input_path",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "normalized_path",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "file_name",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "extension",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "file_hash",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "size_bytes",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "mtime_ns",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "decision",
+          "type": "VARCHAR",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "process_reason",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "skip_reason",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "duplicate_kind",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "duplicate_of_hash",
+          "type": "VARCHAR",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "duplicate_of_input_id",
+          "type": "INTEGER",
+          "notnull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "notnull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_run_inputs_image_file",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "image_file_id"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_run_inputs_run_decision",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "run_id",
+            "decision"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_run_inputs_process_reason",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "run_id",
+            "process_reason"
+          ],
+          "partial_where": null
+        },
+        {
+          "name": "idx_run_inputs_hash",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "file_hash"
+          ],
+          "partial_where": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "duplicate_of_input_id",
+          "table": "run_inputs",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "SET NULL"
+        },
+        {
+          "from": "image_file_id",
+          "table": "image_files",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "SET NULL"
+        },
+        {
+          "from": "run_id",
+          "table": "extraction_runs",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "CASCADE"
+        }
+      ],
+      "checks": [
+        "CONSTRAINT ck_run_inputs_order CHECK (input_order >= 0),",
+        "CONSTRAINT ck_run_inputs_size_nonnegative CHECK (size_bytes IS NULL OR size_bytes >= 0),",
+        "CONSTRAINT ck_run_inputs_decision_vocab CHECK (decision IN ('process', 'skip', 'duplicate', 'missing', 'unsupported', 'outside_input', 'hash_failed')),",
+        "CONSTRAINT ck_run_inputs_duplicate_kind_vocab CHECK (duplicate_kind IS NULL OR duplicate_kind IN ('hash', 'batch'))"
+      ],
+      "create_sql": "CREATE TABLE run_inputs (\n\tid INTEGER NOT NULL, \n\trun_id VARCHAR NOT NULL, \n\timage_file_id VARCHAR, \n\tinput_order INTEGER NOT NULL, \n\tinput_path VARCHAR NOT NULL, \n\tnormalized_path VARCHAR, \n\tfile_name VARCHAR, \n\textension VARCHAR, \n\tfile_hash VARCHAR, \n\tsize_bytes INTEGER, \n\tmtime_ns INTEGER, \n\tdecision VARCHAR NOT NULL, \n\tprocess_reason VARCHAR, \n\tskip_reason VARCHAR, \n\tduplicate_kind VARCHAR, \n\tduplicate_of_hash VARCHAR, \n\tduplicate_of_input_id INTEGER, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tCONSTRAINT ck_run_inputs_order CHECK (input_order >= 0), \n\tCONSTRAINT ck_run_inputs_size_nonnegative CHECK (size_bytes IS NULL OR size_bytes >= 0), \n\tFOREIGN KEY(run_id) REFERENCES extraction_runs (id) ON DELETE CASCADE, \n\tFOREIGN KEY(image_file_id) REFERENCES image_files (id) ON DELETE SET NULL, \n\tFOREIGN KEY(duplicate_of_input_id) REFERENCES run_inputs (id) ON DELETE SET NULL\n,\n\tCONSTRAINT ck_run_inputs_decision_vocab CHECK (decision IN ('process', 'skip', 'duplicate', 'missing', 'unsupported', 'outside_input', 'hash_failed')),\n\tCONSTRAINT ck_run_inputs_duplicate_kind_vocab CHECK (duplicate_kind IS NULL OR duplicate_kind IN ('hash', 'batch'))\n)"
+    }
+  },
+  "triggers": []
+}

@@ -57,3 +57,10 @@ data/forza.sqlite3-wal
 /scripts
 /_code_removed_
 /graphify-out
+
+# Rust migration fixtures: personal/large artifacts stay out of Git (see forza-rust/fixtures/README.md)
+forza-rust/fixtures/images/
+forza-rust/fixtures/model_responses/
+forza-rust/fixtures/python_outputs/best_laps.csv
+forza-rust/fixtures/python_outputs/best_laps.pdf
+forza-rust/fixtures/python_outputs/artifacts/
