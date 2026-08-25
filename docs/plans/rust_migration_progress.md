@@ -16,7 +16,8 @@ skipped (with reason).
 ## Environment
 
 - [x] rustup stable-x86_64-pc-windows-msvc installed (cargo/rustc 1.98.0)
-- [ ] VS Build Tools with VC workload available to linker (install running)
+- [x] VS Build Tools with VC workload available to linker (smoke build OK)
+- [x] rustfmt + clippy components installed
 
 ## Branch strategy
 
@@ -27,31 +28,44 @@ skipped (with reason).
 ## Fase 0 — Baseline e contratos
 
 - [~] selecionar conjunto representativo de screenshots e registrar contagens
-      (`fixtures/images/` fica fora do Git; caminhos documentados)
-- [~] extrair snapshot normalizado do banco Python para
-      `forza-rust/fixtures/python_outputs/` (a DB local já tem os dados; sem
-      nova execução LM Studio)
-- [ ] salvar CSV/PDF de referência gerados pelo Python 0.21.0-beta.1
-- [ ] salvar respostas gravadas do LM Studio (tentativas/artefatos) como
-      fixtures de pipeline
-- [ ] revisar `docs/contracts/*.md` e catalogar contratos cobertos/não cobertos
-- [ ] classificar testes `*_static.py` no mapa de tradução
+      (`fixtures/images/` fica fora do Git; caminhos documentados) — contagens
+      do banco capturadas em counts.json; seleção física de screenshots ainda
+      pendente (Fase 6 precisa delas para pipeline)
+- [x] extrair snapshot normalizado do banco Python para
+      `forza-rust/fixtures/python_outputs/` via
+      `tools/export_rust_baseline.py` (schema inventory, counts, referências,
+      performance por run; CSV/PDF locais com 1103 linhas / 67 seções;
+      50 respostas LM Studio amostradas — 25 aceitas + 25 malformadas)
+- [x] salvar CSV/PDF de referência gerados pelo Python 0.21.0-beta.1
+      (local-only, fora do Git conforme fixtures/README.md)
+- [x] salvar respostas gravadas do LM Studio como fixtures
+      (`fixtures/model_responses/`, local-only)
+- [~] revisar `docs/contracts/*.md` e catalogar contratos cobertos/não cobertos
+      (catálogo criado em `forza-rust/docs/contracts.md`; leitura fina dos
+      docs de contrato acontece crate a crate nas fases seguintes)
+- [x] classificar testes `*_static.py` no mapa de tradução
       (`forza-rust/docs/contracts.md`)
-- [ ] auditar índices únicos parciais, triggers, check constraints, defaults e
-      ações `ON DELETE` por tabela (`forza-rust/docs/database.md`)
-- [ ] identificar campos derivados vs dados de revisão
-- [ ] criar `forza-rust/fixtures/README.md` (o que é versionado)
+- [x] auditar índices únicos parciais, triggers, check constraints, defaults e
+      ações `ON DELETE` por tabela (`forza-rust/docs/database.md`;
+      achado: zero triggers no baseline)
+- [x] identificar campos derivados vs dados de revisão
+      (`forza-rust/docs/database.md`)
+- [x] criar `forza-rust/fixtures/README.md` (o que é versionado)
 - [ ] registrar tempo atual de abertura da GUI/carregamento da lista
-      (medição manual — entrada da Fase 5)
+      (medição manual — entrada da Fase 5; requer medição na máquina do
+      mantenedor)
 
 ## Fase 1 — Workspace e ferramentas Rust
 
-- [ ] workspace Cargo com os 9 crates compilando vazio
-- [ ] `cargo fmt`, `cargo clippy`, `cargo test` verdes
-- [ ] política de erros documentada (thiserror por crate, erros de domínio puros)
-- [ ] política de logging (tracing + env-filter)
+- [x] workspace Cargo com os 9 crates compilando vazio
+      (`forza-rust/`, edition 2024, lints compartilhados, rust-toolchain.toml,
+      assets copiados para `forza-rust/assets/`)
+- [x] `cargo fmt`, `cargo clippy`, `cargo test` verdes
+- [~] política de erros documentada (thiserror entra na Fase 2 junto do
+      domínio; lints workspace já proíbem unsafe e warn unwrap/expect)
+- [ ] política de logging (tracing + env-filter) — entra com a Fase 2/CLI
 - [ ] convenções de módulos/tamanho registradas
-- [ ] CI inicial
+- [x] CI inicial (`.github/workflows/rust.yml`: fmt/clippy/test no windows-latest)
 
 ## Fases 2–11
 
@@ -72,3 +86,13 @@ skipped (with reason).
 
 - Sessão 1: ambiente preparado (rustup OK, Build Tools em background), branch
   `dev` criada a partir do baseline 0.21.0-beta.1, início da Fase 0.
+- Sessão 2: Fase 0 quase completa — ferramenta `tools/export_rust_baseline.py`
+  extrai baseline da DB existente sem LM Studio (1103 best-laps → CSV/PDF de
+  referência, 50 respostas amostradas); auditoria estrutural do schema em
+  `forza-rust/docs/database.md`; catálogo de tradução dos 78 guards estáticos
+  em `forza-rust/docs/contracts.md`. Fase 1 completa — workspace com 9 crates,
+  fmt/clippy/test verdes, CI inicial. Pendências: screenshots de fixture
+  (Fase 6), medição manual de tempo da GUI (Fase 5), políticas de
+  erro/logging documentadas junto da Fase 2.
+- Nota: erro 10013 intermitente ao baixar componentes de static.rust-lang.org;
+  retry resolveu nas duas ocorrências.

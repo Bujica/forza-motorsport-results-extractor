@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/forza-domain",
+    "crates/forza-config",
+    "crates/forza-db",
+    "crates/forza-pipeline",
+    "crates/forza-lmstudio",
+    "crates/forza-output",
+    "crates/forza-app",
+    "crates/forza-cli",
+    "crates/forza-gui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Bujica89"]
+repository = "https://github.com/Bujica/forza-motorsport-results-extractor"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
