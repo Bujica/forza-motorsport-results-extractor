@@ -3,7 +3,7 @@
 
 Forza Motorsport Results Extractor is a Windows desktop tool for extracting lap-time data from Forza Motorsport results-screen screenshots using a local LM Studio vision model.
 
-Status: public beta. The current release target is `0.20.0-beta.1`.
+Status: public beta. The current release target is `0.21.0-beta.1`.
 
 ## Target and support scope
 
@@ -39,7 +39,7 @@ The beta bundle is a one-folder Windows distribution intended for testers. It in
 Expected artifact name:
 
 ```text
-ForzaMotorsportResultsExtractor-0.20.0-beta.1-windows-x64.zip
+ForzaMotorsportResultsExtractor-0.21.0-beta.1-windows-x64.zip
 ```
 
 The beta application bundle must not include developer-only or private runtime material. In particular, `tools/`, `scripts/`, `tests/`, `.git/`, and `.github/` must not be copied into beta application bundles.

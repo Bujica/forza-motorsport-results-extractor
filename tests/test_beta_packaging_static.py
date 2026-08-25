@@ -87,4 +87,4 @@ def test_packaging_documentation_states_one_folder_policy() -> None:
     assert "tools/" in text
     assert "scripts/" in text
     assert "DataFM.xlsx" in text
-    assert "ForzaMotorsportResultsExtractor-0.20.0-beta.1-windows-x64.zip" in text
+    assert "ForzaMotorsportResultsExtractor-0.21.0-beta.1-windows-x64.zip" in text

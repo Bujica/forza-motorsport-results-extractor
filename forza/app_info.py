@@ -8,7 +8,7 @@ from typing import Any
 APP_NAME = "Forza Motorsport Results Extractor"
 APP_SHORT_NAME = "FM2023 Results Extractor"
 APP_PACKAGE_NAME = "forza-motorsport-results-extractor"
-APP_BASE_VERSION = "0.20.0"
+APP_BASE_VERSION = "0.21.0"
 APP_CHANNEL = "beta"
 APP_BETA_LABEL = "beta.1"
 APP_RELEASE = f"{APP_BASE_VERSION}-{APP_BETA_LABEL}"

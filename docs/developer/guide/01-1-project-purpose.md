@@ -50,7 +50,7 @@ Notes:
 - Coverage is a risk signal, not a blind goal. Prioritize coverage for orchestration, persistence, config, parsing, and regression-prone GUI contracts.
 - GUI tests are partly static by design. Do not rely only on them for behavior. Add behavioral tests when a workflow can be tested without a full Qt interaction harness.
 - The repository may not have remote GitHub Actions checks. Absence of remote status is not equivalent to validation.
-- Test profiles, marker taxonomy, coverage gates, and cleanup rules live in `docs/developer/testing-policy.md`; the active rollout plan lives in `docs/history/2026-06-13_testing_policy_implementation_plan_archive.md`.
+- Test profiles, marker taxonomy, coverage gates, and cleanup rules live in `docs/developer/testing-policy.md`; the original rollout plan was internal pre-beta evidence and is not published.
 - Detailed local test profiles, marker taxonomy, and test-debt cleanup rules live in `docs/developer/testing-policy.md`. Keep that policy current before deleting or reclassifying tests.
 
 Versioning rules:

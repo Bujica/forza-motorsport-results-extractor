@@ -4,7 +4,7 @@ Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: permanent
 Scope: documentation ownership, naming, lifecycle, and update rules
-Last verified: 2026-06-05
+Last verified: 2026-08-25
 Supersedes: ad hoc documentation placement rules in `docs/README.md`
 Related tests: none
 

@@ -4,11 +4,13 @@ Status: current
 Audience: developer, maintainer, LLM
 Lifecycle: permanent
 Scope: local test organization, execution profiles, coverage gates, and test-debt cleanup
-Last verified: 2026-06-14
-Related plan: `docs/history/2026-06-13_testing_policy_implementation_plan_archive.md`
+Last verified: 2026-08-25
 Related tests: `python -m pytest -q`
 
-This document defines the standing testing policy for the project. The implementation plan and sequencing live in `docs/history/2026-06-13_testing_policy_implementation_plan_archive.md`.
+This document defines the standing testing policy for the project. The original
+implementation plan and rollout sequencing were internal pre-beta evidence and
+are not part of the public repository; this policy is the authoritative source
+for test organization.
 
 ## 1. Baseline
 

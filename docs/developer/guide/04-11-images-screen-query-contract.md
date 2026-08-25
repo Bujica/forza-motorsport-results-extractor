@@ -271,8 +271,8 @@ Read these files before large maintenance changes:
 - `docs/README.md`: documentation index.
 - `docs/user/guide.md`: full external user manual.
 - `docs/user/advanced_tools.md`: advanced GUI diagnostics, DB Doctor, logs, and generated-artifact notes.
-- `docs/history/2026-06-02_modular_reorganization_report.md`: record of the completed aggressive package reorganization.
-- `docs/history/2026-05-30_quality_audit_remediation.md`: audit finding-to-remediation traceability and release-readiness notes.
+- `docs/history/README.md`: explains which historical records are published and
+  why pre-beta archives are not part of the public repository.
 - `forza_config.ini.example`: default user-editable configuration shape.
 
 When code and docs disagree, inspect the relevant contract and

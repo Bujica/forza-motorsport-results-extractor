@@ -31,7 +31,7 @@ def test_app_info_declares_public_product_identity() -> None:
     assert APP_PACKAGE_NAME == "forza-motorsport-results-extractor"
     assert APP_CHANNEL == "beta"
     assert APP_BETA_LABEL == "beta.1"
-    assert APP_RELEASE == "0.20.0-beta.1"
+    assert APP_RELEASE == "0.21.0-beta.1"
     assert BUILD_INFO_FILENAME == "build_info.json"
     assert TARGET_GAME == "Forza Motorsport, 2023 release"
     assert TARGET_SCREEN == "post-race Results screen"

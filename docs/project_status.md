@@ -3,8 +3,8 @@
 Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: permanent
-Scope: current product state after the 0.20.0 diagnostics release
-Last verified: 2026-06-21
+Scope: current product state after the 0.21.0-beta.1 release
+Last verified: 2026-08-25
 Supersedes: scattered stage notes in implementation and history documents
 Related tests: `python -m compileall -q forza`, `pytest`, `python -m forza maintenance db-doctor --json`
 
@@ -13,7 +13,9 @@ current released product posture and links to the authoritative contracts.
 
 ## Current Stage
 
-The current product version is 0.20.0, the GUI diagnostics and image workflow polish release.
+The current product version is 0.21.0-beta.1, the final stable baseline of the
+Python line before the Rust migration experiment
+(`docs/plans/2026-08-25_rust_migration_plan.md`).
 SQLite is the runtime source of truth for extraction runs, inputs, attempts, raw
 model evidence, reviews, internal image flags, best laps, Community Records,
 performance analytics, and reference catalog data. Legacy runtime JSON caches,
@@ -112,15 +114,18 @@ The 0.19.2 stabilization release completed the post-audit hardening pass:
 Completed implementation plans are archived in:
 
 ```text
-docs/history/2026-06-14_clean_break_removal_plan_completed.md
-docs/history/2026-06-16_images_first_schema_plan_completed.md
-docs/history/2026-06-18_0.19.2_stabilization_release.md
+docs/history/2026-08-25_0.21.0-beta.1_final_python_line_release.md
 ```
 
-## Post-0.20.0 Bugfixes
+Pre-beta history records (clean-break plans, audits, and release records from
+the private development phase) were not published with the public repository.
+`docs/history/README.md` explains the boundary.
+
+## Post-0.20.0 Beta Hardening
 
 The following bugs were identified and fixed during public beta validation after
-the 0.20.0 release. No schema changes were required.
+the 0.20.0 release. No schema changes were required. All of this work is part
+of the 0.21.0-beta.1 release; see `CHANGELOG.md` for the complete list.
 
 ### Stale gamertag in GUI Review write path
 
@@ -194,18 +199,24 @@ enforced by static tests).
 `forza/gui/controllers/settings_controller.py`,
 `forza/gui/main_window.py`.
 
+### Additional 0.21.0-beta.1 hardening
+
+Beyond the three beta-validation fixes above, the release consolidates the
+July/August hardening work: QThread workers for DB Doctor/image refresh/Review
+reload, screen-aware GUI sizing with mixed table column resize modes,
+LM Studio load-config compatibility (ignore `physical_batch_size`, accept
+larger `context_length`), cooperative cancellation through backend backoff,
+exclusive-access `db-reset`, the `forza/application/image` package split,
+immutable run history with latest-result frontier selection, review
+`updated_at` stamps, and tightened dirty-lap prompt detection.
+
 ## Next Approved Work
 
-No active implementation plan is open after the 0.20.0 diagnostics release. New work
-must start with a focused issue or a new document under `docs/plans/` when it
-changes product behavior, schema, or workflow contracts.
-
-Candidate non-blocking follow-up areas:
-
-- Decide whether `python -m forza run` remains a supported automation surface
-  after GUI-only operation is validated.
-- Evaluate Records/Performance usefulness after the local database contains more
-  processed runs and broader external-record coverage.
+The Python line is feature-frozen at 0.21.0-beta.1. The approved next phase is
+the Rust migration experiment defined in
+`docs/plans/2026-08-25_rust_migration_plan.md`; it starts
+with Phase 0 (baseline and contracts) against this release. New Python work is
+limited to regression fixes required to keep this baseline healthy.
 
 ## Known Issues
 
@@ -220,7 +231,6 @@ Use these gates when a change affects runtime contracts:
 python -m compileall -q forza
 pytest
 python -m forza maintenance db-doctor --json
-python scripts\c8_2_audit_docs_tests.py
 python -m forza --help
 python -m forza gui
 ```

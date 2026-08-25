@@ -1,13 +1,5 @@
 # Changelog
 
-## 0.20.0-beta.1 - Public beta baseline
-
-- Renamed the public product to **Forza Motorsport Results Extractor**.
-- Clarified the supported target: **Forza Motorsport, 2023 release** results-screen screenshots.
-- Added public app identity, repository/issue links, About dialog information, and build metadata.
-- Added Windows portable beta bundle support with explicit runtime/development file separation.
-- Kept processing local-first: screenshots are processed through the user-configured local LM Studio endpoint.
-
 All notable changes to Forza Motorsport Results Extractor are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
@@ -15,6 +7,66 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ---
 
 ## [Unreleased]
+
+- Nothing yet. The Python line is feature-frozen at 0.21.0-beta.1; only
+  regression fixes are accepted. New development continues in the Rust
+  migration plan.
+
+---
+
+## [0.21.0-beta.1] - 2026-08-25
+
+Public beta hardening release and the final stable baseline of the Python line
+before the Rust migration experiment
+(`docs/plans/2026-08-25_rust_migration_plan.md`).
+
+### Added
+
+- Added dedicated `QThread` workers for long-running GUI work so DB Doctor runs,
+  image inventory refreshes, and Review queue reloads execute off the UI thread.
+  Workers own their readers/services to avoid cross-thread session sharing,
+  manage their thread lifecycle, and coalesce rapid refresh/reload requests.
+- Added explicit database seam contracts: `RunServiceDatabase` formalizes the
+  interface `RunService` requires, replacing scattered duck-typing checks, and
+  `ExtractionServiceDatabase` describes the subset of `DatabaseService` used by
+  `ExtractionService`. Regression tests assert `DatabaseService` satisfies both
+  protocols.
+- Added scoped best-lap frontier recomputation through
+  `LapRepository.mark_best_laps_for_groups`, limiting updates to affected
+  `(track, race_class)` groups; `mark_best_laps` remains the explicit
+  full-database rebuild path and no longer takes a run id.
+
+### Changed
+
+- Made GUI sizing screen-aware: main window, dialogs, splitters, and preview
+  minimum sizes derive from the primary screen, Image Detail panels scroll
+  inside the dialog on smaller displays, and tables across Best Laps, Images,
+  DB Doctor, Image Debug, Image Detail, Review Queue, and Settings use mixed
+  per-column resize modes with tuned default widths instead of expensive
+  uniform resize-to-contents passes.
+- Hardened LM Studio load-config compatibility checks: `physical_batch_size` is
+  no longer treated as a comparable field because LM Studio never echoes it
+  back, and a requested `context_length` is satisfied when the effective value
+  meets or exceeds the request, preventing false mismatch warnings and
+  unnecessary model reloads.
+- Propagated cooperative cancellation (`run_control`) through backend
+  construction and the thread pool, made LM Studio exponential backoff honor
+  checkpoints in small sleep chunks, and made config-file backups unique when
+  timestamps tie.
+- Hardened CLI `maintenance db-reset` to require exclusive SQLite access and to
+  warn about WAL/SHM sidecar files before deleting a database.
+- Split `image_service` into the `forza/application/image` package (discovery
+  input, inventory, inventory read, rename, retry registration, types) behind a
+  backward-compatible facade that preserves existing imports and test seams.
+- Preserved extraction-run history as immutable records required by DB Doctor:
+  best-lap/frontier calculations now consider only each image's latest result
+  rows, so reprocessed images cannot contribute stale laps while earlier runs
+  remain auditable.
+- Logged warnings when GUI worker threads fail to stop gracefully within the
+  termination timeout, easing cleanup diagnostics across all controllers.
+- Tightened dirty-lap prompt detection so only the upward-triangle warning icon
+  immediately adjacent to a lap time signals a dirty lap, preventing false
+  positives from row highlighting or text color alone.
 
 ### Fixed
 
@@ -53,6 +105,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   `GuiWriteService.recompute_best_laps()` and then `BestLapsController.reload()`,
   keeping both `SettingsController` and `BestLapsController` write-free and
   read-only respectively.
+
+- Fixed reprocessed images appearing twice in the Best Laps list when a later
+  run superseded an older result for the same image; frontier selection now
+  covers the player's own latest result per image instead of only opponents.
+
+- Fixed review status transitions leaving `updated_at` unchanged; ignore,
+  reopen, and resolve writes now stamp one UTC timestamp into both
+  `updated_at` and `resolved_at`.
+
+---
+
+## [0.20.0-beta.1] - Public beta baseline
+
+- Renamed the public product to **Forza Motorsport Results Extractor**.
+- Clarified the supported target: **Forza Motorsport, 2023 release** results-screen screenshots.
+- Added public app identity, repository/issue links, About dialog information, and build metadata.
+- Added Windows portable beta bundle support with explicit runtime/development file separation.
+- Kept processing local-first: screenshots are processed through the user-configured local LM Studio endpoint.
 
 ---
 

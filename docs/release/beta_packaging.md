@@ -47,7 +47,7 @@ python tools\build_windows_beta.py
 Expected artifact:
 
 ```text
-dist\ForzaMotorsportResultsExtractor-0.20.0-beta.1-windows-x64.zip
+dist\ForzaMotorsportResultsExtractor-0.21.0-beta.1-windows-x64.zip
 ```
 
 ## Smoke test
