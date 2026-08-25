@@ -69,7 +69,27 @@ skipped (with reason).
 
 ## Fases 2–11
 
-- [ ] Fase 2 — Domínio e configuração
+- [~] Fase 2 — Domínio e configuração
+      - [x] enums persistidos (`enums.rs`, valores explícitos via macro
+            `value_enum!`, `as_str`/`from_value`/`FromStr`)
+      - [x] lap.rs: parse/format ms, dirty symbols (+FE0F), sanitize driver,
+            weather, °F→°C (string+comma), extract_class_letter,
+            detect_race_class + TCR_CARS
+      - [x] race_class.rs (CLASS_ORDER + CLASS_COLORS), text_utils.rs
+      - [x] difflib.rs: porte fiel de SequenceMatcher.ratio +
+            get_close_matches (sem autojunk; sem lookbehind — crate regex
+            não suporta)
+      - [x] normalizer.rs (fix_track_name 6 passos, fix_car_name 3 passos),
+            review_rules.rs, car_names.rs (car_match_key/canonicalização),
+            ordering.rs (ordered_lap_key), reference_data.rs (assets
+            embutidos via include_str!)
+      - [x] GOLDEN: `tools/export_domain_golden.py` gera vetores do Python
+            real → `fixtures/expected/domain_golden.json`; teste Rust
+            `domain_golden.rs` valida equivalência semântica (15 checks).
+            Divergências reais pegadas e corrigidas: CLASS_ORDER["Unknown"]=12
+      - [x] forza-config: structs completas, defaults Python idênticos,
+            strict vs lenient+warnings, validate_config com mensagens iguais,
+            prompts registry; 7 testes de contrato INI
 - [ ] Fase 3 — SQLite e queries da GUI
 - [ ] Fase 4 — Vertical slice da GUI
 - [ ] Fase 5 — Benchmark da lista de imagens
@@ -95,4 +115,13 @@ skipped (with reason).
   (Fase 6), medição manual de tempo da GUI (Fase 5), políticas de
   erro/logging documentadas junto da Fase 2.
 - Nota: erro 10013 intermitente ao baixar componentes de static.rust-lang.org;
-  retry resolveu nas duas ocorrências.
+  retry resolveu nas duas ocorrências. Mantenedor esclareceu: é o firewall do
+  Windows pedindo autorização para novos programas; aguardar alguns segundos
+  e tentar de novo.
+- Sessão 3: Fase 2 implementada e verde (fmt/clippy -D warnings/test 18/18).
+  Lição técnica: crate `regex` do Rust não tem lookbehind — reescrever padrões
+  Python com grupos de captura equivalentes; `LazyLock::new` em static exige
+  const-context, então helpers de regex viram macro (`lazy_regex!`).
+  Pendência da Fase 2 encerrada: nenhuma bloqueante; validação de paths
+  graváveis (os.access W_OK) ficou de fora do validate_config Rust por agora
+  — decidir abordagem Windows quando a CLI consumir (Fase 2½/Fase 3).

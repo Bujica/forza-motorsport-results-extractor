@@ -1,0 +1,824 @@
+{
+  "parse_lap_time_ms": [
+    [
+      "1:23.456",
+      83456
+    ],
+    [
+      "0:59.999",
+      59999
+    ],
+    [
+      "12:34.567",
+      754567
+    ],
+    [
+      "2:00.000",
+      120000
+    ],
+    [
+      "23.456",
+      23456
+    ],
+    [
+      "5.5",
+      5500
+    ],
+    [
+      "45",
+      45000
+    ],
+    [
+      "0:05.1",
+      5100
+    ],
+    [
+      "1:07.12",
+      67120
+    ],
+    [
+      "1:23.456 ▲",
+      83456
+    ],
+    [
+      "1:23.456▲",
+      83456
+    ],
+    [
+      "  1:23.456 ⚠ ",
+      83456
+    ],
+    [
+      "1:23.456⚠️",
+      83456
+    ],
+    [
+      "1:23.456 !",
+      83456
+    ],
+    [
+      "1:23.4!56",
+      null
+    ],
+    [
+      "!1:23.456",
+      null
+    ],
+    [
+      "--",
+      null
+    ],
+    [
+      "---",
+      null
+    ],
+    [
+      "DNF",
+      null
+    ],
+    [
+      "dnq",
+      null
+    ],
+    [
+      "null",
+      null
+    ],
+    [
+      "None",
+      null
+    ],
+    [
+      "",
+      null
+    ],
+    [
+      "+0.500",
+      null
+    ],
+    [
+      "1:23.456+0.5",
+      null
+    ],
+    [
+      "abc",
+      null
+    ],
+    [
+      "1:2.345",
+      null
+    ],
+    [
+      "1:23.4567",
+      null
+    ]
+  ],
+  "format_lap_time_ms": {
+    "values": [
+      [
+        83456,
+        false
+      ],
+      [
+        59999,
+        false
+      ],
+      [
+        754567,
+        false
+      ],
+      [
+        120000,
+        true
+      ],
+      [
+        1,
+        false
+      ],
+      [
+        59999,
+        true
+      ]
+    ],
+    "results": [
+      "1:23.456",
+      "0:59.999",
+      "12:34.567",
+      "2:00.000 ▲",
+      "0:00.001",
+      "0:59.999 ▲"
+    ]
+  },
+  "is_dirty_lap": [
+    [
+      "1:23.456 ▲",
+      true
+    ],
+    [
+      "1:23.456▲",
+      true
+    ],
+    [
+      "1:23.456 ⚠️",
+      true
+    ],
+    [
+      "22.1 △",
+      true
+    ],
+    [
+      "1:23.456",
+      false
+    ],
+    [
+      "",
+      false
+    ],
+    [
+      "None",
+      false
+    ],
+    [
+      "▲",
+      true
+    ]
+  ],
+  "strip_dirty_symbol": [
+    [
+      "1:23.456 ▲",
+      "1:23.456"
+    ],
+    [
+      "1:23.456▲",
+      "1:23.456"
+    ],
+    [
+      "1:23.456 ⚠️",
+      "1:23.456"
+    ],
+    [
+      "1:!23",
+      "1:!23"
+    ],
+    [
+      "  ▲  ",
+      ""
+    ],
+    [
+      "1:23.456 !",
+      "1:23.456"
+    ],
+    [
+      "1:!23 ▲",
+      "1:!23"
+    ]
+  ],
+  "sanitize_driver_name": [
+    [
+      "Bujica89",
+      "Bujica89"
+    ],
+    [
+      "  spaced   name  ",
+      "spaced name"
+    ],
+    [
+      "Bad★Name!",
+      "BadName"
+    ],
+    [
+      "12 Fast Driver",
+      "12 Fast Driver"
+    ],
+    [
+      "O'Neil-Smith_1",
+      "O'Neil-Smith_1"
+    ],
+    [
+      "Driveŕ combining",
+      "Driveŕ combining"
+    ],
+    [
+      "Tab\tName",
+      "Tab Name"
+    ],
+    [
+      "★☆♪",
+      "★☆♪"
+    ],
+    [
+      "Dot . Name .",
+      "Dot . Name"
+    ]
+  ],
+  "normalize_weather": [
+    [
+      "rain",
+      "rain"
+    ],
+    [
+      "wet",
+      "rain"
+    ],
+    [
+      "chuva",
+      "rain"
+    ],
+    [
+      "molhado",
+      "rain"
+    ],
+    [
+      "raining",
+      "rain"
+    ],
+    [
+      "dry",
+      "dry"
+    ],
+    [
+      "seco",
+      "dry"
+    ],
+    [
+      "clear",
+      "dry"
+    ],
+    [
+      "sunny",
+      "dry"
+    ],
+    [
+      "Rain",
+      "rain"
+    ],
+    [
+      "DRY",
+      "dry"
+    ],
+    [
+      "",
+      "unknown"
+    ],
+    [
+      "fog",
+      "unknown"
+    ]
+  ],
+  "fahrenheit_to_celsius": [
+    [
+      "72",
+      40.0,
+      140.0,
+      22.2
+    ],
+    [
+      "72",
+      40.0,
+      140.0,
+      22.2
+    ],
+    [
+      "72,5",
+      40.0,
+      140.0,
+      22.5
+    ],
+    [
+      "39",
+      40.0,
+      140.0,
+      null
+    ],
+    [
+      "141",
+      40.0,
+      140.0,
+      null
+    ],
+    [
+      "32",
+      32.0,
+      100.0,
+      0.0
+    ],
+    [
+      "__NONE__",
+      40.0,
+      140.0,
+      null
+    ]
+  ],
+  "extract_class_letter": [
+    [
+      "692 A",
+      "A"
+    ],
+    [
+      "692A",
+      "A"
+    ],
+    [
+      "a",
+      "A"
+    ],
+    [
+      "PI400D",
+      "D"
+    ],
+    [
+      "pi400 d",
+      "D"
+    ],
+    [
+      "",
+      "Unknown"
+    ],
+    [
+      "__NONE__",
+      "Unknown"
+    ],
+    [
+      "X",
+      "X"
+    ],
+    [
+      "123 XYZ",
+      "Unknown"
+    ],
+    [
+      "P",
+      "P"
+    ]
+  ],
+  "detect_race_class": [
+    [
+      [],
+      "Unknown"
+    ],
+    [
+      [
+        {
+          "ca": "Audi R8 LMS",
+          "cl": "1 A"
+        },
+        {
+          "ca": "BMW M4",
+          "cl": "2 A"
+        }
+      ],
+      "A"
+    ],
+    [
+      [
+        {
+          "ca": "Audi R8 LMS",
+          "cl": "1 A"
+        },
+        {
+          "ca": "BMW M4",
+          "cl": "2 B"
+        }
+      ],
+      "Mixed"
+    ],
+    [
+      [
+        {
+          "ca": "#98 Elantra",
+          "cl": "1 A"
+        },
+        {
+          "ca": "Honda #73 Civic",
+          "cl": ""
+        },
+        {
+          "ca": "MB #33 A45",
+          "cl": ""
+        },
+        {
+          "ca": "BMW M4",
+          "cl": "9 B"
+        }
+      ],
+      "TCR"
+    ],
+    [
+      [
+        {
+          "ca": "Ford #17Focus ST",
+          "cl": ""
+        }
+      ],
+      "TCR"
+    ],
+    [
+      [
+        {
+          "ca": "Audi #1 RS 3 LMS",
+          "cl": ""
+        },
+        {
+          "ca": "#66 Astra",
+          "cl": "C"
+        },
+        {
+          "ca": "#98 Veloster",
+          "cl": ""
+        },
+        {
+          "ca": "Peugeot #7 308",
+          "cl": ""
+        },
+        {
+          "ca": "MG #20 MG6",
+          "cl": ""
+        },
+        {
+          "ca": "VW #22 Golf GTI",
+          "cl": ""
+        }
+      ],
+      "TCR"
+    ],
+    [
+      [
+        {
+          "ca": "#98 Veloster",
+          "cl": "C"
+        },
+        {
+          "ca": "BMW M4 GT3",
+          "cl": "9 B"
+        },
+        {
+          "ca": "#66 Astra",
+          "cl": ""
+        }
+      ],
+      "TCR"
+    ],
+    [
+      [
+        {
+          "ca": "Audi R8 LMS",
+          "cl": ""
+        }
+      ],
+      "Unknown"
+    ]
+  ],
+  "car_match_key": [
+    [
+      "Toyota Corolla '74",
+      "toyota corolla74"
+    ],
+    [
+      "Toyota Corolla 1974",
+      "toyota corolla74"
+    ],
+    [
+      "Elemental Rp1 ’19",
+      "elemental rp1 19"
+    ],
+    [
+      "Mini Cooper `65",
+      "mini cooper65"
+    ],
+    [
+      "Audi R8 LMS evoluzione",
+      "audi r8 lms evoluzione"
+    ]
+  ],
+  "fix_track_name": [
+    [
+      "Fuji Speedway GT",
+      "Fuji Speedway GT"
+    ],
+    [
+      "fuji speedway gt",
+      "fuji speedway gt"
+    ],
+    [
+      "Nurburgring Nordschleife",
+      "Nürburgring Nordschleife"
+    ],
+    [
+      "Nürburgring Nordschleife",
+      "Nürburgring Nordschleife"
+    ],
+    [
+      "nürburgring   nordschleife!",
+      "Nürburgring Nordschleife"
+    ],
+    [
+      "Le Mans Full Circuit",
+      "Le Mans Full Circuit"
+    ],
+    [
+      "Le Mans Full Circut",
+      "Le Mans Full Circut"
+    ],
+    [
+      "Le Mans Old Mulsane",
+      "Le Mans Old Mulsane"
+    ],
+    [
+      "Le Mans",
+      null
+    ],
+    [
+      "Zandvoort",
+      "Zandvoort"
+    ],
+    [
+      "ZANDVOORT",
+      "ZANDVOORT"
+    ],
+    [
+      "Totally Made Up Track",
+      "Totally Made Up Track"
+    ],
+    [
+      "",
+      ""
+    ]
+  ],
+  "fix_car_name": [
+    [
+      "Audi R8 LMS",
+      "Audi R8 LMS"
+    ],
+    [
+      "audi r8 lms",
+      "audi r8 lms"
+    ],
+    [
+      "audir8lms",
+      "audir8lms"
+    ],
+    [
+      "BMW M4 GT3",
+      "#96 BMW M4 GT3"
+    ],
+    [
+      "bmw m4 gt3 evolutions",
+      "bmw m4 gt3 evolutions"
+    ],
+    [
+      "Ferrari 296 GTB",
+      "Ferrari 296 GTB"
+    ],
+    [
+      "Unknown Car XYZ",
+      "Unknown Car XYZ"
+    ],
+    [
+      "AudiR8LMS",
+      "AudiR8LMS"
+    ],
+    [
+      "bmw m4 gt#",
+      "#96 BMW M4 GT3"
+    ]
+  ],
+  "review_triggers": [
+    [
+      "   ",
+      "driver_name_empty"
+    ],
+    [
+      "12 Fast",
+      "numeric_prefix"
+    ],
+    [
+      "1234 Slow",
+      null
+    ],
+    [
+      "Bad★Name",
+      "invalid_symbol"
+    ],
+    [
+      "Good-Name_1.",
+      null
+    ],
+    [
+      "",
+      "driver_name_empty"
+    ]
+  ],
+  "has_numeric_prefix": [
+    [
+      "12 Fast",
+      true
+    ],
+    [
+      "1245 Fast",
+      false
+    ]
+  ],
+  "has_suspicious_symbol": [
+    [
+      "Ok Name",
+      false
+    ],
+    [
+      "No★pe",
+      true
+    ]
+  ],
+  "ambiguous_raw_track": [
+    [
+      "ambiguous layout: Le Mans",
+      "Le Mans"
+    ],
+    [
+      "Ambiguous Layout)? : Fuji Speedway",
+      ""
+    ],
+    [
+      "nothing here",
+      ""
+    ]
+  ],
+  "track_suggestions": [
+    [
+      "ambiguous layout: Le Mans",
+      [
+        "Le Mans - Circuit International de la Sarthe Full Circuit",
+        "Le Mans - Circuit International de la Sarthe Old Mulsanne Circuit"
+      ]
+    ],
+    [
+      "Ambiguous layout)? : Fuji Speedway",
+      []
+    ],
+    [
+      "ambiguous layout:",
+      []
+    ],
+    [
+      "plain track name",
+      []
+    ]
+  ],
+  "ordering_keys": {
+    "order_map_input": [
+      "Brands Hatch Grand Prix Circuit",
+      "Brands Hatch Indy Circuit",
+      "Circuit de Barcelona-Catalunya Grand Prix Circuit",
+      "Circuit de Barcelona-Catalunya National Circuit",
+      "Circuit de Barcelona-Catalunya National Circuit ALT",
+      "Circuit de Spa-Francorchamps Full Circuit",
+      "Daytona International Speedway Speedway Circuit",
+      "Daytona International Speedway Sports Car Circuit",
+      "Eaglerock Speedway Club Circuit",
+      "Eaglerock Speedway Club Circuit Reverse",
+      "Eaglerock Speedway Oval Circuit",
+      "Fujimi Kaido Full Circuit",
+      "Fujimi Kaido Full Circuit Reverse",
+      "Grand Oak Raceway Club Circuit",
+      "Grand Oak Raceway National Circuit",
+      "Grand Oak Raceway National Circuit Reverse",
+      "Hakone Club Circuit",
+      "Hakone Club Circuit Reverse",
+      "Hakone Grand Prix Circuit",
+      "Hockenheimring Full Circuit",
+      "Hockenheimring National Circuit",
+      "Hockenheimring Short Circuit",
+      "Homestead-Miami Speedway Road Circuit",
+      "Homestead-Miami Speedway Speedway Circuit",
+      "Indianapolis Motor Speedway Grand Prix Circuit",
+      "Indianapolis Motor Speedway The Brickyard Speedway",
+      "Kyalami Grand Prix Circuit Grand Prix Circuit",
+      "Le Mans - Circuit International de la Sarthe Full Circuit",
+      "Le Mans - Circuit International de la Sarthe Old Mulsanne Circuit",
+      "Lime Rock Park Full Circuit",
+      "Lime Rock Park Full Circuit Alt",
+      "Lime Rock Park South Chicane",
+      "Maple Valley Full Circuit",
+      "Maple Valley Short Circuit",
+      "Maple Valley Short Circuit Reverse",
+      "Michelin Raceway Road Atlanta Grand Prix Course",
+      "Michelin Raceway Road Atlanta Short Course",
+      "Mid-Ohio Sports Car Course Short Circuit",
+      "Mid-Ohio Sports Car Course Sports Car Circuit",
+      "Mount Panorama Circuit Bathurst Circuit",
+      "Mugello Circuit Club Circuit",
+      "Mugello Circuit Full Circuit",
+      "Nürburgring Full Circuit",
+      "Nürburgring GP Circuit",
+      "Nürburgring Nordschleife",
+      "Nürburgring Sprint Circuit",
+      "Road America East Route",
+      "Road America Full Circuit",
+      "Sebring International Raceway Full Circuit",
+      "Sebring International Raceway Short Circuit"
+    ],
+    "rows": [
+      {
+        "track": "Brands Hatch Grand Prix Circuit",
+        "race_class": "A",
+        "weather": "dry",
+        "best_lap_ms": 90000,
+        "driver": "Alpha",
+        "car": "Car A"
+      },
+      {
+        "track": "Mystery Track",
+        "race_class": "B",
+        "weather": null,
+        "best_lap_ms": 80000,
+        "driver": "beta",
+        "car": "Car B"
+      },
+      {
+        "track": "Sebring International Raceway Short Circuit",
+        "race_class": "Unknown",
+        "weather": "rain",
+        "best_lap_ms": 120000,
+        "driver": "Gamma",
+        "car": "Car C"
+      }
+    ],
+    "keys": [
+      [
+        [
+          0,
+          "brands hatch grand prix circuit",
+          5,
+          "A",
+          "dry",
+          90000,
+          "alpha",
+          "car a"
+        ]
+      ],
+      [
+        [
+          51,
+          "mystery track",
+          4,
+          "B",
+          "",
+          80000,
+          "beta",
+          "car b"
+        ]
+      ],
+      [
+        [
+          49,
+          "sebring international raceway short circuit",
+          12,
+          "Unknown",
+          "rain",
+          120000,
+          "gamma",
+          "car c"
+        ]
+      ]
+    ]
+  }
+}
