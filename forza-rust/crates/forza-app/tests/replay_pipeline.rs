@@ -160,7 +160,7 @@ fn lap_projection_matches_python_filtering_and_session_class() {
         "e":[
             {"dr":"▲ Driver One","ca":"MB #33 A45","cl":"PI 700 A","bl":"01:54.154"},
             {"dr":"Ignored","ca":"Honda #73 Civic","cl":"PI 700 A","bl":""},
-            {"dr":"Driver Two","ca":"Honda #73 Civic","cl":"PI 700 A","bl":"01:55.000"}
+            {"dr":"Driver Two","ca":"Honda #73 Civic","cl":"PI 700 A","bl":"01:55.000 ▲"}
         ]
     }"#;
     let parsed: serde_json::Value = serde_json::from_str(raw).unwrap();
@@ -193,6 +193,19 @@ fn lap_projection_matches_python_filtering_and_session_class() {
             (0, "Driver One".into(), "TCR".into(), "01:54.154".into()),
             (1, "Driver Two".into(), "TCR".into(), "01:55.000".into()),
         ]
+    );
+    let (dirty, raw_lap_json): (i64, String) = conn
+        .query_row(
+            "SELECT dirty, raw_lap_json FROM lap_records
+             WHERE run_id=?1 AND lap_index=1",
+            rusqlite::params![run_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(dirty, 1);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&raw_lap_json).unwrap(),
+        serde_json::json!({"model_best_lap": "01:55.000 ▲"})
     );
 }
 

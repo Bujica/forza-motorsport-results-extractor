@@ -9,7 +9,7 @@ use forza_db::repositories::runs::{
 };
 use forza_domain::lap::{
     RawGridEntry, detect_race_class, is_dirty_lap, normalize_weather, parse_lap_time_ms,
-    sanitize_driver_name,
+    sanitize_driver_name, strip_dirty_symbol,
 };
 use forza_lmstudio::protocol::{AttemptStatus, ModelAttemptRecord};
 use forza_lmstudio::response::{parse_and_validate_response, semantic_retry_issues};
@@ -200,6 +200,11 @@ pub fn derive_and_insert_laps(
         let driver_raw = entry.get("dr").and_then(|v| v.as_str());
         let driver = sanitize_driver_name(driver_raw);
         let dirty = is_dirty_lap(Some(best_lap_str));
+        let best_lap_clean = strip_dirty_symbol(best_lap_str);
+        let raw_lap_json = serde_json::json!({
+            "model_best_lap": best_lap_str,
+        })
+        .to_string();
         let temp_c =
             temp_f.and_then(|tf| forza_domain::lap::fahrenheit_to_celsius(tf, 40.0, 140.0));
 
@@ -209,24 +214,28 @@ pub fn derive_and_insert_laps(
                 (id, run_id, image_file_id, extraction_result_id, lap_index,
                  driver, driver_normalized, car, car_normalized,
                  race_class, track, track_normalized, weather, temp_f, temp_c,
-                 best_lap, best_lap_ms, dirty, source_file, created_at)
-             VALUES (?1,?2,?3,?4,?5,?6,LOWER(?6),?7,LOWER(?7),?8,?9,LOWER(?9),?10,?11,?12,?13,?14,?15,?16,datetime('now'))",
+                 best_lap, best_lap_ms, dirty, raw_lap_json, source_file, created_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,datetime('now'))",
             rusqlite::params![
                 id,
                 run_id,
                 image_file_id,
                 extraction_result_id,
                 index as i64,
-                driver,
+                &driver,
+                driver.to_lowercase(),
                 car,
+                car.to_lowercase(),
                 &race_class,
-                track_fixed,
+                &track_fixed,
+                track_fixed.to_lowercase(),
                 weather,
                 temp_f,
                 temp_c,
-                best_lap_str,
+                best_lap_clean,
                 best_lap_ms,
                 dirty,
+                raw_lap_json,
                 source_file.unwrap_or(""),
             ],
         )
