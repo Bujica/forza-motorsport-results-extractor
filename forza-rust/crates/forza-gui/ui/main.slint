@@ -229,6 +229,7 @@ export component MainWindow inherits Window {
                 { key: "diagnostics", label: "Diagnostics" },
                 { key: "image-debug", label: "Image Debug" },
                 { key: "logs", label: "Logs" },
+                { key: "performance", label: "Performance" },
                 { key: "settings", label: "Settings" },
             ]: TouchArea {
                 height: 34px;
@@ -742,6 +743,32 @@ export component MainWindow inherits Window {
                         color: #cfd6dd;
                         wrap: word-wrap;
                         font-size: 11px;
+                    }
+                }
+            }
+
+            // ══ Performance page ══
+            if root.page == "performance": VerticalLayout {
+                spacing: 8px;
+
+                HorizontalLayout {
+                    height: 32px;
+                    spacing: 8px;
+                    Text { text: "Performance"; color: #d0d0d0; font-weight: 700; width: 120px; }
+                    Text { text: "TPS floor / reload policy from Settings (LM Studio backend)"; color: #6c7683; font-size: 11px; horizontal-stretch: 1; }
+                }
+
+                Rectangle {
+                    background: #26282c;
+                    border-radius: 6px;
+                    vertical-stretch: 1;
+                    Text {
+                        x: 14px; y: 14px;
+                        width: parent.width - 28px;
+                        text: "Performance dashboard — live extraction metrics (tokens/s, slow-streak, reload triggers) will appear here after runs.\n\nCurrent policy from configuration:\n  • performance_tps_floor\n  • performance_reload_elapsed_s\n  • performance_reload_streak\n\nHistory is persisted per attempt (see Image Debug → Attempts).";
+                        color: #9aa4b2;
+                        wrap: word-wrap;
+                        font-size: 12px;
                     }
                 }
             }
