@@ -14,6 +14,30 @@ pub struct RunInsert {
     pub mode: String,
 }
 
+/// Runtime/configuration metadata captured on a real extraction run.
+///
+/// `RunInsert::demo` intentionally remains minimal for low-level tests; live
+/// callers must apply this snapshot immediately after creating the run.
+pub struct RunMetadata<'a> {
+    pub backend: &'a str,
+    pub model: &'a str,
+    pub input_dir: &'a str,
+    pub prompt_name: &'a str,
+    pub prompt_hash: Option<&'a str>,
+    pub workers: i64,
+    pub image_format: &'a str,
+    pub max_width: i64,
+    pub encode_quality: i64,
+    pub grayscale: bool,
+    pub context_length: i64,
+    pub reasoning_mode: Option<&'a str>,
+    pub max_completion_tokens: i64,
+    pub temperature: f64,
+    pub max_retries: i64,
+    pub timeout_connect: i64,
+    pub timeout_read: i64,
+}
+
 impl RunInsert {
     pub fn demo(id: &str) -> Self {
         Self {
@@ -33,6 +57,44 @@ pub fn insert_run(conn: &Connection, run: &RunInsert) -> Result<String, DbError>
         params![run.id, run.status, run.mode],
     )?;
     Ok(run.id.clone())
+}
+
+/// Fill the live run header from the actual application configuration.
+pub fn update_run_metadata(
+    conn: &Connection,
+    run_id: &str,
+    metadata: &RunMetadata<'_>,
+) -> Result<(), DbError> {
+    conn.execute(
+        "UPDATE extraction_runs SET
+            backend=?2, model=?3, input_dir=?4, prompt_name=?5, prompt_hash=?6,
+            workers=?7, image_format=?8, max_width=?9, encode_quality=?10,
+            grayscale=?11, context_length=?12, reasoning_mode=?13,
+            max_completion_tokens=?14, temperature=?15, max_retries=?16,
+            timeout_connect=?17, timeout_read=?18
+         WHERE id=?1",
+        params![
+            run_id,
+            metadata.backend,
+            metadata.model,
+            metadata.input_dir,
+            metadata.prompt_name,
+            metadata.prompt_hash,
+            metadata.workers,
+            metadata.image_format,
+            metadata.max_width,
+            metadata.encode_quality,
+            if metadata.grayscale { 1 } else { 0 },
+            metadata.context_length,
+            metadata.reasoning_mode,
+            metadata.max_completion_tokens,
+            metadata.temperature,
+            metadata.max_retries,
+            metadata.timeout_connect,
+            metadata.timeout_read,
+        ],
+    )?;
+    Ok(())
 }
 
 /// Insert a run_input plus its matching extraction_result, returning the

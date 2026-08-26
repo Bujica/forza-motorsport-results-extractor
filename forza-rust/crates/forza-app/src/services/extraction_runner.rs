@@ -11,8 +11,8 @@ use rusqlite::Connection;
 use crate::services::run_control::RunControl;
 use forza_config::AppConfig;
 use forza_db::repositories::runs::{
-    RunInsert, complete_run, find_image_id_by_hash, insert_processed_input, insert_run,
-    insert_run_input_only, mark_run_running,
+    RunInsert, RunMetadata, complete_run, find_image_id_by_hash, insert_processed_input,
+    insert_run, insert_run_input_only, mark_run_running, update_run_metadata,
 };
 use forza_db::repositories::{
     known_hashes, known_path_hashes, list_failed_images_for_retry, mark_best_laps,
@@ -377,6 +377,33 @@ where
         },
     )
     .map_err(|e| e.to_string())?;
+    let input_dir = params.input_dir.to_string_lossy().into_owned();
+    update_run_metadata(
+        &conn,
+        &run_id,
+        &RunMetadata {
+            backend: "lmstudio",
+            model: &params.model,
+            input_dir: &input_dir,
+            prompt_name: &params.prompt_id,
+            // The immutable prompt snapshot will own the content hash once
+            // snapshot persistence is added; never write a seed placeholder.
+            prompt_hash: None,
+            workers: 1,
+            image_format: &params.image_format,
+            max_width: i64::from(params.max_width),
+            encode_quality: i64::from(params.encode_quality),
+            grayscale: params.grayscale,
+            context_length: params.context_length,
+            reasoning_mode: params.reasoning_mode.as_deref(),
+            max_completion_tokens: params.max_tokens,
+            temperature: params.temperature,
+            max_retries: i64::from(params.max_retries),
+            timeout_connect: params.timeout_connect as i64,
+            timeout_read: params.timeout_read as i64,
+        },
+    )
+    .map_err(|e| e.to_string())?;
     mark_run_running(&conn, &run_id).map_err(|e| e.to_string())?;
     on_event(RunEvent::Started {
         run_id: run_id.clone(),
@@ -486,6 +513,32 @@ where
             input_order,
         )
         .map_err(|e| e.to_string())?;
+        let file_metadata = std::fs::metadata(&image.path).ok();
+        let extension = image
+            .path
+            .extension()
+            .map(|value| value.to_string_lossy().to_lowercase());
+        let size_bytes = file_metadata.as_ref().map(|metadata| metadata.len() as i64);
+        let mtime_ns = file_metadata
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_nanos().min(i64::MAX as u128) as i64);
+        conn.execute(
+            "UPDATE run_inputs SET file_hash=?2, file_name=?3, extension=?4,
+                    normalized_path=?5, size_bytes=?6, mtime_ns=?7
+             WHERE run_id=?1 AND input_order=?8",
+            rusqlite::params![
+                run_id,
+                image.file_hash,
+                name,
+                extension,
+                image.path.to_string_lossy().to_string(),
+                size_bytes,
+                mtime_ns,
+                input_order,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
 
         // Encode.
         let encoded = match encode_image_payload(
@@ -539,10 +592,15 @@ where
                     Some(&image.file_hash),
                     &mut |record: &ModelAttemptRecord| {
                         attempt_count += 1;
-                        let insert = crate::services::extraction_replay::to_attempt_insert(
+                        let mut insert = crate::services::extraction_replay::to_attempt_insert(
                             record,
                             &model_name,
                         );
+                        insert.request_image_format = Some(&encoded.format);
+                        insert.request_image_mime_type = Some(&encoded.mime_type);
+                        insert.request_image_width = Some(i64::from(encoded.width_px));
+                        insert.request_image_height = Some(i64::from(encoded.height_px));
+                        insert.request_image_bytes = Some(encoded.byte_count as i64);
                         if let Ok(row_id) = insert_attempt_full_checked(
                             conn_ref,
                             &run_id_ref,
@@ -587,6 +645,21 @@ where
                     &row_id,
                     attempt_count,
                     &stats,
+                )
+                .map_err(|e| e.to_string())?;
+                conn.execute(
+                    "UPDATE extraction_results SET request_image_format=?2,
+                            request_image_mime_type=?3, request_image_width=?4,
+                            request_image_height=?5, request_image_bytes=?6
+                     WHERE id=?1",
+                    rusqlite::params![
+                        result_id,
+                        encoded.format,
+                        encoded.mime_type,
+                        i64::from(encoded.width_px),
+                        i64::from(encoded.height_px),
+                        encoded.byte_count as i64,
+                    ],
                 )
                 .map_err(|e| e.to_string())?;
                 succeeded += 1;
