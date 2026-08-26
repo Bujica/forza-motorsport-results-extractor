@@ -79,6 +79,9 @@ pub enum Request {
     LoadImageDetail {
         image_id: String,
     },
+    RenameImages {
+        image_ids: Vec<String>,
+    },
     LoadSettings,
     /// Validate pending edits without saving (status bar shows the verdict).
     PreviewSettings {
@@ -135,6 +138,7 @@ pub enum Response {
     Rebuild(Result<forza_app::RebuildOutcome, String>),
     RunDryRunDone(String),
     ImageDetail(Result<Option<forza_app::ImageDetailData>, String>),
+    RenameDone(Result<String, String>),
     ImageDebugCases(Result<Vec<forza_db::image_debug::ImageDebugCase>, String>),
     ImageDebugDetail(Result<Option<forza_db::image_debug::ImageDebugDetail>, String>),
     Logs(Result<(String, String), String>),
@@ -236,6 +240,7 @@ pub fn handle_request(
             let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
             load_image_detail(&conn, image_id)
         })()),
+        Request::RenameImages { image_ids } => Response::RenameDone(rename_images(ctx, image_ids)),
         Request::LoadSettings => {
             let outcome = (|| -> Result<SettingsOutcome, String> {
                 let (cfg, _) =
@@ -350,6 +355,74 @@ pub fn handle_request(
             Ok((app_log, error_log))
         })()),
     }
+}
+
+fn rename_images(ctx: &WorkerContext, image_ids: &[String]) -> Result<String, String> {
+    let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+    let mut changed = 0usize;
+    let mut skipped = 0usize;
+    let mut errors = Vec::new();
+    for image_id in image_ids {
+        let row = conn.query_row(
+            "SELECT current_path, current_name, semantic_name FROM image_files WHERE id=?1",
+            rusqlite::params![image_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?)),
+        );
+        let Ok((source_text, current_name, semantic_name)) = row else {
+            skipped += 1;
+            continue;
+        };
+        let source = std::path::PathBuf::from(&source_text);
+        if !source.exists() {
+            skipped += 1;
+            let _ = conn.execute("UPDATE image_files SET file_status='missing', missing_at=datetime('now') WHERE id=?1", rusqlite::params![image_id]);
+            continue;
+        }
+        let preferred = semantic_name.or(current_name).unwrap_or_else(|| "image".into());
+        let suffix = source.extension().map(|s| format!(".{}", s.to_string_lossy())).unwrap_or_default();
+        let target_name = safe_rename_filename(&preferred, &suffix);
+        let target = source.with_file_name(target_name);
+        if source == target {
+            skipped += 1;
+            continue;
+        }
+        if target.exists() {
+            errors.push(format!("{}: target exists ({})", image_id, target.display()));
+            continue;
+        }
+        if let Err(error) = std::fs::rename(&source, &target) {
+            errors.push(format!("{}: {}", image_id, error));
+            continue;
+        }
+        if let Err(error) = conn.execute(
+            "UPDATE image_files SET current_path=?2, current_name=?3, file_status='available', missing_at=NULL, updated_at=datetime('now') WHERE id=?1",
+            rusqlite::params![image_id, target.to_string_lossy(), target.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()],
+        ) {
+            errors.push(format!("{}: DB update failed: {}", image_id, error));
+        } else {
+            changed += 1;
+        }
+    }
+    if errors.is_empty() {
+        Ok(format!("renamed {changed}; unchanged/missing {skipped}"))
+    } else {
+        Ok(format!("renamed {changed}; skipped {skipped}; errors: {}", errors.join(" | ")))
+    }
+}
+
+fn safe_rename_filename(name: &str, fallback_suffix: &str) -> String {
+    let path = std::path::Path::new(name);
+    let suffix = if path.extension().is_some() {
+        path.extension().map(|s| format!(".{}", s.to_string_lossy())).unwrap_or_default()
+    } else {
+        fallback_suffix.to_string()
+    };
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(name);
+    let mut clean: String = stem.chars().filter(|c| !"<>:\"/\\|?*".contains(*c) && !c.is_control()).collect();
+    clean = clean.split_whitespace().collect::<Vec<_>>().join(" ").trim().trim_end_matches('.').to_string();
+    if clean.is_empty() { clean = "image".into(); }
+    if matches!(clean.to_uppercase().as_str(), "CON"|"PRN"|"AUX"|"NUL") { clean.push('_'); }
+    format!("{}{}", clean.chars().take(200).collect::<String>(), suffix)
 }
 
 fn errors_log_path(log_file: &Path) -> PathBuf {

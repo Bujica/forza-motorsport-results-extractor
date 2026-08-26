@@ -72,6 +72,8 @@ pub struct RunParams {
     /// Retry only images whose latest extraction result is `error`.
     /// Mutually exclusive with `force` (Python run contract).
     pub retry_errors: bool,
+    /// When present, process only these image-file IDs from the inventory.
+    pub selected_image_file_ids: Option<Vec<String>>,
     // LLM
     pub url: String,
     pub model: String,
@@ -98,6 +100,7 @@ impl RunParams {
             gamertag: cfg.gamertag.clone(),
             force,
             retry_errors: false,
+            selected_image_file_ids: None,
             url: cfg.llm.url.clone(),
             model: cfg.llm.model.clone(),
             max_tokens: cfg.llm.max_completion_tokens,
@@ -332,7 +335,15 @@ where
             skipped_images: Vec::new(),
         }
     } else {
-        let images = find_images(&params.input_dir);
+        let mut images = find_images(&params.input_dir);
+        if let Some(selected_ids) = &params.selected_image_file_ids {
+            let selected_paths = selected_image_paths(&conn, selected_ids)?;
+            images.retain(|image| selected_paths.contains(&path_key(image)));
+            on_event(RunEvent::Log(format!(
+                "selected run: {} image(s) from Images",
+                images.len()
+            )));
+        }
         if images.is_empty() {
             on_event(RunEvent::Log("no supported images in input folder".into()));
         }
@@ -754,6 +765,26 @@ where
     mark_best_laps(&conn, Some(&params.gamertag)).map_err(|e| e.to_string())?;
 
     Ok((processed, succeeded, failed, 0, 0))
+}
+
+fn path_key(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('/', "\\").to_lowercase()
+}
+
+fn selected_image_paths(
+    conn: &Connection,
+    image_ids: &[String],
+) -> Result<std::collections::HashSet<String>, String> {
+    let mut paths = std::collections::HashSet::new();
+    let mut stmt = conn
+        .prepare("SELECT current_path FROM image_files WHERE id=?1")
+        .map_err(|e| e.to_string())?;
+    for image_id in image_ids {
+        if let Ok(path) = stmt.query_row(rusqlite::params![image_id], |row| row.get::<_, String>(0)) {
+            paths.insert(path_key(std::path::Path::new(&path)));
+        }
+    }
+    Ok(paths)
 }
 
 fn insert_attempt_full_checked(

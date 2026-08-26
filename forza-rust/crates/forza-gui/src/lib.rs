@@ -24,6 +24,8 @@ slint::include_modules!();
 thread_local! {
     static LIST_MODEL: RefCell<Option<Rc<VecModel<ImageItem>>>> = const { RefCell::new(None) };
     static ROW_CACHE: RefCell<Vec<ImageInventoryEntry>> = const { RefCell::new(Vec::new()) };
+    static SELECTED_IMAGE_IDS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    static RUN_SELECTED_IDS: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
     static REVIEW_MODEL: RefCell<Option<Rc<VecModel<ReviewItem>>>> = const { RefCell::new(None) };
     static BESTLAP_MODEL: RefCell<Option<Rc<VecModel<BestLapItem>>>> = const { RefCell::new(None) };
     static GAMERTAG: RefCell<String> = const { RefCell::new(String::new()) };
@@ -72,6 +74,34 @@ fn run_info_line(cfg: &forza_config::AppConfig) -> String {
         cfg.llm.context_length.unwrap_or(5000),
         if cfg.image.grayscale { "on" } else { "off" }
     )
+}
+
+fn image_items(entries: &[ImageInventoryEntry]) -> Vec<ImageItem> {
+    SELECTED_IMAGE_IDS.with(|selected| {
+        let selected = selected.borrow();
+        entries
+            .iter()
+            .map(|e| ImageItem {
+                id: e.id.clone().into(),
+                name: e.name.clone().into(),
+                processing: e.processing_status.clone().into(),
+                best_lap: e.best_lap_status.clone().into(),
+                file_status: e.file_status.clone().into(),
+                selected: selected.iter().any(|id| id == &e.id),
+            })
+            .collect()
+    })
+}
+
+fn update_image_selection(ui: &MainWindow) {
+    let count = SELECTED_IMAGE_IDS.with(|ids| ids.borrow().len() as i32);
+    ui.set_selected_image_count(count);
+    LIST_MODEL.with(|slot| {
+        if let Some(model) = slot.borrow().as_ref() {
+            let rows = ROW_CACHE.with(|cache| cache.borrow().clone());
+            model.set_vec(image_items(&rows));
+        }
+    });
 }
 
 /// Launch the GUI. Blocks until the window closes.
@@ -151,20 +181,14 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         ROW_CACHE.with(|slot| *slot.borrow_mut() = entries.clone());
                         LIST_MODEL.with(|slot| {
                             if let Some(model) = slot.borrow().as_ref() {
-                                let items: Vec<ImageItem> = entries
-                                    .iter()
-                                    .map(|e| ImageItem {
-                                        id: e.id.clone().into(),
-                                        name: e.name.clone().into(),
-                                        processing: e.processing_status.clone().into(),
-                                        best_lap: e.best_lap_status.clone().into(),
-                                        file_status: e.file_status.clone().into(),
-                                    })
-                                    .collect();
-                                model.set_vec(items);
+                                SELECTED_IMAGE_IDS.with(|selected| {
+                                    selected.borrow_mut().retain(|id| entries.iter().any(|e| &e.id == id));
+                                });
+                                model.set_vec(image_items(&entries));
                             }
                         });
                         if let Some(w) = ui.upgrade() {
+                            update_image_selection(&w);
                             w.set_status_text(format!("{count} image(s) [{filter_label}]").into());
                         }
                         if let Ok(options) = options
@@ -320,6 +344,17 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         }
                     }
                 },
+                Response::RenameDone(result) => {
+                    if let Some(w) = ui.upgrade() {
+                        match result {
+                            Ok(message) => {
+                                set_status(&w, &message);
+                                send_request(Request::RefreshInventory { filter: ImageInventoryFilter::default() });
+                            }
+                            Err(message) => set_status(&w, format!("rename error: {message}").as_str()),
+                        }
+                    }
+                }
                 Response::Settings(result) => match result {
                     Ok(outcome) => {
                         apply_settings(&ui, outcome);
@@ -396,6 +431,57 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 );
             },
         );
+    }
+    {
+        let ui = main.as_weak();
+        main.on_selection_toggle(move |index| {
+            let id = ROW_CACHE.with(|rows| rows.borrow().get(index as usize).map(|e| e.id.clone()));
+            if let Some(id) = id {
+                SELECTED_IMAGE_IDS.with(|selected| {
+                    let mut selected = selected.borrow_mut();
+                    if let Some(pos) = selected.iter().position(|item| item == &id) {
+                        selected.remove(pos);
+                    } else {
+                        selected.push(id);
+                    }
+                });
+                if let Some(w) = ui.upgrade() {
+                    update_image_selection(&w);
+                }
+            }
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_clear_selection(move || {
+            SELECTED_IMAGE_IDS.with(|selected| selected.borrow_mut().clear());
+            if let Some(w) = ui.upgrade() {
+                update_image_selection(&w);
+            }
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_process_selected(move || {
+            let selected = SELECTED_IMAGE_IDS.with(|ids| ids.borrow().clone());
+            if selected.is_empty() {
+                return;
+            }
+            RUN_SELECTED_IDS.with(|slot| *slot.borrow_mut() = Some(selected));
+            if let Some(w) = ui.upgrade() {
+                w.invoke_start_run(false, w.get_force_checked(), w.get_retry_checked());
+            }
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_rename_selected(move || {
+            let selected = SELECTED_IMAGE_IDS.with(|ids| ids.borrow().clone());
+            if selected.is_empty() {
+                return;
+            }
+            enqueue(Request::RenameImages { image_ids: selected }, &ui, "renaming selected images…");
+        });
     }
     {
         let ui = main.as_weak();
@@ -692,6 +778,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             let params = forza_app::RunParams {
                 force,
                 retry_errors: retry && !force,
+                selected_image_file_ids: RUN_SELECTED_IDS.with(|slot| slot.borrow_mut().take()),
                 ..params
             };
             let control = forza_app::RunControl::new();

@@ -23,6 +23,7 @@ forza-config = { path = "../forza-config" }
 forza-db = { path = "../forza-db" }
 forza-app = { path = "../forza-app" }
 forza-pipeline = { path = "../forza-pipeline" }
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 [build-dependencies]
 slint-build = "1"

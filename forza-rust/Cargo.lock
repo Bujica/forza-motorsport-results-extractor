@@ -1720,6 +1720,7 @@ dependencies = [
  "forza-config",
  "forza-db",
  "forza-pipeline",
+ "rusqlite",
  "slint",
  "slint-build",
  "tempfile",

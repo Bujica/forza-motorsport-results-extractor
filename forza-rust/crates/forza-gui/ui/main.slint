@@ -9,6 +9,7 @@ export struct ImageItem {
     processing: string,
     best-lap: string,
     file-status: string,
+    selected: bool,
 }
 
 export struct ReviewItem {
@@ -114,6 +115,10 @@ export component MainWindow inherits Window {
 
     callback refresh-requested(string, string, string, string, string, string);
     callback selection-changed(int);
+    callback selection-toggle(int);
+    callback clear-selection();
+    callback process-selected();
+    callback rename-selected();
     callback reviews-requested(string);
     callback case-decided(int, string, string);
     callback case-ignored(int);
@@ -209,6 +214,7 @@ export component MainWindow inherits Window {
     in property <[string]> image-tracks: ["all"];
     in property <[string]> image-runs: ["all"];
     in-out property <int> selected-index: -1;
+    in-out property <int> selected-image-count: 0;
     in-out property <bool> dry-run-checked: false;
     in-out property <bool> force-checked: false;
     in-out property <bool> retry-checked: false;
@@ -323,6 +329,8 @@ export component MainWindow inherits Window {
                     Button { text: "Refresh"; clicked => { root.refresh-requested(root.image-file-filter,
                         root.image-best-filter, root.image-inventory-filter, root.image-track-filter,
                         root.image-run-filter, root.image-process-filter); } }
+                    Text { text: "Selected: " + root.selected-image-count; color: #9aa4b2; vertical-alignment: center; }
+                    Button { text: "Clear selection"; enabled: root.selected-image-count > 0; clicked => { root.clear-selection(); } }
                 }
 
                 HorizontalLayout {
@@ -343,6 +351,7 @@ export component MainWindow inherits Window {
                                 width: lv.width;
                                 clicked => {
                                     root.selected-index = index;
+                                    root.selection-toggle(index);
                                     root.selection-changed(index);
                                 }
                                 Rectangle {
@@ -350,7 +359,7 @@ export component MainWindow inherits Window {
                                     width: parent.width - 2px;
                                     height: parent.height - 2px;
                                     border-radius: 4px;
-                                    background: root.selected-index == index ? #3a4048 : transparent;
+                                    background: item.selected ? #3a4048 : transparent;
                                     HorizontalLayout {
                                         padding-left: 8px;
                                         Text { text: item.name; color: #e6e6e6; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
@@ -399,6 +408,19 @@ export component MainWindow inherits Window {
                             text: "Details…";
                             enabled: root.selected-index >= 0;
                             clicked => { root.open-image-detail(root.selected-index); }
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Button {
+                                text: "Process selected";
+                                enabled: root.selected-image-count > 0 && !root.run-running;
+                                clicked => { root.process-selected(); }
+                            }
+                            Button {
+                                text: "Rename";
+                                enabled: root.selected-image-count > 0 && !root.run-running;
+                                clicked => { root.rename-selected(); }
+                            }
                         }
                     }
                 }
@@ -600,6 +622,11 @@ export component MainWindow inherits Window {
                                 Text { text: lap.time; color: lap.dirty ? #ef6b6b : #7bd88f; width: 130px; vertical-alignment: center; }
                             }
                         }
+                    }
+                    if root.best-laps.length == 0: Text {
+                        x: 12px; y: 12px;
+                        text: "No best laps found. Use Reload or Rebuild derived state.";
+                        color: #9aa4b2;
                     }
                 }
             }

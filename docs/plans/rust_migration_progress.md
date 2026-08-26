@@ -630,3 +630,14 @@ skipped (with reason).
   ao card, evitando renderização no tamanho intrínseco original. Build e
   testes direcionados passaram; confirmar visualmente executando o novo
   `forza-gui.exe` a partir de `forza-rust/target/debug`.
+
+- Sessão 26 (2026-08-26): fechada a lacuna funcional de seleção e organização
+  em Images. A lista agora mantém seleção múltipla por `image_file_id`, exibe
+  a contagem, permite limpar a seleção e oferece `Process selected`, que limita
+  a descoberta da run aos arquivos selecionados (respeitando Force/Retry).
+  `Rename` foi conectado ao worker: usa `semantic_name`/nome atual, saneia
+  nomes Windows, evita sobrescrever destinos e atualiza o caminho na DB.
+  Best Laps ganhou estado vazio explícito; a DB de teste atual contém 15
+  registros `is_best_lap=1`, portanto o carregamento deve exibir linhas após o
+  binário ser recompilado. `cargo check`, Clippy, testes direcionados e
+  `cargo build -p forza-gui` passaram.

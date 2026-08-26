@@ -22,6 +22,7 @@ fn params(db: &std::path::Path, input: &std::path::Path) -> RunParams {
         gamertag: "TestDriver".into(),
         force: false,
         retry_errors: false,
+        selected_image_file_ids: None,
         url: "http://127.0.0.1:1/api/v1/chat".into(), // unreachable on purpose
         model: "unused".into(),
         max_tokens: 10,
