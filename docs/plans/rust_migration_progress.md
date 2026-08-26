@@ -4,7 +4,7 @@ Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: temporary (deleted when migration completes or is abandoned)
 Scope: execution tracking for `2026-08-25_rust_migration_plan.md`
-Last verified: 2026-08-25
+Last verified: 2026-08-26
 
 Companion tracker for the migration plan. Update this file at the end of every
 work session: mark completed items, add dated notes for decisions taken outside
@@ -347,6 +347,31 @@ skipped (with reason).
       - [ ] renderer visual PDF (genpdf), benchmark final (Fase 5)
       - [ ] bump versão 0.1.0 → 0.21.0-beta.x, THIRD_PARTY licenças, docs uso
 
+## Auditoria de equivalência funcional — 2026-08-26
+
+- [x] comparação controlada Python/Rust das mesmas cinco imagens por hash,
+      usando `qwen3.6-35b-a3b`; respostas `raw_response` idênticas byte a byte
+      e JSONs semanticamente iguais
+- [x] integridade da DB Rust verificada: `integrity_check = ok`, sem órfãos
+      de foreign key, resultados/tentativas aceitos nas cinco imagens
+- [x] corrigir projeção para `lap_records`: entradas sem `best_lap` são
+      descartadas; piloto é sanitizado; classe da sessão é calculada sobre as
+      entradas válidas; `lap_index` segue a convenção Python
+- [~] alinhar `is_best_lap` com a projeção Python; comparação final precisa ser
+      feita em DBs novas equivalentes, pois as DBs de teste atuais têm históricos
+      diferentes e esse campo é derivado globalmente
+- [ ] corrigir metadados live: cabeçalho de run sem `seed-*`, `run_inputs`
+      completos e metadados do payload nas tentativas
+- [ ] persistir prompt/runtime snapshots, artifacts e ciclo de vida completo
+      no caminho live
+- [ ] implementar Performance real; a tela atual é somente placeholder
+- [ ] completar renderer visual PDF, artifacts de export e testes headless de
+      Image Debug
+- [ ] executar matriz final de equivalência e benchmark da GUI
+- [x] decisão: DBs atuais são somente ambientes de teste; não reparar nem
+      migrar retroativamente. A validação final usará DBs novas e descartáveis,
+      recriadas do zero em Python e Rust.
+
 ## Session log
 
 ### 2026-08-25
@@ -529,5 +554,22 @@ skipped (with reason).
   pendente para release). CLI `forza --help` lista todos subcomandos
   (gui/run/rebuild/export/maintenance). Smoke máquina limpa:
   `forza maintenance db-upgrade` → `forza run --dry-run` → GUI viva 8s.
+
+- Sessão 18 (2026-08-26): auditoria controlada da DB Rust contra uma execução
+  Python `--force` com o mesmo modelo e prompt. As cinco respostas brutas foram
+  idênticas byte a byte e os JSONs semanticamente iguais. A projeção Rust ainda
+  diverge: mantém seis entradas sem `best_lap`, usa convenções diferentes em
+  `race_class`/`is_best_lap`/`lap_index` e não preenche metadados live completos
+  (`run_inputs`, payload, snapshots e cabeçalho sem seed). O plano ganhou a
+  seção 10 com backlog P0/P1/P2 para equivalência funcional, GUI Performance,
+  PDF, validação e benchmark.
   Pendente: `cargo build --release` completo (pesado, adiado), `genpdf`
   renderer visual do PDF, benchmark final (Fase 5).
+
+- Sessão 19 (2026-08-26): Fase A iniciada no caminho compartilhado por live e
+  replay (`extraction_replay.rs`). A projeção agora descarta `bl` inválido,
+  sanitiza pilotos, calcula `race_class` via `detect_race_class` sobre entradas
+  válidas, trata track vazio/ambíguo e usa `lap_index` zero-based. Teste de
+  contrato adicionado para filtragem/classe/índice. Gates: workspace `cargo test`
+  e `cargo clippy --workspace --all-targets -- -D warnings` verdes. A regra
+  global de `is_best_lap` fica para comparação em DBs novas equivalentes.

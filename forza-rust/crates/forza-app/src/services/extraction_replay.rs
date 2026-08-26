@@ -7,7 +7,10 @@ use rusqlite::Connection;
 use forza_db::repositories::runs::{
     AttemptInsert, ResultStats, finalize_result_ok, insert_attempt_full,
 };
-use forza_domain::lap::{is_dirty_lap, normalize_weather, parse_lap_time_ms};
+use forza_domain::lap::{
+    RawGridEntry, detect_race_class, is_dirty_lap, normalize_weather, parse_lap_time_ms,
+    sanitize_driver_name,
+};
 use forza_lmstudio::protocol::{AttemptStatus, ModelAttemptRecord};
 use forza_lmstudio::response::{parse_and_validate_response, semantic_retry_issues};
 
@@ -145,8 +148,14 @@ pub fn derive_and_insert_laps(
 ) -> Result<usize, String> {
     let refs = forza_domain::reference_data::embedded_reference_data();
     let track_raw = parsed.get("t").and_then(|v| v.as_str()).unwrap_or("");
-    let track_fixed = forza_domain::normalizer::fix_track_name(track_raw, &refs)
-        .unwrap_or_else(|| track_raw.to_string());
+    let track_fixed = if track_raw.is_empty() {
+        "Unknown".to_string()
+    } else {
+        match forza_domain::normalizer::fix_track_name(track_raw, &refs) {
+            Some(track) => track,
+            None => format!("Unknown (ambiguous layout): {track_raw}"),
+        }
+    };
     let weather = normalize_weather(parsed.get("w").and_then(|v| v.as_str()));
     let temp_f = parsed.get("tf").and_then(|v| v.as_f64());
 
@@ -155,18 +164,42 @@ pub fn derive_and_insert_laps(
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
-    let mut lap_rows = 0usize;
-    for (index, entry) in entries.iter().enumerate() {
-        let driver = entry.get("dr").and_then(|v| v.as_str()).unwrap_or("");
+    // Python's process_image() builds the corrected grid only from entries
+    // with a valid lap time. Invalid/empty `bl` rows never reach lap_records
+    // and must not influence session-class detection either.
+    let mut valid_entries = Vec::new();
+    for entry in &entries {
         let car_raw = entry.get("ca").and_then(|v| v.as_str()).unwrap_or("");
         let class_field = entry.get("cl").and_then(|v| v.as_str());
-        let bl = entry.get("bl");
-
         let car = forza_domain::normalizer::fix_car_name(car_raw, &refs);
-        let race_class = forza_domain::lap::extract_class_letter(class_field);
-        let best_lap_str = bl.and_then(|v| v.as_str());
+        let best_lap_str = entry.get("bl").and_then(|v| v.as_str());
         let best_lap_ms = best_lap_str.and_then(|s| parse_lap_time_ms(Some(s)));
-        let dirty = best_lap_str.is_some_and(|s| is_dirty_lap(Some(s)));
+        let Some(best_lap_ms) = best_lap_ms else {
+            continue;
+        };
+        valid_entries.push((
+            entry,
+            car,
+            class_field.unwrap_or(""),
+            best_lap_str.unwrap_or(""),
+            best_lap_ms,
+        ));
+    }
+
+    let corrected_grid: Vec<RawGridEntry> = valid_entries
+        .iter()
+        .map(|(_, car, class_field, _, _)| RawGridEntry {
+            ca: car.clone(),
+            cl: (*class_field).to_string(),
+        })
+        .collect();
+    let race_class = detect_race_class(&corrected_grid);
+    let mut lap_rows = 0usize;
+    for (index, item) in valid_entries.iter().enumerate() {
+        let (entry, car, _, best_lap_str, best_lap_ms) = item;
+        let driver_raw = entry.get("dr").and_then(|v| v.as_str());
+        let driver = sanitize_driver_name(driver_raw);
+        let dirty = is_dirty_lap(Some(best_lap_str));
         let temp_c =
             temp_f.and_then(|tf| forza_domain::lap::fahrenheit_to_celsius(tf, 40.0, 140.0));
 
@@ -183,16 +216,16 @@ pub fn derive_and_insert_laps(
                 run_id,
                 image_file_id,
                 extraction_result_id,
-                (index + 1) as i64,
+                index as i64,
                 driver,
                 car,
-                race_class,
+                &race_class,
                 track_fixed,
                 weather,
                 temp_f,
                 temp_c,
-                best_lap_str.unwrap_or(""),
-                best_lap_ms.unwrap_or(0),
+                best_lap_str,
+                best_lap_ms,
                 dirty,
                 source_file.unwrap_or(""),
             ],

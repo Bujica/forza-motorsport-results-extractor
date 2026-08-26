@@ -963,3 +963,167 @@ O experimento deve responder, com dados reais, às seguintes perguntas:
 8. Quais partes do pipeline se beneficiam de concorrência Rust?
 
 O sucesso da migração não será apenas “compilar em Rust”. Será obter uma aplicação utilizável, modular e funcionalmente equivalente, com uma medição clara do desempenho da GUI e conclusões úteis sobre as escolhas feitas.
+
+## 10. Plano de trabalho pós-auditoria de equivalência funcional
+
+Esta seção transforma a auditoria da primeira execução real Rust contra Python em
+um backlog de conclusão. O objetivo é fechar as diferenças observáveis pelo
+usuário e pelos contratos da aplicação; não é reescrever partes que já foram
+validadas por golden tests.
+
+As DBs atualmente existentes em `data/` e `forza-rust/target/debug/data/` são
+ambientes de teste e evidência. Não haverá reparação, migração ou limpeza
+retroativa dessas bases. As correções serão feitas no código, verificadas em
+bases descartáveis e, no encerramento, Python e Rust serão inicializados do zero.
+
+### 10.1 Diagnóstico consolidado
+
+O estado atual tem três níveis diferentes de equivalência:
+
+1. **Modelo e resposta bruta — equivalente.** Nas cinco imagens comparadas, o
+   `raw_response` persistido pelo Rust foi idêntico byte a byte ao Python. Os
+   JSONs, após decodificação, também foram semanticamente iguais.
+2. **Domínio intermediário — majoritariamente equivalente.** Parsing de JSON,
+   tempos, dirty markers, normalizadores e validações já têm cobertura golden.
+3. **Projeção, persistência e apresentação — incompleta.** A execução Rust
+   persistiu 53 `lap_records`, contra 47 no Python. As seis linhas extras eram
+   entradas com `best_lap` vazio que o Python descarta. Também há divergências
+   em `race_class`, `is_best_lap` e metadados de execução.
+
+### 10.2 Fase A — Fechar a equivalência dos registros extraídos (P0)
+
+Esta é a primeira etapa porque todas as telas, rebuilds e exports dependem dela.
+
+- Centralizar em uma única função de projeção Rust a semântica de
+  `process_image()` do Python:
+  - descartar entradas sem tempo de volta válido;
+  - aplicar `fix_car_name`, `sanitize_driver_name`, clima, temperatura e dirty
+    exatamente na mesma ordem;
+  - calcular `race_class` com `detect_race_class` sobre as entradas corrigidas,
+    em vez de usar apenas a letra individual de `cl`;
+  - preservar a convenção de `lap_index` do banco Python;
+  - separar o campo de classe da volta (`car_class`) da classe da sessão quando
+    os contratos Python fazem essa distinção.
+- Comparar e corrigir a regra de `is_best_lap`. Esse campo não é uma propriedade
+  direta do JSON do modelo: é estado derivado pelo cálculo de melhores voltas.
+  O Rust deve reproduzir a seleção de candidatos, o latest-result por imagem,
+  a fronteira do jogador, desempates e atualização de `image_files`.
+- Garantir que `best_lap`, `best_lap_ms`, `dirty` e `raw_lap_json` sejam gravados
+  sem alterar símbolos, vazios ou valores nulos indevidamente.
+- Criar um teste de contrato com as cinco respostas reais atuais, comparando
+  linha a linha Python/Rust depois da projeção, e não somente o JSON bruto.
+- Reexecutar `rebuild` após a correção e comparar também a lista de vencedores,
+  `best_lap_status`, review cases e CSV.
+
+**Saída da fase:** para as cinco fixtures, mesmo número de voltas, mesmos campos
+de domínio, mesmos vencedores e mesmas decisões de revisão, salvo diferenças
+explicitamente documentadas.
+
+### 10.3 Fase B — Corrigir a persistência do run live (P0)
+
+O schema está presente e a DB passa nos testes estruturais, mas a execução real
+mostrou que o caminho live ainda não preenche todos os contratos.
+
+- Construir o cabeçalho de `extraction_runs` a partir de `AppConfig` e do
+  prompt ativo; remover defaults de produção como `seed-model`, `seed` e
+  `seed-hash` de `runs.rs`.
+- Persistir em `run_inputs` os dados do plano: `file_hash`, `file_name`,
+  `extension`, `size_bytes`, `mtime_ns`, `normalized_path`, decisão,
+  `process_reason`, `skip_reason` e informações de duplicata.
+- Persistir em `extraction_results` e `extraction_attempts` os metadados reais
+  do payload: formato, MIME, largura, altura e bytes finais enviados.
+- Criar e associar `prompt_snapshots` e `model_runtime_snapshots` no caminho
+  live, incluindo preflight único por run e dados efetivamente carregados no
+  LM Studio.
+- Persistir `model_artifacts`/raw artifacts conforme o contrato, mantendo o
+  vínculo resultado → tentativa → artefato.
+- Implementar o ciclo completo `pending → running → completed/failed/cancelled`
+  com contadores reais e atualização transacional por imagem.
+- Tratar encerramento anormal em novas execuções: detectar runs abandonados e
+  reconciliar estado no próximo `db-doctor`/startup. Isso é comportamento a
+  implementar, não uma instrução para reparar as DBs de teste atuais.
+- Preencher `review_cases.source_file`, `lap_record_id` e demais campos de
+  identidade sempre que a revisão nasce do processamento live.
+
+**Saída da fase:** uma execução real deixa na DB a mesma informação necessária
+para reconstruir, diagnosticar e exibir o processamento sem depender de valores
+de seed ou de inferência posterior.
+
+### 10.4 Fase C — Completar o comportamento do pipeline e CLI (P1)
+
+- Validar o fluxo completo de descoberta → plano → processamento → persistência
+  para normal, `--force`, `--retry-errors`, `--dry-run`, cancelamento e pausa.
+- Confirmar que `force` reprocessa sem quebrar identidade/duplicata e que
+  `retry-errors` seleciona somente o último resultado `error` por imagem.
+- Implementar/validar no CLI `maintenance db-doctor --json`, incluindo contagem
+  de runs, resultados, tentativas, órfãos, estados impossíveis e divergências
+  dos invariantes de negócio.
+- Cobrir erros parciais: falha de hash, imagem ilegível, timeout, resposta
+  inválida, retry sem sucesso e falha de persistência sem abortar o lote.
+- Confirmar unload/load automático quando o runtime carregado for incompatível
+  com a configuração, incluindo o caso observado de `eval_batch_size`.
+
+### 10.5 Fase D — Fechar outputs e recursos da aplicação (P1)
+
+- Implementar o renderer visual do PDF com uma biblioteca adequada ao layout
+  do ReportLab atual (spike comparando `genpdf` e `printpdf`). O `build_pdf_plan`
+  já valida o conteúdo; falta renderizar agrupamento, cores, símbolos, tabelas,
+  quebras de página e navegação.
+- Comparar PDF Rust/Python por inspeção manual das mesmas cinco imagens e por
+  extração de texto/contagem de seções, aceitando diferenças de fonte quando a
+  lista e os valores forem iguais.
+- Completar artifacts de export e abertura do arquivo gerado pela GUI.
+- Manter Records fora do caminho crítico, conforme decisão vigente de redesign
+  futuro; não tratar essa ausência como bloqueio da equivalência principal.
+
+### 10.6 Fase E — Completar as telas GUI (P1)
+
+- Finalizar testes headless de Image Debug, incluindo seleção de resultado,
+  oito abas, deeplink e ausência de auto-load indevido.
+- Substituir o placeholder de Performance por serviço, consultas, worker e
+  tela equivalentes ao Python: histórico de tentativas, TPS, reload elapsed,
+  reload streak, gaps relativos, policy e diagnóstico do bug de reload do LM
+  Studio.
+- Confirmar que a tela Images usa exclusivamente a projeção de status correta
+  após runs live, retries, duplicatas, arquivos ausentes e rebuild.
+- Revisar navegação e atualização cruzada entre Images, Image Detail, Review,
+  Best Laps, Image Debug, Logs, Performance e Settings.
+- Fazer um smoke manual de todas as operações que alteram dados: decisão de
+  revisão, correção, ignore, rebuild, save de configuração, force, retry,
+  pause/resume e cancel.
+
+### 10.7 Fase F — Validação final e benchmark (P2)
+
+- Congelar um conjunto de entradas por hash e gerar automaticamente uma matriz
+  Python/Rust com: contagem de imagens, resultados, tentativas, laps, reviews,
+  vencedores, CSV e texto extraído do PDF.
+- Executar a validação final em duas DBs novas, criadas pelo fluxo oficial de
+  cada aplicação, sem importar ou corrigir as DBs de desenvolvimento atuais.
+- Medir separadamente:
+  - abertura da janela;
+  - consulta e montagem da lista de imagens;
+  - primeira pintura da lista;
+  - troca de filtro;
+  - abertura do Image Detail.
+- Repetir cada medição em build dev e release, registrando máquina, quantidade
+  de imagens, tamanho da DB e número de linhas retornadas.
+- Executar os gates finais: `cargo fmt --check`, `cargo clippy -- -D
+  warnings`, testes workspace, smoke de máquina limpa e build release.
+- Atualizar versão, licenças, instruções de uso e o checklist vivo somente após
+  os critérios anteriores passarem.
+
+### 10.8 Critério de conclusão revisado
+
+A migração será considerada funcionalmente equivalente quando:
+
+- a extração live Rust produzir a mesma projeção de registros que Python para
+  uma entrada controlada com mesma resposta do modelo;
+- a DB Rust persistir todos os metadados necessários sem valores de seed;
+- uma DB nova de cada implementação puder ser criada e usada desde o primeiro
+  comando, sem depender de reparação manual;
+- normal/retry/force/rebuild/review/cancel/pause funcionarem;
+- Images, Review, Best Laps, Image Detail, Image Debug, Logs, Settings e
+  Performance forem utilizáveis no fluxo correspondente;
+- CSV e PDF exibirem a mesma lista e os mesmos valores essenciais;
+- Records continuar explicitamente marcado como fora do escopo atual;
+- o benchmark da lista estiver registrado e os gates Rust permanecerem verdes.

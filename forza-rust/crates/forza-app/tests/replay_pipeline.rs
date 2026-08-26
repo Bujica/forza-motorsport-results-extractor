@@ -4,7 +4,9 @@
 //! End-to-end replay of a recorded response through the whole pipeline:
 //! parse → validate → attempts → result → laps (Fase 7 criterion).
 
-use forza_app::services::extraction_replay::{ReplayOutcome, replay_recorded_response};
+use forza_app::services::extraction_replay::{
+    ReplayOutcome, derive_and_insert_laps, replay_recorded_response,
+};
 
 fn first_fixture(kind_prefix: &str) -> (tempfile::TempDir, String, String) {
     let dir = tempfile::tempdir().unwrap();
@@ -116,6 +118,82 @@ fn accepted_fixture_flows_through_parse_validate_and_persistence() {
         )
         .unwrap();
     assert!(!track.is_empty());
+}
+
+#[test]
+fn lap_projection_matches_python_filtering_and_session_class() {
+    let guard = tempfile::tempdir().unwrap();
+    let db_path = guard.path().join("projection.sqlite3");
+    let conn = fresh_db(&db_path);
+    let run_id = forza_db::repositories::insert_run(
+        &conn,
+        &forza_db::repositories::RunInsert::demo("20260101_000000_projection"),
+    )
+    .unwrap();
+    forza_db::repositories::images::insert_image_file(
+        &conn,
+        &forza_db::repositories::ImageFileInsert {
+            id: "img-projection",
+            file_hash: "projection-hash",
+            current_name: "projection.png",
+            current_path: r"C:\shots\projection.png",
+            size_bytes: 4096,
+            width_px: 3840,
+            height_px: 2160,
+        },
+    )
+    .unwrap();
+    let result_id = forza_db::repositories::runs::insert_input_and_result(
+        &conn,
+        &run_id,
+        "img-projection",
+        "process",
+        "running",
+        1,
+    )
+    .unwrap();
+
+    let raw = r#"{
+        "t":"Daytona International Speedway Sports Car Circuit",
+        "tf":80,
+        "w":"dry",
+        "e":[
+            {"dr":"▲ Driver One","ca":"MB #33 A45","cl":"PI 700 A","bl":"01:54.154"},
+            {"dr":"Ignored","ca":"Honda #73 Civic","cl":"PI 700 A","bl":""},
+            {"dr":"Driver Two","ca":"Honda #73 Civic","cl":"PI 700 A","bl":"01:55.000"}
+        ]
+    }"#;
+    let parsed: serde_json::Value = serde_json::from_str(raw).unwrap();
+    let lap_rows = derive_and_insert_laps(
+        &conn,
+        &run_id,
+        "img-projection",
+        &result_id,
+        &parsed,
+        Some("projection.png"),
+    )
+    .unwrap();
+
+    assert_eq!(lap_rows, 2, "empty best_lap rows must be discarded");
+    let rows: Vec<(i64, String, String, String)> = conn
+        .prepare(
+            "SELECT lap_index, driver, race_class, best_lap
+             FROM lap_records WHERE run_id=?1 ORDER BY lap_index",
+        )
+        .unwrap()
+        .query_map(rusqlite::params![run_id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            (0, "Driver One".into(), "TCR".into(), "01:54.154".into()),
+            (1, "Driver Two".into(), "TCR".into(), "01:55.000".into()),
+        ]
+    );
 }
 
 #[test]
