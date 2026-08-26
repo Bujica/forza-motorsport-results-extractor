@@ -672,3 +672,16 @@ skipped (with reason).
   desalinhamento por `stretch`. A paleta principal foi clareada, com cartões
   brancos, textos escuros, cabeçalho cinza-claro e destaques suaves para piloto
   próprio/volta suja. `cargo check -p forza-gui` passou.
+
+- Sessão 31 (2026-08-26): retomado o P1 de pipeline/CLI. `maintenance
+  db-doctor --json` passou a emitir JSON seguro e compatível com o contrato
+  Python (`database_file`, `schema_state`, `ok` e checks com `severity`,
+  `count` e `detail`), removendo a serialização manual que quebrava com aspas
+  ou caracteres especiais. O comando `run` deixou de recusar runs reais e
+  agora usa o mesmo `forza-app::spawn_extraction` da GUI, aguarda a thread,
+  imprime eventos de plano/progresso/resultado e retorna erro quando a
+  extração falha. `--force`, `--retry-errors` e `--limit` são encaminhados ao
+  runner; o limite foi adicionado ao contrato `RunParams`. `cargo fmt`,
+  `cargo check --offline -p forza-cli` e Clippy do crate passaram. A validação
+  do doctor na raiz encontrou a DB Python em estado `needs_upgrade`, esperado
+  para bancos de ambientes de teste separados; não houve alteração de dados.

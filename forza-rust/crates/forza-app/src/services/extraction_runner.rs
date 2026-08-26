@@ -74,6 +74,8 @@ pub struct RunParams {
     pub retry_errors: bool,
     /// When present, process only these image-file IDs from the inventory.
     pub selected_image_file_ids: Option<Vec<String>>,
+    /// Optional CLI cap for the number of images sent to extraction.
+    pub max_images: Option<usize>,
     // LLM
     pub url: String,
     pub model: String,
@@ -101,6 +103,7 @@ impl RunParams {
             force,
             retry_errors: false,
             selected_image_file_ids: None,
+            max_images: None,
             url: cfg.llm.url.clone(),
             model: cfg.llm.model.clone(),
             max_tokens: cfg.llm.max_completion_tokens,
@@ -298,7 +301,7 @@ where
     // ── Discovery + plan ─────────────────────────────────────────────────
     // Retry mode replaces discovery: only images whose latest result is
     // still `error` are selected (Python `_retry_error_discovery`).
-    let plan = if params.retry_errors {
+    let mut plan = if params.retry_errors {
         let failed = list_failed_images_for_retry(&conn).map_err(|e| e.to_string())?;
         let mut new_images = Vec::new();
         let mut missing = 0usize;
@@ -351,6 +354,10 @@ where
         let known_set = known_hashes(&conn).map_err(|e| e.to_string())?;
         plan_images(&images, &known_set, &known_paths, params.force).map_err(|e| e.to_string())?
     };
+
+    if let Some(max_images) = params.max_images {
+        plan.new_images.truncate(max_images);
+    }
 
     let cached = plan
         .duplicates

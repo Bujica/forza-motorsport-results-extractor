@@ -25,7 +25,7 @@ struct Cli {
 enum Command {
     /// Launch the graphical interface.
     Gui,
-    /// Process screenshots (only `--dry-run` planning is implemented).
+    /// Process screenshots through the live extraction pipeline.
     Run {
         /// Plan the run without contacting LM Studio or persisting results.
         #[arg(long)]
@@ -131,40 +131,40 @@ fn cmd_db_status(db_path: &Path) -> anyhow::Result<()> {
 fn cmd_db_doctor(db_path: &Path, json: bool) -> anyhow::Result<()> {
     let report = doctor::doctor_on_path(db_path)?;
     if json {
-        println!(
-            "{{\"ok\": {}, \"schema_status\": \"{}\", \"user_version\": {}, \"checks\": [{}]}}",
-            report.ok,
-            report.schema_status,
-            report.user_version,
-            report
-                .checks
-                .iter()
-                .map(|c| {
-                    format!(
-                        "{{\"key\": \"{}\", \"ok\": {}, \"detail\": \"{}\"}}",
-                        c.key,
-                        c.ok,
-                        c.detail.replace('"', "'")
-                    )
+        let checks: Vec<_> = report
+            .checks
+            .iter()
+            .map(|check| {
+                serde_json::json!({
+                    "key": check.key,
+                    "severity": "error",
+                    "count": if check.ok { 0 } else { 1 },
+                    "detail": check.detail,
                 })
-                .collect::<Vec<_>>()
-                .join(", ")
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "database_file": db_path,
+                "schema_state": report.schema_status,
+                "ok": report.ok,
+                "checks": checks,
+            }))?
         );
     } else {
-        println!("database_file = {}", db_path.display());
-        println!(
-            "schema_state  = {} (user_version={})",
-            report.schema_status, report.user_version
-        );
+        println!("Database: {}", db_path.display());
+        println!("Schema:   {}", report.schema_status);
+        println!("OK:       {}", report.ok);
         for check in &report.checks {
             println!(
-                "  [{}] {} — {}",
-                if check.ok { "OK" } else { "FAIL" },
+                "[{}] {}: {} - {}",
+                if check.ok { "OK" } else { "ERROR" },
                 check.key,
+                if check.ok { 0 } else { 1 },
                 check.detail
             );
         }
-        println!("ok = {}", report.ok);
     }
     if !report.ok {
         std::process::exit(1);
@@ -212,10 +212,8 @@ fn cmd_run(
             "--force and --retry-errors cannot be combined."
         ));
     }
-    if !dry_run && !force && !retry_errors {
-        return Err(anyhow::anyhow!(
-            "full runs (LM Studio extraction) are not implemented yet; use --dry-run"
-        ));
+    if !dry_run {
+        return cmd_live_run(&cfg, force, retry_errors, limit);
     }
 
     let conn = forza_db::open_connection(&cfg.database_file)?;
@@ -305,6 +303,73 @@ fn cmd_run(
         for skipped in &plan.skipped_images {
             println!("  SKIP[{}] {}", skipped.reason, skipped.path.display());
         }
+    }
+    Ok(())
+}
+
+fn cmd_live_run(
+    cfg: &forza_config::AppConfig,
+    force: bool,
+    retry_errors: bool,
+    limit: Option<usize>,
+) -> anyhow::Result<()> {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    let mut params = forza_app::RunParams::from_config(cfg, force);
+    params.retry_errors = retry_errors;
+    params.max_images = limit;
+    let failed = Arc::new(AtomicBool::new(false));
+    let failed_for_events = Arc::clone(&failed);
+    let handle = forza_app::spawn_extraction(params, forza_app::RunControl::new(), move |event| {
+        match event {
+            forza_app::RunEvent::Started { run_id, total } => {
+                println!("started: run={run_id} total={total}");
+            }
+            forza_app::RunEvent::Plan {
+                new,
+                cached,
+                batch,
+                existing,
+                skipped,
+            } => {
+                println!(
+                    "plan: new={new} cached={cached} batch={batch} existing={existing} skipped={skipped}"
+                );
+            }
+            forza_app::RunEvent::ImageStarted { name } => println!("processing: {name}"),
+            forza_app::RunEvent::ImageDone { name, ok, laps } => {
+                println!("done: {name} ok={ok} laps={laps}");
+            }
+            forza_app::RunEvent::Progress { done, total } => println!("progress: {done}/{total}"),
+            forza_app::RunEvent::Log(message) => println!("log: {message}"),
+            forza_app::RunEvent::Finished {
+                cancelled,
+                processed,
+                succeeded,
+                failed,
+                elapsed_s,
+            } => {
+                if failed > 0 {
+                    failed_for_events.store(true, Ordering::Relaxed);
+                }
+                println!(
+                    "finished: cancelled={cancelled} processed={processed} succeeded={succeeded} failed={failed} elapsed_s={elapsed_s:.3}"
+                );
+            }
+            forza_app::RunEvent::Failed(message) => {
+                failed_for_events.store(true, Ordering::Relaxed);
+                eprintln!("run failed: {message}");
+            }
+        }
+    });
+    handle
+        .join()
+        .map_err(|_| anyhow::anyhow!("extraction thread panicked"))?;
+    if failed.load(Ordering::Relaxed) {
+        return Err(anyhow::anyhow!("extraction completed with failures"));
     }
     Ok(())
 }

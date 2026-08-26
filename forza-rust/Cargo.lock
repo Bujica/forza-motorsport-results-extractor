@@ -1676,6 +1676,7 @@ dependencies = [
  "forza-gui",
  "forza-output",
  "forza-pipeline",
+ "serde_json",
 ]
 
 [[package]]
