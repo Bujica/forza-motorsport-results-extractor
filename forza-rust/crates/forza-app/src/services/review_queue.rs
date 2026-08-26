@@ -20,22 +20,28 @@ pub struct ReviewCaseEntry {
 
 /// List review cases filtered by bucket (`open`, `resolved`, `all`).
 /// `resolved` includes system-set `auto_resolved` (operator-equivalent).
-pub fn list_review_cases(conn: &Connection, bucket: &str) -> Result<Vec<ReviewCaseEntry>, String> {
+/// `image_file_id` narrows the queue to one image (Image Detail tab).
+pub fn list_review_cases(
+    conn: &Connection,
+    bucket: &str,
+    image_file_id: Option<&str>,
+) -> Result<Vec<ReviewCaseEntry>, String> {
     let status_filter = match bucket {
         "open" => "status = 'open'",
         "resolved" => "status IN ('resolved', 'auto_resolved')",
         _ => "1=1",
     };
+    let image_filter = " AND (?1 IS NULL OR image_file_id = ?1)";
     let sql = format!(
         "SELECT case_number, reason, COALESCE(\"trigger\",''), status,
                 COALESCE(outcome,''), COALESCE(driver,''), COALESCE(track,''),
                 COALESCE(model_value,''), COALESCE(decision_field,''), lap_index
-         FROM review_cases WHERE {status_filter}
+         FROM review_cases WHERE {status_filter}{image_filter}
          ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, case_number"
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map([], |row| {
+        .query_map([image_file_id], |row| {
             Ok(ReviewCaseEntry {
                 case_number: row.get(0)?,
                 reason: row.get(1)?,

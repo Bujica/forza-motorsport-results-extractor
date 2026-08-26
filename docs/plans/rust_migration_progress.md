@@ -276,9 +276,50 @@ skipped (with reason).
             - [x] 2 testes headless: input vazio termina Finished sem
                   contato com modelo; cancel-before-start → Finished
                   cancelled
-      - [ ] pendências F10b: Pause (placeholder), retry-errors seleção,
-            Image Detail completo (tabs), Image Debug, Settings editável,
-            Records (adiado por decisão do mantenedor — redesign futuro),
+      - [~] 10c — Image Detail + Settings editável:
+            - [x] forza-db `image_detail.rs`: meta com processing_status
+                  derivado (mesma projeção do inventário), laps por
+                  image, results (join runs p/ backend/prompt), attempts
+                  (ordem created_at DESC, attempt_number ASC) — payloads
+                  brutos ficam fora (Image Debug os possui, contrato GUI)
+            - [x] review queue ganhou filtro image_file_id (tab Review
+                  cases do detail); read facade `load_image_detail` em
+                  forza-app monta o bundle completo
+            - [x] forza-config `save.rs` + `ini.rs`: porte fiel do
+                  ConfigFileService (candidate strict → validate → backup
+                  timestamped .bak com sufixo contador → write atômico
+                  tmp+replace; INI ordenado próprio preserva ordem/keys
+                  desconhecidas, dropa comentários como configparser;
+                  prune das legacy keys idêntico; floats repr Python
+                  `{:?}` → "45.0"; bools True/False)
+            - [x] Settings snapshot (forza-app `services/settings.rs`):
+                  30 linhas nos 3 grupos Python com editor/status/options
+                  (ranges idênticos), status de paths ok/invalid/missing,
+                  pending overrides, mensagem de validação
+                  "Configuration errors:\n  • ..." idêntica
+            - [x] worker: WorkerContext (Mutex<AppConfig> + config_path) —
+                  gamertag sempre lido do cfg vivo (equivalente Rust do
+                  live provider callable do contrato configuration.md);
+                  LoadImageDetail/LoadSettings/PreviewSettings/SaveSettings
+                  com handlers puros testáveis
+            - [x] gamertag change → rebuild derivado no próprio save +
+                  refresh de Best Laps/Reviews/Inventory e run-info
+            - [x] Slint: página Image Detail (preview com Image::
+                  load_from_path, badges file/best/processing, 5 tabs
+                  Metadata/Laps/Review cases/Extractions/Attempts,
+                  Previous/Next/Close navegando ROW_CACHE; botão Details…
+                  na página Images); página Settings (tabela Field/Value/
+                  Status com headers de grupo, LineEdit p/ text/int/float,
+                  ComboBox True/False p/ bool, barra de validação com
+                  badge valid/changed/invalid, Discard/Save; load lazy na
+                  primeira entrada via page-changed)
+            - [x] testes: image detail round trip (2), settings
+                  load/preview/save com backup+recompute+invalid (1),
+                  snapshot rows/pending/override/path-status (4), ini
+                  parse/render (4), save INI (5)
+      - [ ] pendências F10b/c: Pause (placeholder), retry-errors seleção,
+            Image Debug (com deeplink a partir do detail), Records
+            (adiado por decisão do mantenedor — redesign futuro),
             Performance dashboard, Logs view dedicada
 - [ ] Fase 11 — Empacotamento e acabamento
 
@@ -378,3 +419,29 @@ skipped (with reason).
   tipados marshaled via invoke_from_event_loop, laps derivados por função
   compartilhada com o replay. Slint: ProgressBar inexistente no std-widgets
   → barra custom; CheckBox ok. 2 testes headless do runner.
+
+- Sessão 12 (2026-08-26): 10c Image Detail + Settings editável completos.
+  Screenshots da GUI Python (7-Image Details/6-Settings) usados como
+  referência visual. Lições técnicas: (1) ListView como filho direto de
+  VerticalLayout não aceita x/y (o layout define) — envolver em Rectangle
+  absoluto com dimensões parent-based; (2) crate configparser perde ordem
+  e keys desconhecidas → INI ordered reader/writer próprio reproduzindo o
+  comportamento observável do configparser Python (ordem preservada,
+  comentários descartados, `key = value`, linha em branco por seção);
+  (3) f64 com `{:?}` reproduz str(float) do Python ("45.0") — helper
+  py_float; (4) os keys editáveis usam prefixo LÓGICO llm.* mesmo para a
+  seção [lmstudio] (o _apply_llm do Python trata workers + todos os
+  campos do backend num só dispatcher); (5) propagação de gamertag via
+  WorkerContext com Mutex<AppConfig> — handlers sempre leem o cfg vivo,
+  equivalente Rust do live provider callable; save com mudança de
+  gamertag dispara rebuild no worker e a resposta atualiza header/
+  run-info/RUN_CONFIG na UI; (6) desvio consciente documentado: o Image
+  Detail carrega os summaries das 5 tabs num único round trip (leitura
+  limitada e pequena, ≤13 laps típicos) — payloads pesados (raw response,
+  parsed JSON) continuam fora e serão da página Image Debug; (7) Slint
+  sem split de string → options de choice ficariam impossíveis como
+  modelo dinâmico de ComboBox; text/int/float usam LineEdit (input-type
+  number/decimal) e bool usa ComboBox True/False fixo. Smoke real: GUI
+  viva 8s com banco novo via db-upgrade; fmt/clippy -D warnings/test
+  workspace 100% verdes. Próximo: retry-errors + Pause no Process,
+  depois Image Debug com deeplink.

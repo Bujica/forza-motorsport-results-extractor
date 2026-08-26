@@ -7,7 +7,9 @@
 //! defaults, and validation messages. Invalid values either fail fast
 //! (`strict`) or produce collected warnings with the documented fallback.
 
+pub mod ini;
 pub mod prompts;
+pub mod save;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

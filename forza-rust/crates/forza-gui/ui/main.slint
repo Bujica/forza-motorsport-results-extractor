@@ -1,7 +1,7 @@
 // Full GUI shell (Fase 10): sidebar navigation over the operator pages,
 // consuming application services through the typed worker channel.
 
-import { ComboBox, Button, ListView, CheckBox } from "std-widgets.slint";
+import { ComboBox, Button, ListView, CheckBox, LineEdit } from "std-widgets.slint";
 
 export struct ImageItem {
     id: string,
@@ -31,6 +31,60 @@ export struct BestLapItem {
     mine: bool,
 }
 
+export struct DetailLapItem {
+    index: int,
+    track: string,
+    class: string,
+    driver: string,
+    car: string,
+    time: string,
+    flags: string,
+    dirty: bool,
+    best: bool,
+}
+
+export struct DetailReviewItem {
+    number: int,
+    reason: string,
+    trigger: string,
+    driver: string,
+    track: string,
+    model-value: string,
+    status: string,
+}
+
+export struct DetailResultItem {
+    run: string,
+    status: string,
+    model: string,
+    attempts: int,
+    duration: string,
+    tokens: string,
+    created: string,
+}
+
+export struct DetailAttemptItem {
+    number: int,
+    reason: string,
+    status: string,
+    accepted: bool,
+    rejected: string,
+    model: string,
+    duration: string,
+    tps: string,
+    created: string,
+}
+
+export struct SettingItem {
+    key: string,
+    name: string,
+    value: string,
+    status: string,
+    editor: string,
+    options: string,
+    group: string,
+}
+
 export component MainWindow inherits Window {
     title: "Forza Motorsport Results Extractor";
     min-width: 1000px;
@@ -49,6 +103,15 @@ export component MainWindow inherits Window {
     callback rebuild-requested();
     callback start-run(bool, bool, bool);
     callback cancel-run();
+    callback open-image-detail(int);
+    callback detail-tab-changed(string);
+    callback detail-prev();
+    callback detail-next();
+    callback detail-close();
+    callback setting-edited(string, string);
+    callback discard-settings();
+    callback save-settings();
+    callback page-changed(string);
 
     in property <[ImageItem]> images;
     in property <[ReviewItem]> reviews;
@@ -59,6 +122,24 @@ export component MainWindow inherits Window {
     in property <string> doctor-report;
     in property <string> context-db;
     in property <string> context-gamertag;
+
+    in property <[DetailLapItem]> detail-laps;
+    in property <[DetailReviewItem]> detail-reviews;
+    in property <[DetailResultItem]> detail-results;
+    in property <[DetailAttemptItem]> detail-attempts;
+    in property <image> detail-preview;
+    in property <bool> detail-has-preview;
+    in property <string> detail-meta;
+    in property <string> detail-badges;
+    in property <string> detail-path;
+    in property <string> detail-tab;
+    in property <bool> detail-loaded;
+
+    in property <[SettingItem]> settings-rows;
+    in property <bool> settings-valid;
+    in property <string> settings-validation-text;
+    in property <bool> settings-dirty;
+    in property <string> settings-message;
 
     in property <bool> run-running;
     in property <float> run-percent;
@@ -98,9 +179,13 @@ export component MainWindow inherits Window {
                 { key: "review", label: "Review" },
                 { key: "best-laps", label: "Best Laps" },
                 { key: "diagnostics", label: "Diagnostics" },
+                { key: "settings", label: "Settings" },
             ]: TouchArea {
                 height: 34px;
-                clicked => { root.page = entry.key; }
+                clicked => {
+                    root.page = entry.key;
+                    root.page-changed(entry.key);
+                }
                 Rectangle {
                     border-radius: 6px;
                     background: root.nav-color(entry.key);
@@ -206,6 +291,11 @@ export component MainWindow inherits Window {
                             vertical-stretch: 1;
                             Text { x: 10px; y: 8px; width: parent.width - 20px;
                                    text: root.detail-lines; color: #cfd6dd; wrap: word-wrap; font-size: 12px; }
+                        }
+                        Button {
+                            text: "Details…";
+                            enabled: root.selected-index >= 0;
+                            clicked => { root.open-image-detail(root.selected-index); }
                         }
                     }
                 }
@@ -421,6 +511,358 @@ export component MainWindow inherits Window {
                         color: #cfd6dd;
                         wrap: word-wrap;
                     }
+                }
+            }
+
+            // ══ Image Detail page ══
+            if root.page == "image-detail": VerticalLayout {
+                spacing: 8px;
+
+                HorizontalLayout {
+                    height: 34px;
+                    spacing: 8px;
+                    Text {
+                        text: root.detail-title;
+                        color: #e6e6e6;
+                        font-weight: 800;
+                        font-size: 16px;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                    Text { text: root.detail-badges; color: #7bd88f; font-size: 11px; vertical-alignment: center; }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 1;
+
+                    // Preview card
+                    VerticalLayout {
+                        width: 460px;
+                        spacing: 6px;
+                        Text { text: "Preview"; color: #d0d0d0; font-weight: 700; }
+                        Rectangle {
+                            background: #26282c;
+                            border-radius: 6px;
+                            vertical-stretch: 1;
+                            clip: true;
+                            if root.detail-has-preview: Image {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                source: root.detail-preview;
+                                image-fit: contain;
+                            }
+                            if !root.detail-has-preview: Text {
+                                width: parent.width;
+                                y: parent.height / 2 - 10px;
+                                text: "preview unavailable";
+                                color: #6c7683;
+                                horizontal-alignment: center;
+                            }
+                        }
+                        Text { text: root.detail-path; color: #6c7683; font-size: 10px; overflow: elide; }
+                    }
+
+                    // Tabs + content
+                    VerticalLayout {
+                        spacing: 6px;
+                        horizontal-stretch: 1;
+
+                        HorizontalLayout {
+                            height: 30px;
+                            spacing: 4px;
+                            for tab in [
+                                { key: "metadata", label: "Metadata" },
+                                { key: "laps", label: "Laps" },
+                                { key: "reviews", label: "Review cases" },
+                                { key: "extractions", label: "Extractions" },
+                                { key: "attempts", label: "Attempts" },
+                            ]: Rectangle {
+                                border-radius: 4px;
+                                background: root.detail-tab == tab.key ? #3a4048 : #26282c;
+                                width: 108px;
+                                TouchArea {
+                                    clicked => { root.detail-tab-changed(tab.key); }
+                                    Rectangle {
+                                        Text {
+                                            text: tab.label;
+                                            color: root.detail-tab == tab.key ? #ffffff : #9aa4b2;
+                                            font-size: 11px;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                            width: parent.width;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            background: #26282c;
+                            border-radius: 6px;
+                            vertical-stretch: 1;
+                            clip: true;
+
+                            // Metadata tab
+                            if root.detail-tab == "metadata": Text {
+                                x: 12px; y: 10px;
+                                width: parent.width - 24px;
+                                text: root.detail-meta;
+                                color: #cfd6dd;
+                                wrap: word-wrap;
+                                font-size: 12px;
+                            }
+
+                            // Laps tab
+                            if root.detail-tab == "laps": Rectangle {
+                                x: 4px; y: 4px;
+                                width: parent.width - 8px;
+                                height: parent.height - 8px;
+                                dl := ListView {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    for lap in root.detail-laps: Rectangle {
+                                        height: 28px;
+                                        width: dl.width;
+                                        background: lap.best ? #2c3325 : (lap.dirty ? #3a2525 : transparent);
+                                        HorizontalLayout {
+                                            padding-left: 10px;
+                                            spacing: 6px;
+                                            Text { text: lap.index; color: #6c7683; width: 36px; vertical-alignment: center; }
+                                            Text { text: lap.track; color: #e6e6e6; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
+                                            Text { text: lap.class; color: #9aa4b2; width: 54px; vertical-alignment: center; }
+                                            Text { text: lap.driver; color: lap.best ? #ffd166 : #cfd6dd; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                            Text { text: lap.car; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                            Text { text: lap.time; color: lap.dirty ? #ef6b6b : #7bd88f; width: 110px; vertical-alignment: center; }
+                                            Text { text: lap.flags; color: #9aa4b2; width: 60px; vertical-alignment: center; }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Review cases tab
+                            if root.detail-tab == "reviews": Rectangle {
+                                x: 4px; y: 4px;
+                                width: parent.width - 8px;
+                                height: parent.height - 8px;
+                                drl := ListView {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    for case in root.detail-reviews: Rectangle {
+                                        height: 30px;
+                                        width: drl.width;
+                                        HorizontalLayout {
+                                            padding-left: 10px;
+                                            spacing: 6px;
+                                            Text { text: "#" + case.number; color: #6c7683; width: 48px; vertical-alignment: center; }
+                                            Text { text: case.reason; color: #ffd166; width: 110px; vertical-alignment: center; }
+                                            Text { text: case.driver; color: #e6e6e6; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                            Text { text: case.track; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                            Text { text: case.model-value; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                            Text { text: case.status; color: #9aa4b2; width: 96px; vertical-alignment: center; }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Extractions tab
+                            if root.detail-tab == "extractions": Rectangle {
+                                x: 4px; y: 4px;
+                                width: parent.width - 8px;
+                                height: parent.height - 8px;
+                                derl := ListView {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    for result in root.detail-results: Rectangle {
+                                        height: 30px;
+                                        width: derl.width;
+                                        HorizontalLayout {
+                                            padding-left: 10px;
+                                            spacing: 6px;
+                                            Text { text: result.status; color: result.status == "ok" ? #7bd88f : #ef6b6b; width: 90px; vertical-alignment: center; }
+                                            Text { text: result.model; color: #e6e6e6; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
+                                            Text { text: result.attempts + " attempt(s)"; color: #9aa4b2; width: 90px; vertical-alignment: center; }
+                                            Text { text: result.duration; color: #9aa4b2; width: 100px; vertical-alignment: center; }
+                                            Text { text: result.tokens; color: #9aa4b2; width: 110px; vertical-alignment: center; }
+                                            Text { text: result.created; color: #6c7683; width: 150px; vertical-alignment: center; overflow: elide; }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Attempts tab
+                            if root.detail-tab == "attempts": Rectangle {
+                                x: 4px; y: 4px;
+                                width: parent.width - 8px;
+                                height: parent.height - 8px;
+                                dal := ListView {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    for attempt in root.detail-attempts: Rectangle {
+                                        height: 30px;
+                                        width: dal.width;
+                                        HorizontalLayout {
+                                            padding-left: 10px;
+                                            spacing: 6px;
+                                            Text { text: attempt.number; color: #6c7683; width: 30px; vertical-alignment: center; }
+                                            Text { text: attempt.reason; color: #ffd166; width: 100px; vertical-alignment: center; overflow: elide; }
+                                            Text { text: attempt.status; color: attempt.accepted ? #7bd88f : #ef6b6b; width: 80px; vertical-alignment: center; }
+                                            Text { text: attempt.rejected; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                            Text { text: attempt.duration; color: #9aa4b2; width: 90px; vertical-alignment: center; }
+                                            Text { text: attempt.tps; color: #9aa4b2; width: 90px; vertical-alignment: center; }
+                                            Text { text: attempt.created; color: #6c7683; width: 150px; vertical-alignment: center; overflow: elide; }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    height: 34px;
+                    spacing: 8px;
+                    Button { text: "← Previous"; clicked => { root.detail-prev(); } }
+                    Button { text: "Next →"; clicked => { root.detail-next(); } }
+                    Rectangle {}
+                    Button { text: "Close"; clicked => { root.detail-close(); } }
+                }
+            }
+
+            // ══ Settings page ══
+            if root.page == "settings": VerticalLayout {
+                spacing: 8px;
+
+                HorizontalLayout {
+                    height: 40px;
+                    spacing: 8px;
+                    VerticalLayout {
+                        width: 320px;
+                        Text { text: "Settings"; color: #e6e6e6; font-weight: 800; font-size: 16px; }
+                        Text { text: "Paths, backend, model, prompt, and validation."; color: #9aa4b2; font-size: 11px; }
+                    }
+                    Rectangle {}
+                    Button { text: "Discard / reload"; clicked => { root.discard-settings(); } }
+                    Button {
+                        text: "Save changes";
+                        enabled: root.settings-dirty;
+                        clicked => { root.save-settings(); }
+                    }
+                }
+
+                // Validation bar
+                Rectangle {
+                    background: #26282c;
+                    border-radius: 6px;
+                    height: 44px;
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        spacing: 10px;
+                        Text { text: "Validation"; color: #d0d0d0; font-weight: 700; vertical-alignment: center; }
+                        Rectangle {
+                            width: 64px;
+                            height: 20px;
+                            border-radius: 10px;
+                            y: 12px;
+                            background: root.settings-dirty && root.settings-valid ? #6b5b23 :
+                                        root.settings-valid ? #2c4a2e : #5a2626;
+                            Text {
+                                text: root.settings-dirty && root.settings-valid ? "changed" :
+                                      root.settings-valid ? "valid" : "invalid";
+                                color: root.settings-valid ? #cfe8cf : #f2c4c4;
+                                font-size: 10px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                width: parent.width;
+                                height: parent.height;
+                            }
+                        }
+                        Text {
+                            text: root.settings-validation-text;
+                            color: root.settings-valid ? #9aa4b2 : #ef6b6b;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: root.settings-message;
+                            color: #ffd166;
+                            font-size: 11px;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+
+                // Rows
+                Rectangle {
+                    background: #26282c;
+                    border-radius: 6px;
+                    vertical-stretch: 1;
+                    clip: true;
+                    slv := ListView {
+                        x: 4px; y: 4px;
+                        width: parent.width - 8px;
+                        height: parent.height - 8px;
+                        for row[index] in root.settings-rows: VerticalLayout {
+                            // Group header
+                            if index == 0 || root.settings-rows[index - 1].group != row.group: Rectangle {
+                                height: 26px;
+                                background: #303338;
+                                Text {
+                                    x: 10px;
+                                    text: row.group;
+                                    color: #e6e6e6;
+                                    font-weight: 700;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            // Editable row
+                            Rectangle {
+                                height: 30px;
+                                background: row.status == "pending" ? #3a3325 : transparent;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    spacing: 8px;
+                                    Text { text: row.name; color: #cfd6dd; width: 200px; vertical-alignment: center; overflow: elide; }
+                                    if row.editor == "bool": ComboBox {
+                                        width: 110px;
+                                        model: ["True", "False"];
+                                        current-index: row.value == "True" ? 0 : 1;
+                                        selected => { root.setting-edited(row.key, self.current-value); }
+                                    }
+                                    if row.editor != "bool": LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: row.value;
+                                        input-type: row.editor == "int" ? InputType.number :
+                                                    row.editor == "float" ? InputType.decimal : InputType.text;
+                                        edited(value) => { root.setting-edited(row.key, value); }
+                                    }
+                                    Text {
+                                        text: row.status;
+                                        width: 70px;
+                                        vertical-alignment: center;
+                                        font-size: 11px;
+                                        color: row.status == "pending" ? #ffd166 :
+                                               row.status == "ok" ? #7bd88f :
+                                               row.status == "invalid" ? #ef6b6b : #d19a3d;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: "Edit values in the value column. Saving validates first, creates a backup of the current INI, then writes the file.";
+                    color: #6c7683;
+                    font-size: 11px;
                 }
             }
         }

@@ -3,10 +3,14 @@
 //! Services never know widgets; they return typed results that any
 //! front-end can consume.
 
+// Unit tests assert with unwrap/expect like the other crates.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 pub mod services;
 
 pub use services::{
-    BestLapEntry, DoctorSummary, ImageInventoryEntry, ImageInventoryFilter, ImageInventoryService,
-    RebuildOutcome, ReviewCaseEntry, RunEvent, RunParams, decide_case, ignore_case,
-    list_clean_flat_entries, list_review_cases, rebuild, run_doctor, spawn_extraction,
+    BestLapEntry, DoctorSummary, ImageDetailData, ImageInventoryEntry, ImageInventoryFilter,
+    ImageInventoryService, RebuildOutcome, ReviewCaseEntry, RunEvent, RunParams, SettingRow,
+    SettingsSnapshot, decide_case, ignore_case, list_clean_flat_entries, list_review_cases,
+    load_image_detail, rebuild, run_doctor, settings_snapshot, spawn_extraction,
 };
