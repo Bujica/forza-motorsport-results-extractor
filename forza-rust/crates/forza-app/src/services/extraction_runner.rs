@@ -12,7 +12,8 @@ use crate::services::run_control::RunControl;
 use forza_config::AppConfig;
 use forza_db::repositories::runs::{
     RunInsert, RunMetadata, complete_run, find_image_id_by_hash, insert_processed_input,
-    insert_run, insert_run_input_only, mark_run_running, update_run_metadata,
+    insert_prompt_snapshot, insert_run, insert_run_input_only, link_run_prompt_snapshot,
+    mark_run_running, update_run_metadata,
 };
 use forza_db::repositories::{
     known_hashes, known_path_hashes, list_failed_images_for_retry, mark_best_laps,
@@ -378,6 +379,19 @@ where
     )
     .map_err(|e| e.to_string())?;
     let input_dir = params.input_dir.to_string_lossy().into_owned();
+    let system_prompt = prompts::get_system_prompt(&params.prompt_id).unwrap_or_default();
+    let prompt_hash = prompts::payload_hash(system_prompt);
+    let prompt_snapshot_id = prompts::snapshot_id(&params.prompt_id);
+    insert_prompt_snapshot(
+        &conn,
+        &prompt_snapshot_id,
+        &params.prompt_id,
+        &prompt_hash,
+        system_prompt,
+    )
+    .map_err(|e| e.to_string())?;
+    link_run_prompt_snapshot(&conn, &run_id, &prompt_snapshot_id, &prompt_hash)
+        .map_err(|e| e.to_string())?;
     update_run_metadata(
         &conn,
         &run_id,
@@ -386,9 +400,7 @@ where
             model: &params.model,
             input_dir: &input_dir,
             prompt_name: &params.prompt_id,
-            // The immutable prompt snapshot will own the content hash once
-            // snapshot persistence is added; never write a seed placeholder.
-            prompt_hash: None,
+            prompt_hash: Some(&prompt_hash),
             workers: 1,
             image_format: &params.image_format,
             max_width: i64::from(params.max_width),

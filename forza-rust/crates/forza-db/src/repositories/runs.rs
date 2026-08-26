@@ -38,6 +38,41 @@ pub struct RunMetadata<'a> {
     pub timeout_read: i64,
 }
 
+/// Insert an immutable prompt snapshot and return its deterministic identity.
+/// Reusing an existing identical snapshot is allowed; changing the payload
+/// under the same identity is rejected by the unique key and the caller's
+/// deterministic hash.
+pub fn insert_prompt_snapshot(
+    conn: &Connection,
+    id: &str,
+    prompt_name: &str,
+    content_hash: &str,
+    system_text: &str,
+) -> Result<String, DbError> {
+    conn.execute(
+        "INSERT INTO prompt_snapshots
+            (id, prompt_name, version_label, content_hash, system_text,
+             user_text_template, response_schema_json, created_at)
+         VALUES (?1, ?2, 'embedded', ?3, ?4, NULL, NULL, datetime('now'))
+         ON CONFLICT(prompt_name, content_hash) DO NOTHING",
+        params![id, prompt_name, content_hash, system_text],
+    )?;
+    Ok(id.to_string())
+}
+
+pub fn link_run_prompt_snapshot(
+    conn: &Connection,
+    run_id: &str,
+    snapshot_id: &str,
+    prompt_hash: &str,
+) -> Result<(), DbError> {
+    conn.execute(
+        "UPDATE extraction_runs SET prompt_snapshot_id=?2, prompt_hash=?3 WHERE id=?1",
+        params![run_id, snapshot_id, prompt_hash],
+    )?;
+    Ok(())
+}
+
 impl RunInsert {
     pub fn demo(id: &str) -> Self {
         Self {

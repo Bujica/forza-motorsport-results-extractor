@@ -19,7 +19,10 @@ pub use laps::{ExportFlatRow, LapRecordInsert, insert_lap_record, list_clean_fla
 pub use reviews::{
     ReviewCaseInsert, insert_review_case, query_review_candidates, upsert_review_cases,
 };
-pub use runs::{RunInsert, RunMetadata, insert_run, update_run_metadata};
+pub use runs::{
+    RunInsert, RunMetadata, insert_prompt_snapshot, insert_run, link_run_prompt_snapshot,
+    update_run_metadata,
+};
 
 use crate::error::DbError;
 use rusqlite::Connection;
