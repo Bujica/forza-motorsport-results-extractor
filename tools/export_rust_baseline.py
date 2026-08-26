@@ -100,6 +100,13 @@ def dump_schema(conn: sqlite3.Connection) -> dict:
             "checks": checks,
             "create_sql": create_sql,
         }
+    index_statements = conn.execute(
+        "SELECT name, sql FROM sqlite_master "
+        "WHERE type='index' AND sql IS NOT NULL ORDER BY name"
+    ).fetchall()
+    inventory["index_sql"] = [
+        {"name": name, "sql": sql} for name, sql in index_statements
+    ]
     triggers = conn.execute(
         "SELECT name, tbl_name, sql FROM sqlite_master WHERE type='trigger' ORDER BY name"
     ).fetchall()

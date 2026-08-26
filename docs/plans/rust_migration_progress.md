@@ -90,7 +90,29 @@ skipped (with reason).
       - [x] forza-config: structs completas, defaults Python idênticos,
             strict vs lenient+warnings, validate_config com mensagens iguais,
             prompts registry; 7 testes de contrato INI
-- [ ] Fase 3 — SQLite e queries da GUI
+- [~] Fase 3 — SQLite e queries da GUI
+      - [x] schema Rust completo gerado do inventário do baseline Python:
+            `tools/generate_db_schema.py` → `schema_ddl.rs` (17 tabelas + 32
+            índices, DDL byte-fiel; STRICT tables respeitadas)
+      - [x] versionamento via `PRAGMA user_version` (decisão única registrada;
+            Empty/Current/Incompatible; recusa banco de versão estrangeira)
+      - [x] contrato de conexão (WAL + busy_timeout 5s + foreign_keys ON)
+            com testes próprios, inclusive no pool r2d2
+      - [x] repositories mínimos p/ seed e testes (images/runs/laps/reviews)
+            com `seed_demo_database`
+      - [x] query de inventário da GUI com projeção derivada de
+            processing_status fiel a `image_reads.py` (latest result →
+            skipped-via-latest-input → unprocessed), filtros por status,
+            run_id, best_lap_status, missing-files, ordenação estável
+      - [x] doctor básico: integrity_check, foreign_key_check, schema_state
+      - [x] CLI: `config-check`, `maintenance db-status/db-doctor/db-upgrade/
+            db-reset` funcionando end-to-end (smoke em temp dir)
+      - [x] testes: connection contract (3), schema lifecycle (5),
+            constraints (8: índices parciais ×2, RESTRICT/CASCADE/SET NULL,
+            vocabulários), gui_inventory (5), doctor_basic (3) = 24 testes
+      - [ ] pendência Fase 3½/Fase 8: repositories completos (frontier,
+            review refresh/corrections, artifacts), checks de contadores de
+            run no doctor, validação de paths graváveis no config-check
 - [ ] Fase 4 — Vertical slice da GUI
 - [ ] Fase 5 — Benchmark da lista de imagens
 - [ ] Fase 6 — Imagens e planejamento
@@ -125,3 +147,11 @@ skipped (with reason).
   Pendência da Fase 2 encerrada: nenhuma bloqueante; validação de paths
   graváveis (os.access W_OK) ficou de fora do validate_config Rust por agora
   — decidir abordagem Windows quando a CLI consumir (Fase 2½/Fase 3).
+- Sessão 4: Fase 3 implementada. Lições técnicas: (1) o baseline usa STRICT
+  tables — `run_inputs.id` é INTEGER enquanto todo o resto é VARCHAR/UUID;
+  (2) `created_at` etc. são NOT NULL SEM default no DDL (o Python preenche
+  no cliente) — repositórios Rust precisam sempre fornecer timestamps;
+  (3) referência mútua attempts↔results exige criação sob foreign_keys=OFF;
+  (4) CASE...ELSE sobre coluna NULL engole o COALESCE seguinte — projeção
+  precisa de WHEN ... IS NULL THEN NULL. CLI de manutenção operacional.
+  Próximo: Fase 4 (vertical slice Slint da GUI).

@@ -3412,5 +3412,135 @@
       "create_sql": "CREATE TABLE run_inputs (\n\tid INTEGER NOT NULL, \n\trun_id VARCHAR NOT NULL, \n\timage_file_id VARCHAR, \n\tinput_order INTEGER NOT NULL, \n\tinput_path VARCHAR NOT NULL, \n\tnormalized_path VARCHAR, \n\tfile_name VARCHAR, \n\textension VARCHAR, \n\tfile_hash VARCHAR, \n\tsize_bytes INTEGER, \n\tmtime_ns INTEGER, \n\tdecision VARCHAR NOT NULL, \n\tprocess_reason VARCHAR, \n\tskip_reason VARCHAR, \n\tduplicate_kind VARCHAR, \n\tduplicate_of_hash VARCHAR, \n\tduplicate_of_input_id INTEGER, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tCONSTRAINT ck_run_inputs_order CHECK (input_order >= 0), \n\tCONSTRAINT ck_run_inputs_size_nonnegative CHECK (size_bytes IS NULL OR size_bytes >= 0), \n\tFOREIGN KEY(run_id) REFERENCES extraction_runs (id) ON DELETE CASCADE, \n\tFOREIGN KEY(image_file_id) REFERENCES image_files (id) ON DELETE SET NULL, \n\tFOREIGN KEY(duplicate_of_input_id) REFERENCES run_inputs (id) ON DELETE SET NULL\n,\n\tCONSTRAINT ck_run_inputs_decision_vocab CHECK (decision IN ('process', 'skip', 'duplicate', 'missing', 'unsupported', 'outside_input', 'hash_failed')),\n\tCONSTRAINT ck_run_inputs_duplicate_kind_vocab CHECK (duplicate_kind IS NULL OR duplicate_kind IN ('hash', 'batch'))\n)"
     }
   },
-  "triggers": []
+  "triggers": [],
+  "index_sql": [
+    {
+      "name": "idx_attempts_one_accepted_per_result",
+      "sql": "CREATE UNIQUE INDEX idx_attempts_one_accepted_per_result ON extraction_attempts (extraction_result_id) WHERE accepted = 1"
+    },
+    {
+      "name": "idx_attempts_reason",
+      "sql": "CREATE INDEX idx_attempts_reason ON extraction_attempts (attempt_reason)"
+    },
+    {
+      "name": "idx_attempts_run_status",
+      "sql": "CREATE INDEX idx_attempts_run_status ON extraction_attempts (run_id, status)"
+    },
+    {
+      "name": "idx_external_lap_records_active_order",
+      "sql": "CREATE INDEX idx_external_lap_records_active_order ON external_lap_records (track, race_class, best_lap_ms) WHERE active = 1"
+    },
+    {
+      "name": "idx_extraction_results_image_file",
+      "sql": "CREATE INDEX idx_extraction_results_image_file ON extraction_results (image_file_id)"
+    },
+    {
+      "name": "idx_extraction_results_status",
+      "sql": "CREATE INDEX idx_extraction_results_status ON extraction_results (status)"
+    },
+    {
+      "name": "idx_extraction_runs_created",
+      "sql": "CREATE INDEX idx_extraction_runs_created ON extraction_runs (created_at)"
+    },
+    {
+      "name": "idx_extraction_runs_status",
+      "sql": "CREATE INDEX idx_extraction_runs_status ON extraction_runs (status)"
+    },
+    {
+      "name": "idx_image_files_best_lap_status",
+      "sql": "CREATE INDEX idx_image_files_best_lap_status ON image_files (best_lap_status)"
+    },
+    {
+      "name": "idx_image_files_duplicate_of",
+      "sql": "CREATE INDEX idx_image_files_duplicate_of ON image_files (duplicate_of_image_file_id)"
+    },
+    {
+      "name": "idx_image_files_file_modified_at",
+      "sql": "CREATE INDEX idx_image_files_file_modified_at ON image_files (file_modified_at)"
+    },
+    {
+      "name": "idx_image_files_hash",
+      "sql": "CREATE INDEX idx_image_files_hash ON image_files (file_hash)"
+    },
+    {
+      "name": "idx_image_files_status",
+      "sql": "CREATE INDEX idx_image_files_status ON image_files (file_status)"
+    },
+    {
+      "name": "idx_image_flags_image_file_type_status",
+      "sql": "CREATE INDEX idx_image_flags_image_file_type_status ON image_flags (image_file_id, flag_type, status)"
+    },
+    {
+      "name": "idx_lap_records_best_gui_order",
+      "sql": "CREATE INDEX idx_lap_records_best_gui_order ON lap_records (track, race_class, weather, best_lap_ms, driver, car) WHERE is_best_lap = 1"
+    },
+    {
+      "name": "idx_lap_records_best_track_class_car",
+      "sql": "CREATE INDEX idx_lap_records_best_track_class_car ON lap_records (track_normalized, race_class, car_normalized) WHERE is_best_lap = 1"
+    },
+    {
+      "name": "idx_lap_records_best_track_class_driver",
+      "sql": "CREATE INDEX idx_lap_records_best_track_class_driver ON lap_records (track_normalized, race_class, driver_normalized) WHERE is_best_lap = 1"
+    },
+    {
+      "name": "idx_lap_records_image_file",
+      "sql": "CREATE INDEX idx_lap_records_image_file ON lap_records (image_file_id)"
+    },
+    {
+      "name": "idx_lap_records_track_class_car",
+      "sql": "CREATE INDEX idx_lap_records_track_class_car ON lap_records (track_normalized, race_class, car_normalized)"
+    },
+    {
+      "name": "idx_lap_records_track_class_driver",
+      "sql": "CREATE INDEX idx_lap_records_track_class_driver ON lap_records (track_normalized, race_class, driver_normalized)"
+    },
+    {
+      "name": "idx_model_artifacts_attempt",
+      "sql": "CREATE INDEX idx_model_artifacts_attempt ON model_artifacts (attempt_id)"
+    },
+    {
+      "name": "idx_model_artifacts_run_image_file",
+      "sql": "CREATE INDEX idx_model_artifacts_run_image_file ON model_artifacts (run_id, image_file_id)"
+    },
+    {
+      "name": "idx_model_runtime_run_kind",
+      "sql": "CREATE INDEX idx_model_runtime_run_kind ON model_runtime_snapshots (run_id, snapshot_kind)"
+    },
+    {
+      "name": "idx_review_cases_outcome",
+      "sql": "CREATE INDEX idx_review_cases_outcome ON review_cases (outcome)"
+    },
+    {
+      "name": "idx_review_cases_reason_trigger",
+      "sql": "CREATE INDEX idx_review_cases_reason_trigger ON review_cases (reason, \"trigger\")"
+    },
+    {
+      "name": "idx_review_cases_status_reason",
+      "sql": "CREATE INDEX idx_review_cases_status_reason ON review_cases (status, reason)"
+    },
+    {
+      "name": "idx_review_corrections_image_file_field",
+      "sql": "CREATE INDEX idx_review_corrections_image_file_field ON review_corrections (image_file_id, field)"
+    },
+    {
+      "name": "idx_run_inputs_hash",
+      "sql": "CREATE INDEX idx_run_inputs_hash ON run_inputs (file_hash)"
+    },
+    {
+      "name": "idx_run_inputs_image_file",
+      "sql": "CREATE INDEX idx_run_inputs_image_file ON run_inputs (image_file_id)"
+    },
+    {
+      "name": "idx_run_inputs_process_reason",
+      "sql": "CREATE INDEX idx_run_inputs_process_reason ON run_inputs (run_id, process_reason)"
+    },
+    {
+      "name": "idx_run_inputs_run_decision",
+      "sql": "CREATE INDEX idx_run_inputs_run_decision ON run_inputs (run_id, decision)"
+    },
+    {
+      "name": "idx_runtime_one_preflight_per_run",
+      "sql": "CREATE UNIQUE INDEX idx_runtime_one_preflight_per_run ON model_runtime_snapshots (run_id) WHERE snapshot_kind = 'preflight'"
+    }
+  ]
 }

@@ -1,6 +1,6 @@
 {
   "alembic_version": 1,
-  "export_artifacts": 0,
+  "export_artifacts": 1,
   "external_lap_records": 0,
   "external_record_imports": 0,
   "extraction_attempts": 691,
