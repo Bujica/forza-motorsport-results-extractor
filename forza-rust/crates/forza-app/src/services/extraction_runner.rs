@@ -357,6 +357,11 @@ where
 
     if let Some(max_images) = params.max_images {
         plan.new_images.truncate(max_images);
+        // The run-start event describes the work this invocation can actually
+        // perform, not the number of files discovered before applying the CLI
+        // cap. Keep the full discovery count in the plan only when no cap was
+        // requested.
+        plan.total = plan.new_images.len();
     }
 
     let cached = plan
