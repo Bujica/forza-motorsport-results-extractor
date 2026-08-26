@@ -113,7 +113,30 @@ skipped (with reason).
       - [ ] pendência Fase 3½/Fase 8: repositories completos (frontier,
             review refresh/corrections, artifacts), checks de contadores de
             run no doctor, validação de paths graváveis no config-check
-- [ ] Fase 4 — Vertical slice da GUI
+- [~] Fase 4 — Vertical slice da GUI
+      - [x] abertura da janela (Slint, ui/main.slint compilado por
+            slint-build em build.rs) — smoke real: processo vivo 6s, sem
+            crash, config+sqlite+query no caminho
+      - [x] carregamento de configuração (forza-config com validação e
+            erros claros se DB não existe)
+      - [x] abertura do SQLite via contrato de conexão
+      - [x] consulta da lista de imagens pelo ImageInventoryService
+            (forza-app), nunca SQL direto na GUI
+      - [x] filtro básico por processing status (ComboBox → request tipada)
+      - [x] seleção de imagem + painel de detalhes (dados já carregados,
+            sem nova query)
+      - [x] logs/mensagens de erro: linha de status com loading/contagem/
+            error; tracing-subscriber env-filter no binário
+      - [x] worker: thread dedicada com runtime Tokio current_thread;
+            requests/responses tipados; retorno via invoke_from_event_loop;
+            estado de UI (Rc models) em thread_local — nunca compartilhado
+            entre threads
+      - [x] subcomando `forza gui` no CLI (contrato §4.8 restaurado com
+            #[command(name)] após lint de prefixo)
+      - [x] testes headless do worker/service (3): handler puro, filtro,
+            round trip de thread com canal tipado
+      - [ ] pendências para Fase 10: navegação entre seções, ícones/estilo,
+            paginação da lista, testes de contrato de callbacks .slint
 - [ ] Fase 5 — Benchmark da lista de imagens
 - [ ] Fase 6 — Imagens e planejamento
 - [ ] Fase 7 — Cliente LM Studio e pipeline
@@ -155,3 +178,14 @@ skipped (with reason).
   (4) CASE...ELSE sobre coluna NULL engole o COALESCE seguinte — projeção
   precisa de WHEN ... IS NULL THEN NULL. CLI de manutenção operacional.
   Próximo: Fase 4 (vertical slice Slint da GUI).
+- Sessão 5: Fase 4 implementada e smokeada (janela real abre e consulta o
+  banco). Lições técnicas: (1) Slint não aceita modificadores `public` em
+  callbacks/properties — já são expostos por padrão; ListView vem de
+  std-widgets; (2) `invoke_from_event_loop` exige Send: estado de UI em Rc
+  mora em thread_local! da UI thread, nunca capturado pelo worker;
+  (3) Weak<MainWindow> é Send e é a ponte correta worker→UI; (4) lints do
+  workspace (forbid unsafe_code, unwrap warn) precisam ser sobrescritos no
+  crate GUI porque o código gerado pelo slint-build viola ambos; (5) clippy
+  pede renomear variantes com prefixo comum (`Db*`) — preservar contratos
+  CLI kebab-case com #[command(name)] em vez de renomear. Próximo:
+  Fase 5 benchmark da lista + depois pipeline.

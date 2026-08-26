@@ -23,6 +23,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Launch the graphical interface.
+    Gui,
     /// Validate the configuration file and print a report.
     ConfigCheck,
     /// Database maintenance operations.
@@ -35,16 +37,20 @@ enum Command {
 #[derive(Subcommand)]
 enum MaintenanceCommand {
     /// Show the schema state of the runtime database.
+    #[command(name = "db-status")]
     Status,
     /// Run the basic DB doctor battery.
+    #[command(name = "db-doctor")]
     Doctor {
         /// Emit the report as JSON.
         #[arg(long)]
         json: bool,
     },
     /// Create the schema on an empty database (refuses foreign versions).
+    #[command(name = "db-upgrade")]
     Upgrade,
     /// Delete the database files after warning about WAL/SHM sidecars.
+    #[command(name = "db-reset")]
     Reset {
         /// Skip the confirmation prompt.
         #[arg(long)]
@@ -171,6 +177,7 @@ fn cmd_db_reset(db_path: &Path, yes: bool) -> anyhow::Result<()> {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::Gui => forza_gui::run(&cli.config),
         Command::ConfigCheck => cmd_config_check(&cli.config),
         Command::Maintenance { command } => match command {
             MaintenanceCommand::Status => cmd_db_status(&database_file(&cli.config)),

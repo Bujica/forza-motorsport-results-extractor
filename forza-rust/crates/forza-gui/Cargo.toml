@@ -6,9 +6,35 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "forza-gui"
 path = "src/main.rs"
 
-[lints]
-workspace = true
+[dependencies]
+slint = "1"
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+forza-config = { path = "../forza-config" }
+forza-db = { path = "../forza-db" }
+forza-app = { path = "../forza-app" }
+
+[build-dependencies]
+slint-build = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+# Slint-generated code emits #[allow(unsafe_code)] and is full of unwraps,
+# which conflicts with the workspace-level policy. The GUI crate opts out of
+# the inherited table; hand-written code still avoids unwraps where practical.
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+unwrap_used = "allow"
+expect_used = "allow"

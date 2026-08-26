@@ -6,5 +6,9 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[dependencies]
+forza-db = { path = "../forza-db" }
+rusqlite = { version = "0.40", features = ["bundled"] }
+
 [lints]
 workspace = true
