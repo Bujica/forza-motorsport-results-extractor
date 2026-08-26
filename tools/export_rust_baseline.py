@@ -198,21 +198,24 @@ def dump_responses(
         )
         written["accepted"] += 1
     query_malformed = (
-        "SELECT a.id, a.raw_response, a.parse_error, a.validation_issues_json "
+        "SELECT a.id, a.raw_response, a.parsed_json, a.parse_error, "
+        "a.validation_status, a.validation_issues_json "
         "FROM extraction_attempts a "
         "WHERE a.raw_response IS NOT NULL AND ("
         "(a.parse_error IS NOT NULL AND a.parse_error != '') OR "
-        "(a.validation_status IS NOT NULL AND a.validation_status NOT IN ('', 'ok'))) "
-        "ORDER BY a.id LIMIT ?"
+        "(a.validation_status IS NOT NULL AND a.validation_status NOT IN ('', 'ok')))"
+        " ORDER BY a.id LIMIT ?"
     )
     for row in conn.execute(query_malformed, (sample,)):
-        aid, raw, perr, vissues = row
+        aid, raw, parsed, perr, vstatus, vissues = row
         payload = {
             "kind": "malformed",
             "attempt_id": aid,
             "parse_error": perr,
+            "validation_status": vstatus,
             "validation_issues": json.loads(vissues) if vissues else [],
             "raw_response": raw,
+            "parsed_json": json.loads(parsed) if isinstance(parsed, str) else None,
         }
         (out_dir / f"malformed_{aid}.json").write_text(
             json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"

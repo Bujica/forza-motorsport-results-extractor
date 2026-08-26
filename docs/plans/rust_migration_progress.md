@@ -162,7 +162,37 @@ skipped (with reason).
       - [ ] pendência Fase 7/8: persistir run_inputs do plano (decisões no
             vocabulário completo incl. unsupported/outside_input), retry-errors
             seleção, integração com LM Studio
-- [ ] Fase 7 — Cliente LM Studio e pipeline
+- [~] Fase 7 — Cliente LM Studio e pipeline
+      - [x] `forza-lmstudio`: RuntimeClient (health/list_models/
+            runtime_status com warnings fiéis — physical_batch_size
+            uncomparável, context_length ">= desejado", vision, reasoning)
+      - [x] backend de extração: payload LM Studio native (system_prompt +
+            input[image data_url, text]), retry adaptativo transport →
+            json_retry → semantic_retry, attempt records completos,
+            request_hash canônico, mensagens redacted
+      - [x] performance: PerformanceTracker (slow streak por TPS floor +
+            elapsed) com flag reload_before_next (persistência Fase 8)
+      - [x] response.rs: clean fences, parse estrito, validação t/e/dr/ca/cl/bl
+            com lap times, semantic_retry_issues (track_empty/entries_empty/
+            all_best_laps_null)
+      - [x] json_repair mínimo e HONESTO — descoberta-chave: as 25 fixtures
+            "malformed" reais fazem strict-parse OK hoje; falhavam em
+            validação sob regras antigas. Repair cobre só sintaxe observável
+            (prose wrap, trailing commas, aspas simples/curvas)
+      - [x] GOLDEN 50/50: todas as respostas reais parseiam+validam; accepted
+            batem parsed_json armazenado exatamente
+      - [x] persistência: insert_attempt_full (evidência completa),
+            finalize_result_ok, replay_recorded_response em forza-app derivando
+            laps normalizados (track/car/class/weather/temp/dirty) das entries
+      - [x] critério atendido: fixture gravada percorre parse → validate →
+            attempts → result → laps sem LM Studio (2 testes e2e verdes)
+      - [x] live smoke contra LM Studio real (`examples/lm_health.rs`):
+            17 modelos, modelo configurado carregado; detectou mismatch REAL
+            de eval_batch_size carregado ≠ 1024 desejado (registrar para
+            investigar no app Python também!)
+      - [ ] pendência Fase 8: runtime snapshots/prompt snapshots persistidos,
+            unload/load automático quando incompatível, artifacts raw,
+            integração run_service completa
 - [ ] Fase 8 — Runs, revisão e rebuild
 - [ ] Fase 9 — CSV, PDF e telas de resultado
 - [ ] Fase 10 — GUI completa
@@ -221,5 +251,16 @@ skipped (with reason).
   (3) image 0.25: PngEncoder::write_image usa ExtendedColorType (.into()) e
   ordem (buf,w,h,color); JpegEncoder honra quality; webp é lossless-only;
   (4) thiserror rejeita campo String chamado source.
+- Sessão 7: Fase 7 implementada. ACHADO IMPORTANTE: as 25 respostas
+  "malformed" do baseline passam na validação ATUAL do Python — eram
+  rejeições de regras antigas; json_repair real nunca precisou consertar
+  sintaxe nelas. Porte do repair ficou mínimo e cobre só o observado.
+  Live smoke contra LM Studio local detectou eval_batch_size carregado
+  diferente do desejado (1024) — vale verificar no Python se esse warning
+  também aparece lá (deve, mesmo código de comparação). Lições técnicas:
+  (1) tokio::main exige feature rt-multi-thread quando flavor default;
+  (2) invoke_from_event_loop já validado na Fase 4 reaplicado no worker do
+  backend assíncrono; (3) clippy let-chains: edition 2024 suporta if let &&
+  condição — usar em vez de ifs aninhados.
 - Sessão 6b: orza run --dry-run smokeado com imagens sintéticas reais —
   batch duplicate detectado corretamente entre arquivos idênticos.

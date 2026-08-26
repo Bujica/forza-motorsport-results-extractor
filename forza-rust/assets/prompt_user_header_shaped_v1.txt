@@ -1,0 +1,15 @@
+Return ONLY a minified JSON in a single line, without markdown.
+Schema: {"t":string,"tf":int,"w":"dry"|"rain"|"unknown","e":[{"dr":string,"ca":string,"cl":string,"bl":string}]}
+Fields:
+    t: Track name from the visible header area. Read the track name line and also inspect the small subtitle/layout line directly under it. If a layout subtitle is visible, append it to the track family in the same string. Do not stop at the family name for tracks with visible layouts such as Sports Car Circuit, Club Circuit, Full Circuit, Short Circuit, Grand Prix Circuit, or Road Course. Ignore the logo and never use the image filename.
+    tf: Track Temperature (°F)
+    w: Check the icon next to "Weather". If it shows rain drops, w="rain". Otherwise, w="dry". Use "unknown" if not visible
+    e: List of drivers:
+        dr: Driver/gamertag text only. Do NOT include position numbers, level numbers, PI/class values, badges/icons/symbols/emojis.
+        ca: Car
+        cl: Class (PI Number+Letter). If the class letter is in a small separate box, include it, e.g. "PI 400 D".
+        bl: Best lap ("MM:SS.mmm" | null). Read only the BEST LAP cell. If that cell shows a time, return that time. If another column such as TOTAL says DNF, still return the BEST LAP time. Return null only when the BEST LAP cell itself is empty, --, ---, DNF, or DNQ.
+Rules:
+    1. The warning-shaped dirty-lap icon is the ONLY dirty indicator. It appears as a triangle pointing upwards, located immediately to the right of the time digits within the BEST LAP cell. Do not assume a lap is dirty based on text color changes or row highlighting; only append ▲ if this specific triangular icon is visually present.
+    2. If the BEST LAP cell has a warning icon beside its time, append ▲ (e.g., "07:23.097▲"), including rows where TOTAL is DNF. Otherwise, return only the time (e.g., "00:34.149")
+    3. Include all drivers, even if DNF
