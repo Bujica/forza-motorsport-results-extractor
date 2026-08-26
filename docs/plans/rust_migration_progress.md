@@ -641,3 +641,11 @@ skipped (with reason).
   registros `is_best_lap=1`, portanto o carregamento deve exibir linhas após o
   binário ser recompilado. `cargo check`, Clippy, testes direcionados e
   `cargo build -p forza-gui` passaram.
+
+- Sessão 27 (2026-08-26): corrigida a classificação de imagens recém-
+  inventariadas. `known_hashes`/`known_path_hashes` agora consultam apenas
+  imagens com resultado final (`ok`/`error`), alinhando o planner ao Python;
+  uma imagem nova selecionada em Images não vira mais `skipped` apenas por
+  ter sido registrada no refresh. O cartão Best Laps recebeu altura explícita
+  para impedir o colapso visual do `ListView`; a consulta já retornava as 15
+  linhas. Build GUI passou após o ajuste.

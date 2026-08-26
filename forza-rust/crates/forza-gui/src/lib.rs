@@ -182,7 +182,9 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         LIST_MODEL.with(|slot| {
                             if let Some(model) = slot.borrow().as_ref() {
                                 SELECTED_IMAGE_IDS.with(|selected| {
-                                    selected.borrow_mut().retain(|id| entries.iter().any(|e| &e.id == id));
+                                    selected
+                                        .borrow_mut()
+                                        .retain(|id| entries.iter().any(|e| &e.id == id));
                                 });
                                 model.set_vec(image_items(&entries));
                             }
@@ -349,9 +351,13 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         match result {
                             Ok(message) => {
                                 set_status(&w, &message);
-                                send_request(Request::RefreshInventory { filter: ImageInventoryFilter::default() });
+                                send_request(Request::RefreshInventory {
+                                    filter: ImageInventoryFilter::default(),
+                                });
                             }
-                            Err(message) => set_status(&w, format!("rename error: {message}").as_str()),
+                            Err(message) => {
+                                set_status(&w, format!("rename error: {message}").as_str())
+                            }
                         }
                     }
                 }
@@ -480,7 +486,13 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             if selected.is_empty() {
                 return;
             }
-            enqueue(Request::RenameImages { image_ids: selected }, &ui, "renaming selected images…");
+            enqueue(
+                Request::RenameImages {
+                    image_ids: selected,
+                },
+                &ui,
+                "renaming selected images…",
+            );
         });
     }
     {

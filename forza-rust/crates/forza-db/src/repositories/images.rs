@@ -8,7 +8,11 @@ use rusqlite::{Connection, params};
 /// path -> stored hash for available files (drives existing/duplicate planning).
 pub fn known_path_hashes(conn: &Connection) -> Result<HashMap<String, String>, DbError> {
     let mut stmt = conn.prepare(
-        "SELECT current_path, file_hash FROM image_files WHERE file_status = 'available'",
+        "SELECT i.current_path, i.file_hash FROM image_files i
+         WHERE i.file_status = 'available'
+           AND EXISTS (SELECT 1 FROM extraction_results r
+                       WHERE r.image_file_id = i.id
+                         AND r.status IN ('ok', 'error'))",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -23,8 +27,13 @@ pub fn known_path_hashes(conn: &Connection) -> Result<HashMap<String, String>, D
 
 /// Distinct hashes already present in the inventory.
 pub fn known_hashes(conn: &Connection) -> Result<HashSet<String>, DbError> {
-    let mut stmt =
-        conn.prepare("SELECT DISTINCT file_hash FROM image_files WHERE file_status = 'available'")?;
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT i.file_hash FROM image_files i
+         WHERE i.file_status = 'available'
+           AND EXISTS (SELECT 1 FROM extraction_results r
+                       WHERE r.image_file_id = i.id
+                         AND r.status IN ('ok', 'error'))",
+    )?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
     let mut out = HashSet::new();
     for hash in rows {

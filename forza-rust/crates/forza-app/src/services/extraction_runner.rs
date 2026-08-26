@@ -780,7 +780,8 @@ fn selected_image_paths(
         .prepare("SELECT current_path FROM image_files WHERE id=?1")
         .map_err(|e| e.to_string())?;
     for image_id in image_ids {
-        if let Ok(path) = stmt.query_row(rusqlite::params![image_id], |row| row.get::<_, String>(0)) {
+        if let Ok(path) = stmt.query_row(rusqlite::params![image_id], |row| row.get::<_, String>(0))
+        {
             paths.insert(path_key(std::path::Path::new(&path)));
         }
     }

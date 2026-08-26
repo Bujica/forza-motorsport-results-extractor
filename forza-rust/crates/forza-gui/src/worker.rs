@@ -366,7 +366,13 @@ fn rename_images(ctx: &WorkerContext, image_ids: &[String]) -> Result<String, St
         let row = conn.query_row(
             "SELECT current_path, current_name, semantic_name FROM image_files WHERE id=?1",
             rusqlite::params![image_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
         );
         let Ok((source_text, current_name, semantic_name)) = row else {
             skipped += 1;
@@ -378,8 +384,13 @@ fn rename_images(ctx: &WorkerContext, image_ids: &[String]) -> Result<String, St
             let _ = conn.execute("UPDATE image_files SET file_status='missing', missing_at=datetime('now') WHERE id=?1", rusqlite::params![image_id]);
             continue;
         }
-        let preferred = semantic_name.or(current_name).unwrap_or_else(|| "image".into());
-        let suffix = source.extension().map(|s| format!(".{}", s.to_string_lossy())).unwrap_or_default();
+        let preferred = semantic_name
+            .or(current_name)
+            .unwrap_or_else(|| "image".into());
+        let suffix = source
+            .extension()
+            .map(|s| format!(".{}", s.to_string_lossy()))
+            .unwrap_or_default();
         let target_name = safe_rename_filename(&preferred, &suffix);
         let target = source.with_file_name(target_name);
         if source == target {
@@ -387,7 +398,11 @@ fn rename_images(ctx: &WorkerContext, image_ids: &[String]) -> Result<String, St
             continue;
         }
         if target.exists() {
-            errors.push(format!("{}: target exists ({})", image_id, target.display()));
+            errors.push(format!(
+                "{}: target exists ({})",
+                image_id,
+                target.display()
+            ));
             continue;
         }
         if let Err(error) = std::fs::rename(&source, &target) {
@@ -406,22 +421,40 @@ fn rename_images(ctx: &WorkerContext, image_ids: &[String]) -> Result<String, St
     if errors.is_empty() {
         Ok(format!("renamed {changed}; unchanged/missing {skipped}"))
     } else {
-        Ok(format!("renamed {changed}; skipped {skipped}; errors: {}", errors.join(" | ")))
+        Ok(format!(
+            "renamed {changed}; skipped {skipped}; errors: {}",
+            errors.join(" | ")
+        ))
     }
 }
 
 fn safe_rename_filename(name: &str, fallback_suffix: &str) -> String {
     let path = std::path::Path::new(name);
     let suffix = if path.extension().is_some() {
-        path.extension().map(|s| format!(".{}", s.to_string_lossy())).unwrap_or_default()
+        path.extension()
+            .map(|s| format!(".{}", s.to_string_lossy()))
+            .unwrap_or_default()
     } else {
         fallback_suffix.to_string()
     };
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(name);
-    let mut clean: String = stem.chars().filter(|c| !"<>:\"/\\|?*".contains(*c) && !c.is_control()).collect();
-    clean = clean.split_whitespace().collect::<Vec<_>>().join(" ").trim().trim_end_matches('.').to_string();
-    if clean.is_empty() { clean = "image".into(); }
-    if matches!(clean.to_uppercase().as_str(), "CON"|"PRN"|"AUX"|"NUL") { clean.push('_'); }
+    let mut clean: String = stem
+        .chars()
+        .filter(|c| !"<>:\"/\\|?*".contains(*c) && !c.is_control())
+        .collect();
+    clean = clean
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .trim_end_matches('.')
+        .to_string();
+    if clean.is_empty() {
+        clean = "image".into();
+    }
+    if matches!(clean.to_uppercase().as_str(), "CON" | "PRN" | "AUX" | "NUL") {
+        clean.push('_');
+    }
     format!("{}{}", clean.chars().take(200).collect::<String>(), suffix)
 }
 
