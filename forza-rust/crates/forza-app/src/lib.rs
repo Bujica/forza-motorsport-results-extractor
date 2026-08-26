@@ -7,6 +7,6 @@ pub mod services;
 
 pub use services::{
     BestLapEntry, DoctorSummary, ImageInventoryEntry, ImageInventoryFilter, ImageInventoryService,
-    RebuildOutcome, ReviewCaseEntry, decide_case, ignore_case, list_clean_flat_entries,
-    list_review_cases, rebuild, run_doctor,
+    RebuildOutcome, ReviewCaseEntry, RunEvent, RunParams, decide_case, ignore_case,
+    list_clean_flat_entries, list_review_cases, rebuild, run_doctor, spawn_extraction,
 };

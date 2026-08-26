@@ -1653,12 +1653,15 @@ dependencies = [
 name = "forza-app"
 version = "0.1.0"
 dependencies = [
+ "forza-config",
  "forza-db",
  "forza-domain",
  "forza-lmstudio",
+ "forza-pipeline",
  "rusqlite",
  "serde_json",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -1716,6 +1719,7 @@ dependencies = [
  "forza-app",
  "forza-config",
  "forza-db",
+ "forza-pipeline",
  "slint",
  "slint-build",
  "tempfile",

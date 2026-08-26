@@ -1,7 +1,7 @@
 // Full GUI shell (Fase 10): sidebar navigation over the operator pages,
 // consuming application services through the typed worker channel.
 
-import { ComboBox, Button, ListView } from "std-widgets.slint";
+import { ComboBox, Button, ListView, CheckBox } from "std-widgets.slint";
 
 export struct ImageItem {
     id: string,
@@ -47,6 +47,8 @@ export component MainWindow inherits Window {
     callback bestlaps-requested();
     callback doctor-requested();
     callback rebuild-requested();
+    callback start-run(bool, bool, bool);
+    callback cancel-run();
 
     in property <[ImageItem]> images;
     in property <[ReviewItem]> reviews;
@@ -58,9 +60,21 @@ export component MainWindow inherits Window {
     in property <string> context-db;
     in property <string> context-gamertag;
 
+    in property <bool> run-running;
+    in property <float> run-percent;
+    in property <int> run-done;
+    in property <int> run-total;
+    in property <string> run-rate;
+    in property <string> run-eta;
+    in property <[string]> run-log;
+    in property <string> run-info;
+
     in-out property <string> page: "images";
     in-out property <string> filter-value: "all";
     in-out property <int> selected-index: -1;
+    in-out property <bool> dry-run-checked: false;
+    in-out property <bool> force-checked: false;
+    in-out property <bool> retry-checked: false;
 
     function nav-color(target: string) -> color {
         return root.page == target ? #3a4048 : transparent;
@@ -80,6 +94,7 @@ export component MainWindow inherits Window {
 
             for entry in [
                 { key: "images", label: "Images" },
+                { key: "process", label: "Process" },
                 { key: "review", label: "Review" },
                 { key: "best-laps", label: "Best Laps" },
                 { key: "diagnostics", label: "Diagnostics" },
@@ -191,6 +206,98 @@ export component MainWindow inherits Window {
                             vertical-stretch: 1;
                             Text { x: 10px; y: 8px; width: parent.width - 20px;
                                    text: root.detail-lines; color: #cfd6dd; wrap: word-wrap; font-size: 12px; }
+                        }
+                    }
+                }
+            }
+
+            // ══ Process page ══
+            if root.page == "process": VerticalLayout {
+                spacing: 8px;
+
+                // Run Config card
+                Rectangle {
+                    background: #26282c;
+                    border-radius: 6px;
+                    HorizontalLayout {
+                        padding: 10px;
+                        spacing: 10px;
+                        VerticalLayout {
+                            spacing: 6px;
+                            HorizontalLayout {
+                                spacing: 10px;
+                                CheckBox { text: "Dry-run"; checked <=> root.dry-run-checked; }
+                                CheckBox { text: "Force"; checked <=> root.force-checked; }
+                                CheckBox { text: "Retry errors"; checked <=> root.retry-checked; enabled: false; }
+                                CheckBox { text: "Debug"; enabled: false; }
+                            }
+                            Text { text: root.run-info; color: #9aa4b2; font-size: 11px; }
+                        }
+                        Rectangle {}
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Button {
+                                text: root.run-running ? "Running…" : "Run All";
+                                enabled: !root.run-running;
+                                clicked => { root.start-run(root.dry-run-checked, root.force-checked, root.retry-checked); }
+                            }
+                            Button {
+                                text: "Cancel";
+                                enabled: root.run-running;
+                                clicked => { root.cancel-run(); }
+                            }
+                        }
+                    }
+                }
+
+                // Progress card
+                Rectangle {
+                    background: #26282c;
+                    border-radius: 6px;
+                    HorizontalLayout {
+                        padding: 10px;
+                        spacing: 10px;
+                        VerticalLayout {
+                            spacing: 6px;
+                            Text { text: "Progress"; color: #d0d0d0; font-weight: 700; }
+                            Rectangle {
+                                height: 14px;
+                                background: #3a3d42;
+                                border-radius: 7px;
+                                Rectangle {
+                                    x: 0; y: 0;
+                                    height: parent.height;
+                                    border-radius: 7px;
+                                    background: #4c8bf5;
+                                    width: parent.width * root.run-percent / 100;
+                                }
+                            }
+                            HorizontalLayout {
+                                Text { text: root.run-running ? "Running" : "Ready"; color: #9aa4b2; horizontal-stretch: 1; }
+                                Text { text: root.run-done + " / " + root.run-total; color: #9aa4b2; horizontal-stretch: 1; horizontal-alignment: center; }
+                                Text { text: "Rate: " + root.run-rate; color: #9aa4b2; horizontal-stretch: 1; horizontal-alignment: center; }
+                                Text { text: "ETA: " + root.run-eta; color: #9aa4b2; horizontal-stretch: 1; horizontal-alignment: right; }
+                            }
+                        }
+                    }
+                }
+
+                // Event Log card
+                Rectangle {
+                    background: #26282c;
+                    border-radius: 6px;
+                    vertical-stretch: 1;
+                    clip: true;
+                    elv := ListView {
+                        x: 6px; y: 6px;
+                        width: parent.width - 12px;
+                        height: parent.height - 12px;
+                        for line in root.run-log: Text {
+                            height: 18px;
+                            width: elv.width;
+                            text: line;
+                            color: #cfd6dd;
+                            font-size: 11px;
                         }
                     }
                 }

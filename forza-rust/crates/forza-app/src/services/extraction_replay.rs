@@ -78,14 +78,6 @@ pub fn replay_recorded_response(
     let parsed = parse_and_validate_response(raw_response)?;
     let issues = semantic_retry_issues(&parsed);
 
-    let track_raw = parsed.get("t").and_then(|v| v.as_str()).unwrap_or("");
-    let temp_f = parsed.get("tf").and_then(|v| v.as_f64());
-    let weather = normalize_weather(parsed.get("w").and_then(|v| v.as_str()));
-
-    let refs = forza_domain::reference_data::embedded_reference_data();
-    let track_fixed = forza_domain::normalizer::fix_track_name(track_raw, &refs)
-        .unwrap_or_else(|| track_raw.to_string());
-
     let mut attempt_row_ids = Vec::new();
     // The caller supplies a single recorded response; model it as attempt #1.
     let record = ModelAttemptRecord {
@@ -124,7 +116,40 @@ pub fn replay_recorded_response(
     finalize_result_ok(conn, extraction_result_id, &attempt_row_id, 1, &stats)
         .map_err(|e| e.to_string())?;
 
-    // Derive laps from parsed entries.
+    // Derive laps from parsed entries (shared with the live extraction path).
+    let lap_rows = derive_and_insert_laps(
+        conn,
+        run_id,
+        image_file_id,
+        extraction_result_id,
+        &parsed,
+        None,
+    )?;
+
+    Ok(ReplayOutcome {
+        accepted: true,
+        lap_rows,
+        attempt_row_ids,
+    })
+}
+
+/// Insert lap records derived from a validated parsed response.
+/// Shared by the recorded-replay and the live extraction paths.
+pub fn derive_and_insert_laps(
+    conn: &Connection,
+    run_id: &str,
+    image_file_id: &str,
+    extraction_result_id: &str,
+    parsed: &serde_json::Value,
+    source_file: Option<&str>,
+) -> Result<usize, String> {
+    let refs = forza_domain::reference_data::embedded_reference_data();
+    let track_raw = parsed.get("t").and_then(|v| v.as_str()).unwrap_or("");
+    let track_fixed = forza_domain::normalizer::fix_track_name(track_raw, &refs)
+        .unwrap_or_else(|| track_raw.to_string());
+    let weather = normalize_weather(parsed.get("w").and_then(|v| v.as_str()));
+    let temp_f = parsed.get("tf").and_then(|v| v.as_f64());
+
     let entries = parsed
         .get("e")
         .and_then(|v| v.as_array())
@@ -151,8 +176,8 @@ pub fn replay_recorded_response(
                 (id, run_id, image_file_id, extraction_result_id, lap_index,
                  driver, driver_normalized, car, car_normalized,
                  race_class, track, track_normalized, weather, temp_f, temp_c,
-                 best_lap, best_lap_ms, dirty, created_at)
-             VALUES (?1,?2,?3,?4,?5,?6,LOWER(?6),?7,LOWER(?7),?8,?9,LOWER(?9),?10,?11,?12,?13,?14,?15,datetime('now'))",
+                 best_lap, best_lap_ms, dirty, source_file, created_at)
+             VALUES (?1,?2,?3,?4,?5,?6,LOWER(?6),?7,LOWER(?7),?8,?9,LOWER(?9),?10,?11,?12,?13,?14,?15,?16,datetime('now'))",
             rusqlite::params![
                 id,
                 run_id,
@@ -169,15 +194,11 @@ pub fn replay_recorded_response(
                 best_lap_str,
                 best_lap_ms,
                 dirty,
+                source_file.unwrap_or(""),
             ],
         )
         .map_err(|e| e.to_string())?;
         lap_rows += 1;
     }
-
-    Ok(ReplayOutcome {
-        accepted: true,
-        lap_rows,
-        attempt_row_ids,
-    })
+    Ok(lap_rows)
 }

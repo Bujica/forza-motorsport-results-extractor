@@ -22,6 +22,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 forza-config = { path = "../forza-config" }
 forza-db = { path = "../forza-db" }
 forza-app = { path = "../forza-app" }
+forza-pipeline = { path = "../forza-pipeline" }
 
 [build-dependencies]
 slint-build = "1"

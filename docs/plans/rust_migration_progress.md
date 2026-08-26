@@ -256,10 +256,30 @@ skipped (with reason).
       - [x] SMOKE REAL end-to-end: banco criado via CLI, 15 laps seedadas
             das 3 fixtures aceitas reais, `forza rebuild` → 5 winners,
             `forza export` → CSV com dados reais, GUI viva 10s navegável
-      - [ ] pendências F10b: Settings editável (.ini write), Image Detail
-            completo (tabs), Image Debug/Diagnostics avançados, Records +
-            import externo, Performance dashboard/worker/telas, Logs view,
-            process view com progresso/cancelamento do backend live
+      - [~] Process view com backend live (10b):
+            - [x] `extraction_runner.rs`: thread dedicada + cancel
+                  cooperativo entre imagens (Arc<AtomicBool>); eventos
+                  tipados Started/Plan/ImageStarted/ImageDone/Progress/Log/
+                  Finished/Failed; discovery→plan→run row→inventory
+                  decisions (skip/duplicate/hash_failed)→encode→ensure_
+                  loaded→extract com attempts persistidos→laps derivados
+                  (função compartilhada `derive_and_insert_laps` com o
+                  replay)→finalize→counters→mark_best_laps ao final
+            - [x] Slint: página Process fiel ao screenshot Python (Run
+                  Config com Dry-run/Force checkboxes, Run All/Cancel,
+                  info line; Progress com barra custom %/done/total/rate/
+                  ETA; Event Log ListView) — ProgressBar não existe no
+                  std-widgets atual (barra custom)
+            - [x] Dry-run via worker (RunDryRun com input_dir) logando o
+                  plano no Event Log; Run All dispara runner real contra
+                  o LM Studio configurado
+            - [x] 2 testes headless: input vazio termina Finished sem
+                  contato com modelo; cancel-before-start → Finished
+                  cancelled
+      - [ ] pendências F10b: Pause (placeholder), retry-errors seleção,
+            Image Detail completo (tabs), Image Debug, Settings editável,
+            Records (adiado por decisão do mantenedor — redesign futuro),
+            Performance dashboard, Logs view dedicada
 - [ ] Fase 11 — Empacotamento e acabamento
 
 ## Session log
@@ -352,3 +372,9 @@ skipped (with reason).
   Lições Slint: (1) ListView precisa dimensões x/y/w/h via parent explícito
   (binding loop senão); (2) sem public em callbacks; (3) font-family
   monospace não existe; (4) LocalKey<OnceCell> exige .with() para get/set.
+
+- Sessão 11: 10b Process view live implementado. Runner em thread própria
+  (isola o worker de requests), cancel cooperativo entre imagens, eventos
+  tipados marshaled via invoke_from_event_loop, laps derivados por função
+  compartilhada com o replay. Slint: ProgressBar inexistente no std-widgets
+  → barra custom; CheckBox ok. 2 testes headless do runner.

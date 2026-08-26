@@ -226,6 +226,80 @@ pub struct ResultStats<'a> {
     pub duration_ms: i64,
 }
 
+/// Insert a standalone run_input row (skip/duplicate/missing decisions —
+/// no extraction_result attached).
+pub fn insert_run_input_only(
+    conn: &Connection,
+    run_id: &str,
+    image_file_id: Option<&str>,
+    decision: &str,
+    input_order: i64,
+    input_path: &str,
+) -> Result<i64, DbError> {
+    conn.execute(
+        "INSERT INTO run_inputs (run_id, image_file_id, decision, input_order, input_path, created_at)
+         SELECT COALESCE(MAX(id), 0) + 1, ?1, ?2, ?3, ?4, datetime('now') FROM run_inputs",
+        params![run_id, image_file_id, decision, input_order, input_path],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Transition a run to running.
+pub fn mark_run_running(conn: &Connection, run_id: &str) -> Result<(), DbError> {
+    conn.execute(
+        "UPDATE extraction_runs SET status='running', started_at=datetime('now') WHERE id=?1",
+        params![run_id],
+    )?;
+    Ok(())
+}
+
+/// Finalize a run with outcome counters.
+#[allow(clippy::too_many_arguments)]
+pub fn complete_run(
+    conn: &Connection,
+    run_id: &str,
+    status: &str,
+    total_inputs: i64,
+    processed: i64,
+    succeeded: i64,
+    failed: i64,
+    skipped: i64,
+    duplicate_count: i64,
+) -> Result<(), DbError> {
+    conn.execute(
+        "UPDATE extraction_runs SET status=?2, finished_at=datetime('now'),
+            total_inputs=?3, to_process=?3, processed=?4, succeeded=?5,
+            failed=?6, skipped=?7, duplicate_count=?8
+         WHERE id=?1",
+        params![
+            run_id,
+            status,
+            total_inputs,
+            processed,
+            succeeded,
+            failed,
+            skipped,
+            duplicate_count
+        ],
+    )?;
+    Ok(())
+}
+
+/// Find an available image row by content hash, if any.
+pub fn find_image_id_by_hash(
+    conn: &Connection,
+    file_hash: &str,
+) -> Result<Option<String>, DbError> {
+    let id = conn
+        .query_row(
+            "SELECT id FROM image_files WHERE file_hash=?1 AND file_status='available' LIMIT 1",
+            params![file_hash],
+            |r| r.get::<_, String>(0),
+        )
+        .ok();
+    Ok(id)
+}
+
 /// Insert an accepted attempt for a result. The caller must ensure the
 /// result's own status is consistent (`ck_attempt_acceptance_status`).
 #[allow(clippy::too_many_arguments)]

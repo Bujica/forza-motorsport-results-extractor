@@ -32,6 +32,11 @@ pub enum Request {
     ListBestLaps,
     RunDoctor,
     RunRebuild,
+    /// Dry-run planning through the worker (live runs use the dedicated
+    /// extraction runner thread instead).
+    RunDryRun {
+        input_dir: String,
+    },
 }
 
 /// Typed response delivered back to the UI thread.
@@ -49,6 +54,7 @@ pub enum Response {
     BestLaps(Result<Vec<forza_app::BestLapEntry>, String>),
     Doctor(Result<forza_app::DoctorSummary, String>),
     Rebuild(Result<forza_app::RebuildOutcome, String>),
+    RunDryRunDone(String),
 }
 
 /// Pure handler (no channels) so tests can exercise it headlessly.
@@ -102,6 +108,35 @@ pub fn handle_request(
             let conn = forza_db::open_connection(database_file).map_err(|e| e.to_string())?;
             rebuild(&conn, gamertag)
         })()),
+        Request::RunDryRun { input_dir } => {
+            let summary = (|| -> Result<String, String> {
+                let conn = forza_db::open_connection(database_file).map_err(|e| e.to_string())?;
+                let known_paths =
+                    forza_db::repositories::known_path_hashes(&conn).map_err(|e| e.to_string())?;
+                let known =
+                    forza_db::repositories::known_hashes(&conn).map_err(|e| e.to_string())?;
+                let images = forza_pipeline::find_images(std::path::Path::new(input_dir));
+                let plan = forza_pipeline::plan_images(&images, &known, &known_paths, false)
+                    .map_err(|e| e.to_string())?;
+                Ok(format!(
+                    "dry-run: total={} new={} cached={} batch={} existing={} skipped={}",
+                    plan.total,
+                    plan.process_count(),
+                    plan.duplicates
+                        .iter()
+                        .filter(|d| d.reason == "cached")
+                        .count(),
+                    plan.duplicates
+                        .iter()
+                        .filter(|d| d.reason == "batch")
+                        .count(),
+                    plan.existing_images.len(),
+                    plan.skipped_images.len()
+                ))
+            })()
+            .unwrap_or_else(|e| format!("dry-run failed: {e}"));
+            Response::RunDryRunDone(summary)
+        }
     }
 }
 

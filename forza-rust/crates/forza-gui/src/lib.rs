@@ -11,9 +11,11 @@ pub mod worker;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 
-use slint::{ModelRc, VecModel};
+use slint::{Model, ModelRc, VecModel};
 
 use crate::worker::{Request, Response};
 use forza_app::{ImageInventoryEntry, ImageInventoryFilter};
@@ -26,6 +28,20 @@ thread_local! {
     static REVIEW_MODEL: RefCell<Option<Rc<VecModel<ReviewItem>>>> = const { RefCell::new(None) };
     static BESTLAP_MODEL: RefCell<Option<Rc<VecModel<BestLapItem>>>> = const { RefCell::new(None) };
     static GAMERTAG: RefCell<String> = const { RefCell::new(String::new()) };
+    static RUN_LOG: RefCell<Option<Rc<VecModel<slint::SharedString>>>> = const { RefCell::new(None) };
+    static RUN_CANCEL: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
+    static RUN_CONFIG: RefCell<Option<forza_app::RunParams>> = const { RefCell::new(None) };
+}
+
+fn append_run_log(line: String) {
+    RUN_LOG.with(|slot| {
+        if let Some(model) = slot.borrow().as_ref() {
+            model.push(line.into());
+            while model.row_count() > 500 {
+                model.remove(0);
+            }
+        }
+    });
 }
 
 fn set_status(ui: &MainWindow, text: &str) {
@@ -54,6 +70,25 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     main.set_images(ModelRc::from(inventory_model.clone()));
     LIST_MODEL.with(|slot| *slot.borrow_mut() = Some(inventory_model.clone()));
     GAMERTAG.with(|slot| *slot.borrow_mut() = cfg.gamertag.clone());
+
+    // Run log model + params snapshot for the extraction runner.
+    let run_log_model = Rc::new(VecModel::<slint::SharedString>::from(Vec::new()));
+    main.set_run_log(ModelRc::from(run_log_model.clone()));
+    RUN_LOG.with(|slot| *slot.borrow_mut() = Some(run_log_model));
+    RUN_CONFIG
+        .with(|slot| *slot.borrow_mut() = Some(forza_app::RunParams::from_config(&cfg, false)));
+    main.set_run_info(
+        format!(
+            "{} · {} · prompt {} · {} · ctx {} · grayscale {}",
+            cfg.llm.url,
+            cfg.llm.model,
+            cfg.prompt.active,
+            cfg.llm.image_format,
+            cfg.llm.context_length.unwrap_or(5000),
+            if cfg.image.grayscale { "on" } else { "off" }
+        )
+        .into(),
+    );
 
     // Context header values.
     main.set_context_db(db_path.display().to_string().into());
@@ -188,6 +223,12 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         }
                     }
                 }
+                Response::RunDryRunDone(summary) => {
+                    if let Some(w) = ui.upgrade() {
+                        append_run_log(summary.clone());
+                        set_status(&w, "dry-run complete");
+                    }
+                }
                 Response::Rebuild(result) => {
                     if let Some(w) = ui.upgrade() {
                         match result {
@@ -313,6 +354,119 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
         let ui = main.as_weak();
         main.on_rebuild_requested(move || {
             enqueue(Request::RunRebuild, &ui, "rebuilding derived state…");
+        });
+    }
+
+    // ── Live extraction runner (own thread, cooperative cancel) ──────────
+    {
+        let ui = main.as_weak();
+        main.on_start_run(move |dry_run, force, _retry| {
+            if dry_run {
+                let input_dir = RUN_CONFIG
+                    .with(|slot| slot.borrow().as_ref().map(|p| p.input_dir.to_string_lossy().to_string()))
+                    .unwrap_or_default();
+                enqueue(
+                    Request::RunDryRun { input_dir },
+                    &ui,
+                    "dry-run: planning only…",
+                );
+                return;
+            }
+            let already_running = RUN_CANCEL.with(|slot| slot.borrow().is_some());
+            if already_running {
+                if let Some(w) = ui.upgrade() {
+                    set_status(&w, "a run is already active");
+                }
+                return;
+            }
+            let Some(params) = RUN_CONFIG.with(|slot| slot.borrow().clone()) else { return };
+            let params = forza_app::RunParams { force, ..params };
+            let cancel = Arc::new(AtomicBool::new(false));
+            RUN_CANCEL.with(|slot| *slot.borrow_mut() = Some(cancel.clone()));
+            if let Some(w) = ui.upgrade() {
+                w.set_run_running(true);
+                w.set_run_done(0);
+                w.set_run_total(0);
+                w.set_run_percent(0.0);
+            }
+            append_run_log(format!("[start] model={} force={}", params.model, params.force));
+
+            let ui = ui.clone();
+            let _handle = forza_app::spawn_extraction(params, cancel, move |event| {
+                let ui = ui.clone();
+                let _ = slint::invoke_from_event_loop(move || match event {
+                    forza_app::RunEvent::Started { run_id, total } => {
+                        append_run_log(format!("[run {run_id}] {total} file(s) considered"));
+                        if let Some(w) = ui.upgrade() {
+                            w.set_run_total(total as i32);
+                        }
+                    }
+                    forza_app::RunEvent::Plan { new, cached, batch, existing, skipped } => {
+                        append_run_log(format!(
+                            "plan: new={new} cached={cached} batch={batch} existing={existing} skipped={skipped}"
+                        ));
+                    }
+                    forza_app::RunEvent::ImageStarted { name } => {
+                        append_run_log(format!("→ {name}"));
+                    }
+                    forza_app::RunEvent::ImageDone { name, ok, laps } => {
+                        append_run_log(format!(
+                            "  {} {name} ({laps} lap(s))",
+                            if ok { "✓" } else { "✗" }
+                        ));
+                    }
+                    forza_app::RunEvent::Progress { done, total } => {
+                        if let Some(w) = ui.upgrade() {
+                            w.set_run_done(done as i32);
+                            w.set_run_total(total as i32);
+                            let percent = if total > 0 {
+                                (done as f32 / total as f32) * 100.0
+                            } else {
+                                0.0
+                            };
+                            w.set_run_percent(percent);
+                        }
+                    }
+                    forza_app::RunEvent::Log(line) => append_run_log(line),
+                    forza_app::RunEvent::Finished { cancelled, processed, succeeded, failed, elapsed_s } => {
+                        append_run_log(format!(
+                            "[done] cancelled={cancelled} processed={processed} ok={succeeded} fail={failed} in {elapsed_s:.1}s"
+                        ));
+                        RUN_CANCEL.with(|slot| *slot.borrow_mut() = None);
+                        if let Some(w) = ui.upgrade() {
+                            w.set_run_running(false);
+                            w.set_run_percent(100.0);
+                        }
+                        // Refresh derived views after a run.
+                        send_request(Request::RefreshInventory {
+                            filter: ImageInventoryFilter::default(),
+                        });
+                        send_request(Request::ListBestLaps);
+                        send_request(Request::ListReviews { bucket: "open".into() });
+                    }
+                    forza_app::RunEvent::Failed(message) => {
+                        append_run_log(format!("[failed] {message}"));
+                        RUN_CANCEL.with(|slot| *slot.borrow_mut() = None);
+                        if let Some(w) = ui.upgrade() {
+                            w.set_run_running(false);
+                            set_status(&w, format!("run failed: {message}").as_str());
+                        }
+                    }
+                });
+            });
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_cancel_run(move || {
+            RUN_CANCEL.with(|slot| {
+                if let Some(cancel) = slot.borrow().as_ref() {
+                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                    if let Some(w) = ui.upgrade() {
+                        set_status(&w, "cancellation requested…");
+                    }
+                }
+            });
         });
     }
 
