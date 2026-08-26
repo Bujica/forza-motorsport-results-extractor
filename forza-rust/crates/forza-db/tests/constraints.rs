@@ -4,7 +4,7 @@
 //! Constraint and relationship tests translated from
 //! `forza-rust/docs/database.md` — the integrity invariants of the baseline.
 
-use forza_db::repositories::{RunInsert, insert_run, laps, runs};
+use forza_db::repositories::{RunInsert, RunMetadata, insert_run, laps, runs, update_run_metadata};
 use forza_db::repositories::{insert_image_file, insert_review_case};
 use forza_db::test_support::seed_demo_database;
 use rusqlite::{Connection, params};
@@ -53,6 +53,87 @@ fn one_accepted_attempt_per_result_is_enforced() {
     );
     assert!(retried.is_ok(), "non-accepted attempts remain allowed");
     let _ = first;
+}
+
+#[test]
+fn live_run_metadata_replaces_seed_defaults() {
+    let (_dir, _path, conn) = fresh_db();
+    let run_id = insert_run(&conn, &RunInsert::demo("run-metadata")).unwrap();
+
+    update_run_metadata(
+        &conn,
+        &run_id,
+        &RunMetadata {
+            backend: "lmstudio",
+            model: "qwen3.6-35b-a3b",
+            input_dir: r"C:\shots",
+            prompt_name: "user_header_shaped_v1",
+            prompt_hash: Some("prompt-sha256"),
+            workers: 2,
+            image_format: "webp",
+            max_width: 1600,
+            encode_quality: 85,
+            grayscale: true,
+            context_length: 32_768,
+            reasoning_mode: Some("off"),
+            max_completion_tokens: 2_048,
+            temperature: 0.2,
+            max_retries: 3,
+            timeout_connect: 4,
+            timeout_read: 90,
+        },
+    )
+    .unwrap();
+
+    let row = conn
+        .query_row(
+            "SELECT backend, model, input_dir, prompt_name, prompt_hash,
+                    workers, image_format, max_width, encode_quality, grayscale,
+                    context_length, reasoning_mode, max_completion_tokens,
+                    temperature, max_retries, timeout_connect, timeout_read
+             FROM extraction_runs WHERE id=?1",
+            [&run_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, i64>(9)?,
+                    row.get::<_, i64>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, i64>(12)?,
+                    row.get::<_, f64>(13)?,
+                    row.get::<_, i64>(14)?,
+                    row.get::<_, i64>(15)?,
+                    row.get::<_, i64>(16)?,
+                ))
+            },
+        )
+        .unwrap();
+
+    assert_eq!(row.0, "lmstudio");
+    assert_eq!(row.1, "qwen3.6-35b-a3b");
+    assert_eq!(row.2, r"C:\shots");
+    assert_eq!(row.3, "user_header_shaped_v1");
+    assert_eq!(row.4.as_deref(), Some("prompt-sha256"));
+    assert_eq!(row.5, 2);
+    assert_eq!(row.6, "webp");
+    assert_eq!(row.7, 1600);
+    assert_eq!(row.8, 85);
+    assert_eq!(row.9, 1);
+    assert_eq!(row.10, 32_768);
+    assert_eq!(row.11.as_deref(), Some("off"));
+    assert_eq!(row.12, 2_048);
+    assert!((row.13 - 0.2).abs() < f64::EPSILON);
+    assert_eq!(row.14, 3);
+    assert_eq!(row.15, 4);
+    assert_eq!(row.16, 90);
 }
 
 #[test]
