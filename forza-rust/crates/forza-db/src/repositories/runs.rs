@@ -273,8 +273,8 @@ pub fn insert_run_input_only(
     input_path: &str,
 ) -> Result<i64, DbError> {
     conn.execute(
-        "INSERT INTO run_inputs (run_id, image_file_id, decision, input_order, input_path, created_at)
-         SELECT COALESCE(MAX(id), 0) + 1, ?1, ?2, ?3, ?4, datetime('now') FROM run_inputs",
+        "INSERT INTO run_inputs (id, run_id, image_file_id, decision, input_order, input_path, created_at)
+         SELECT COALESCE(MAX(id), 0) + 1, ?1, ?2, ?3, ?4, ?5, datetime('now') FROM run_inputs",
         params![run_id, image_file_id, decision, input_order, input_path],
     )?;
     Ok(conn.last_insert_rowid())

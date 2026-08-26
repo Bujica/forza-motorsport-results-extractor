@@ -1102,7 +1102,7 @@ export component MainWindow inherits Window {
                                         text: row.value;
                                         input-type: row.editor == "int" ? InputType.number :
                                                     row.editor == "float" ? InputType.decimal : InputType.text;
-                                        edited(value) => { root.setting-edited(row.key, value); }
+                                        accepted(value) => { root.setting-edited(row.key, value); }
                                     }
                                     Text {
                                         text: row.status;
