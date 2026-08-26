@@ -15,20 +15,32 @@ pub struct ImageInventoryEntry {
     pub size_bytes: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ImageInventoryOptions {
+    pub tracks: Vec<String>,
+    pub runs: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ImageInventoryFilter {
+    pub file_status: Option<String>,
     pub processing_status: Option<String>,
     pub run_id: Option<String>,
     pub best_lap_status: Option<String>,
+    pub inventory_filter: Option<String>,
+    pub track: Option<String>,
     pub include_missing_files: bool,
 }
 
 impl ImageInventoryFilter {
     fn to_db(&self) -> db::ImageInventoryFilter {
         db::ImageInventoryFilter {
+            file_status: self.file_status.clone(),
             processing_status: self.processing_status.clone(),
             run_id: self.run_id.clone(),
             best_lap_status: self.best_lap_status.clone(),
+            inventory_filter: self.inventory_filter.clone(),
+            track: self.track.clone(),
             include_missing_files: self.include_missing_files,
         }
     }
@@ -72,5 +84,11 @@ impl ImageInventoryService {
             .into_iter()
             .map(to_entry)
             .collect())
+    }
+
+    pub fn options(&self) -> Result<ImageInventoryOptions, forza_db::DbError> {
+        let conn = forza_db::open_connection(&self.database_file)?;
+        let (tracks, runs) = db::image_inventory_options(&conn)?;
+        Ok(ImageInventoryOptions { tracks, runs })
     }
 }

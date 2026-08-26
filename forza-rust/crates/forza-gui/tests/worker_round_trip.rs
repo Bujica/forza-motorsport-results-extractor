@@ -47,13 +47,40 @@ fn refresh_inventory_returns_seeded_rows() {
         Response::Inventory {
             result,
             filter_label,
+            options,
         } => {
             assert_eq!(filter_label, "all");
             let rows = result.unwrap();
             assert_eq!(rows.len(), 2);
             assert!(rows.iter().all(|r| r.processing_status == "processed_ok"));
+            let options = options.unwrap();
+            assert_eq!(options.tracks, vec!["Fuji Speedway"]);
+            assert_eq!(options.runs, vec!["20260101_000000_seedrun"]);
         }
         _ => panic!("expected inventory response"),
+    }
+}
+
+#[test]
+fn best_laps_round_trip_returns_seeded_rows() {
+    let (_guard, db) = seeded_db();
+    {
+        let conn = forza_db::open_connection(&db).unwrap();
+        conn.execute("UPDATE lap_records SET is_best_lap = 1", [])
+            .unwrap();
+    }
+    let service = ImageInventoryService::new(db.clone());
+    let ctx = context(&db, "Player One");
+
+    let response = handle_request(&ctx, &service, &Request::ListBestLaps);
+    match response {
+        Response::BestLaps(result) => {
+            let rows = result.unwrap();
+            assert_eq!(rows.len(), 2);
+            assert!(rows.iter().any(|row| row.mine));
+            assert!(rows.iter().any(|row| !row.mine));
+        }
+        _ => panic!("expected best-laps response"),
     }
 }
 

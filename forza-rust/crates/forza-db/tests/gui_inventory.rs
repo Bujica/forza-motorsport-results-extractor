@@ -4,7 +4,7 @@
 //! GUI inventory query: derived processing status, filters, stable ordering,
 //! and the basic DB doctor battery.
 
-use forza_db::gui_queries::{ImageInventoryFilter, image_inventory};
+use forza_db::gui_queries::{ImageInventoryFilter, image_inventory, image_inventory_options};
 use forza_db::test_support::seed_demo_database;
 use rusqlite::Connection;
 
@@ -144,4 +144,47 @@ fn missing_files_hidden_by_default_but_listable_on_demand() {
     )
     .unwrap();
     assert_eq!(everything.len(), 2);
+}
+
+#[test]
+fn inventory_options_include_tracks_and_runs_for_gui_filters() {
+    let (_dir, conn) = seeded();
+    let (tracks, runs) = image_inventory_options(&conn).unwrap();
+
+    assert_eq!(tracks, vec!["Fuji Speedway"]);
+    assert_eq!(runs, vec!["20260101_000000_seedrun"]);
+}
+
+#[test]
+fn inventory_filters_by_file_status_and_best_lap_status() {
+    let (_dir, conn) = seeded();
+    conn.execute(
+        "UPDATE image_files SET file_status='missing' WHERE id='img-b'",
+        [],
+    )
+    .unwrap();
+
+    let missing = image_inventory(
+        &conn,
+        &ImageInventoryFilter {
+            file_status: Some("missing".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        missing.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        ["img-b"]
+    );
+
+    let pending = image_inventory(
+        &conn,
+        &ImageInventoryFilter {
+            best_lap_status: Some("pending".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert!(pending.iter().all(|row| row.best_lap_status == "pending"));
 }

@@ -115,6 +115,7 @@ pub struct SettingsOutcome {
 pub enum Response {
     Inventory {
         result: Result<Vec<forza_app::ImageInventoryEntry>, String>,
+        options: Result<forza_app::ImageInventoryOptions, String>,
         filter_label: String,
     },
     Reviews {
@@ -142,6 +143,7 @@ pub fn handle_request(
     match request {
         Request::RefreshInventory { filter } => Response::Inventory {
             result: service.list(filter).map_err(|e| e.to_string()),
+            options: service.options().map_err(|e| e.to_string()),
             filter_label: filter
                 .processing_status
                 .clone()

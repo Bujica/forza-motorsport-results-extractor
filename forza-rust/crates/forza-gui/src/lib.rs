@@ -143,6 +143,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             let _ = slint::invoke_from_event_loop(move || match response {
                 Response::Inventory {
                     result,
+                    options,
                     filter_label,
                 } => match result {
                     Ok(entries) => {
@@ -165,6 +166,20 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         });
                         if let Some(w) = ui.upgrade() {
                             w.set_status_text(format!("{count} image(s) [{filter_label}]").into());
+                        }
+                        if let Ok(options) = options
+                            && let Some(w) = ui.upgrade()
+                            && w.get_image_track_filter() == "all"
+                            && w.get_image_run_filter() == "all"
+                        {
+                            let tracks: Vec<slint::SharedString> = std::iter::once("all".into())
+                                .chain(options.tracks.into_iter().map(Into::into))
+                                .collect();
+                            let runs: Vec<slint::SharedString> = std::iter::once("all".into())
+                                .chain(options.runs.into_iter().map(Into::into))
+                                .collect();
+                            w.set_image_tracks(ModelRc::from(Rc::new(VecModel::from(tracks))));
+                            w.set_image_runs(ModelRc::from(Rc::new(VecModel::from(runs))));
                         }
                     }
                     Err(message) => {
@@ -357,17 +372,30 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     // ── Page callbacks ────────────────────────────────────────────────────
     {
         let ui = main.as_weak();
-        main.on_refresh_requested(move |filter_value| {
-            let filter = ImageInventoryFilter {
-                processing_status: (filter_value != "all").then(|| filter_value.to_string()),
-                ..Default::default()
-            };
-            enqueue(
-                Request::RefreshInventory { filter },
-                &ui,
-                &format!("loading ({filter_value})…"),
-            );
-        });
+        main.on_refresh_requested(
+            move |file_value,
+                  best_value,
+                  inventory_value,
+                  track_value,
+                  run_value,
+                  process_value| {
+                let filter = ImageInventoryFilter {
+                    file_status: (file_value != "all").then(|| file_value.to_string()),
+                    best_lap_status: (best_value != "all").then(|| best_value.to_string()),
+                    inventory_filter: (inventory_value != "all")
+                        .then(|| inventory_value.to_string()),
+                    track: (track_value != "all").then(|| track_value.to_string()),
+                    run_id: (run_value != "all").then(|| run_value.to_string()),
+                    processing_status: (process_value != "all").then(|| process_value.to_string()),
+                    ..Default::default()
+                };
+                enqueue(
+                    Request::RefreshInventory { filter },
+                    &ui,
+                    &format!("loading images ({process_value})…"),
+                );
+            },
+        );
     }
     {
         let ui = main.as_weak();
@@ -503,6 +531,9 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             }
             if page == "logs" {
                 send_request(Request::LoadLogs);
+            }
+            if page == "best-laps" {
+                send_request(Request::ListBestLaps);
             }
         });
     }
@@ -776,6 +807,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     send_request(Request::ListReviews {
         bucket: "open".into(),
     });
+    send_request(Request::ListBestLaps);
 
     main.run()?;
     Ok(())

@@ -112,7 +112,7 @@ export component MainWindow inherits Window {
     preferred-height: 760px;
     background: #1e1f22;
 
-    callback refresh-requested(string);
+    callback refresh-requested(string, string, string, string, string, string);
     callback selection-changed(int);
     callback reviews-requested(string);
     callback case-decided(int, string, string);
@@ -200,6 +200,14 @@ export component MainWindow inherits Window {
 
     in-out property <string> page: "images";
     in-out property <string> filter-value: "all";
+    in-out property <string> image-file-filter: "all";
+    in-out property <string> image-best-filter: "all";
+    in-out property <string> image-inventory-filter: "all";
+    in-out property <string> image-track-filter: "all";
+    in-out property <string> image-run-filter: "all";
+    in-out property <string> image-process-filter: "all";
+    in property <[string]> image-tracks: ["all"];
+    in property <[string]> image-runs: ["all"];
     in-out property <int> selected-index: -1;
     in-out property <bool> dry-run-checked: false;
     in-out property <bool> force-checked: false;
@@ -280,17 +288,41 @@ export component MainWindow inherits Window {
                     height: 32px;
                     spacing: 8px;
                     Text { text: "Images"; color: #d0d0d0; font-weight: 700; width: 90px; }
-                    ComboBox {
-                        width: 200px;
-                        model: ["all", "unprocessed", "processing", "processed_ok",
+                    ComboBox { width: 120px; model: ["all", "available", "missing"];
+                        current-index: 0; selected => { root.image-file-filter = self.current-value;
+                            root.refresh-requested(root.image-file-filter, root.image-best-filter,
+                                root.image-inventory-filter, root.image-track-filter,
+                                root.image-run-filter, root.image-process-filter); } }
+                    ComboBox { width: 140px; model: ["all", "pending", "contributing", "non_contributing"];
+                        current-index: 0; selected => { root.image-best-filter = self.current-value;
+                            root.refresh-requested(root.image-file-filter, root.image-best-filter,
+                                root.image-inventory-filter, root.image-track-filter,
+                                root.image-run-filter, root.image-process-filter); } }
+                    ComboBox { width: 125px; model: ["all", "duplicate"];
+                        current-index: 0; selected => { root.image-inventory-filter = self.current-value;
+                            root.refresh-requested(root.image-file-filter, root.image-best-filter,
+                                root.image-inventory-filter, root.image-track-filter,
+                                root.image-run-filter, root.image-process-filter); } }
+                    ComboBox { width: 180px; model: root.image-tracks;
+                        current-index: 0; selected => { root.image-track-filter = self.current-value;
+                            root.refresh-requested(root.image-file-filter, root.image-best-filter,
+                                root.image-inventory-filter, root.image-track-filter,
+                                root.image-run-filter, root.image-process-filter); } }
+                    ComboBox { width: 180px; model: root.image-runs;
+                        current-index: 0; selected => { root.image-run-filter = self.current-value;
+                            root.refresh-requested(root.image-file-filter, root.image-best-filter,
+                                root.image-inventory-filter, root.image-track-filter,
+                                root.image-run-filter, root.image-process-filter); } }
+                    ComboBox { width: 140px; model: ["all", "unprocessed", "processing", "processed_ok",
                                 "processed_error", "cancelled", "skipped"];
-                        current-index: 0;
-                        selected => {
+                        current-index: 0; selected => { root.image-process-filter = self.current-value;
                             root.filter-value = self.current-value;
-                            root.refresh-requested(self.current-value);
-                        }
-                    }
-                    Button { text: "Refresh"; clicked => { root.refresh-requested(root.filter-value); } }
+                            root.refresh-requested(root.image-file-filter, root.image-best-filter,
+                                root.image-inventory-filter, root.image-track-filter,
+                                root.image-run-filter, root.image-process-filter); } }
+                    Button { text: "Refresh"; clicked => { root.refresh-requested(root.image-file-filter,
+                        root.image-best-filter, root.image-inventory-filter, root.image-track-filter,
+                        root.image-run-filter, root.image-process-filter); } }
                 }
 
                 HorizontalLayout {
@@ -301,6 +333,7 @@ export component MainWindow inherits Window {
                         background: #26282c;
                         border-radius: 6px;
                         clip: true;
+                        vertical-stretch: 1;
                         lv := ListView {
                             x: 4px; y: 4px;
                             width: parent.width - 8px;

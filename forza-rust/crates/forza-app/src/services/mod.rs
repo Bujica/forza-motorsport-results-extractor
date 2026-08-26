@@ -16,6 +16,7 @@ pub use image_debug::{
     ImageDebugFilter, list_debug_cases, load_debug_detail, load_debug_detail_by_result,
 };
 pub use image_detail::{ImageDetailData, load_image_detail};
+pub use image_inventory::ImageInventoryOptions;
 pub use rebuild::{RebuildOutcome, rebuild};
 pub use review_queue::{ReviewCaseEntry, decide_case, ignore_case, list_review_cases};
 pub use run_control::RunControl;

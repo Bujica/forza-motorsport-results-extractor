@@ -23,11 +23,14 @@ pub struct ImageInventoryRow {
 
 #[derive(Debug, Clone, Default)]
 pub struct ImageInventoryFilter {
+    pub file_status: Option<String>,
     /// Exact match on the derived processing status vocabulary.
     pub processing_status: Option<String>,
     /// Only images considered by this run (via run_inputs).
     pub run_id: Option<String>,
     pub best_lap_status: Option<String>,
+    pub inventory_filter: Option<String>,
+    pub track: Option<String>,
     pub include_missing_files: bool,
 }
 
@@ -88,7 +91,10 @@ pub fn image_inventory(
     let mut clauses: Vec<String> = Vec::new();
     let mut args: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
-    if !filter.include_missing_files {
+    if let Some(file_status) = &filter.file_status {
+        clauses.push("i.file_status = ?".to_string());
+        args.push(Box::new(file_status.clone()));
+    } else if !filter.include_missing_files {
         clauses.push("i.file_status = 'available'".to_string());
     }
     if let Some(status) = &filter.processing_status {
@@ -102,6 +108,20 @@ pub fn image_inventory(
     if let Some(run) = &filter.run_id {
         clauses.push("i.id IN (SELECT image_file_id FROM run_inputs WHERE run_id = ?)".to_string());
         args.push(Box::new(run.clone()));
+    }
+    if let Some(track) = &filter.track {
+        clauses.push("i.id IN (SELECT image_file_id FROM lap_records WHERE track = ?)".to_string());
+        args.push(Box::new(track.clone()));
+    }
+    if filter.inventory_filter.as_deref() == Some("duplicate") {
+        clauses.push(
+            "(i.duplicate_of_image_file_id IS NOT NULL OR i.id IN
+            (SELECT duplicate_of_image_file_id FROM image_files
+             WHERE duplicate_of_image_file_id IS NOT NULL))"
+                .to_string(),
+        );
+    } else if filter.inventory_filter.is_some() {
+        clauses.push("0".to_string());
     }
     let where_clause = if clauses.is_empty() {
         String::new()
@@ -124,4 +144,16 @@ pub fn image_inventory(
         .query_map(params_ref.as_slice(), row_to_inventory)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
+}
+
+pub fn image_inventory_options(conn: &Connection) -> Result<(Vec<String>, Vec<String>), DbError> {
+    let tracks = conn
+        .prepare("SELECT DISTINCT track FROM lap_records WHERE track <> '' ORDER BY LOWER(track)")?
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<Vec<String>, _>>()?;
+    let runs = conn
+        .prepare("SELECT id FROM extraction_runs ORDER BY created_at DESC, id DESC")?
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<Vec<String>, _>>()?;
+    Ok((tracks, runs))
 }

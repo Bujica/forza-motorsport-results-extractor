@@ -609,3 +609,14 @@ skipped (with reason).
   registros coincidentes, 0 somente-Python e 0 somente-Rust. O preflight
   encontrou o modelo configurado carregado e saudável. Permanecem pendentes
   artifacts raw, persistência de Performance e validação visual do PDF.
+
+- Sessão 24 (2026-08-26): Images/Best Laps GUI corrigidos. Images agora
+  carrega opções dinâmicas de pista/run, aplica filtros equivalentes aos
+  vocabulários Python (arquivo, melhor volta, duplicata e processamento) e
+  mantém a seleção dinâmica durante refresh; o painel ganhou stretch vertical
+  para o `ListView` ocupar a área disponível. Best Laps passou a ser solicitado
+  no carregamento inicial e ao entrar na página. Testes headless cobrem opções,
+  filtros, round-trip do worker e projeção de melhores voltas. Gates: fmt,
+  `cargo test -p forza-db --test gui_inventory`, `cargo test -p forza-app`,
+  `cargo test -p forza-gui --test worker_round_trip`, clippy workspace e
+  `cargo build -p forza-gui` verdes.
