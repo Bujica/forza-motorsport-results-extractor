@@ -63,6 +63,42 @@ pub fn insert_input_and_result(
     Ok(result_id)
 }
 
+/// Run input for an actually-processed image: real source path plus the
+/// Python `process_reason` vocabulary ("full_run" | "force" |
+/// "retry_errors"), with the pending result row.
+pub fn insert_processed_input(
+    conn: &Connection,
+    run_id: &str,
+    image_file_id: &str,
+    input_path: &str,
+    process_reason: &str,
+    input_order: i64,
+) -> Result<String, DbError> {
+    let input_id: i64 = conn.query_row(
+        "INSERT INTO run_inputs (id, run_id, image_file_id, decision, input_order,
+                                 input_path, process_reason, created_at)
+         SELECT COALESCE(MAX(id), 0) + 1, ?1, ?2, 'process', ?3, ?4, ?5, datetime('now')
+         FROM run_inputs RETURNING id",
+        params![
+            run_id,
+            image_file_id,
+            input_order,
+            input_path,
+            process_reason
+        ],
+        |row| row.get(0),
+    )?;
+    let _ = input_id;
+    let result_id = format!("res-{run_id}-{input_order}");
+    conn.execute(
+        "INSERT INTO extraction_results
+            (id, run_id, run_input_id, image_file_id, status, attempt_count, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 'running', 0, datetime('now'), datetime('now'))",
+        params![result_id, run_id, input_id, image_file_id],
+    )?;
+    Ok(result_id)
+}
+
 /// Primitive attempt row for persistence — converted from the backend's
 /// typed record by the application layer (no crate dependency inversion).
 pub struct AttemptInsert<'a> {

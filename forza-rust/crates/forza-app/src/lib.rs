@@ -10,7 +10,7 @@ pub mod services;
 
 pub use services::{
     BestLapEntry, DoctorSummary, ImageDetailData, ImageInventoryEntry, ImageInventoryFilter,
-    ImageInventoryService, RebuildOutcome, ReviewCaseEntry, RunEvent, RunParams, SettingRow,
-    SettingsSnapshot, decide_case, ignore_case, list_clean_flat_entries, list_review_cases,
-    load_image_detail, rebuild, run_doctor, settings_snapshot, spawn_extraction,
+    ImageInventoryService, RebuildOutcome, ReviewCaseEntry, RunControl, RunEvent, RunParams,
+    SettingRow, SettingsSnapshot, decide_case, ignore_case, list_clean_flat_entries,
+    list_review_cases, load_image_detail, rebuild, run_doctor, settings_snapshot, spawn_extraction,
 };

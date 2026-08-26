@@ -4,18 +4,19 @@
 //! GUI (progress, per-image outcomes, log lines).
 
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use rusqlite::Connection;
 
+use crate::services::run_control::RunControl;
 use forza_config::AppConfig;
 use forza_db::repositories::runs::{
-    RunInsert, complete_run, find_image_id_by_hash, insert_input_and_result, insert_run,
+    RunInsert, complete_run, find_image_id_by_hash, insert_processed_input, insert_run,
     insert_run_input_only, mark_run_running,
 };
-use forza_db::repositories::{known_hashes, known_path_hashes, mark_best_laps};
+use forza_db::repositories::{
+    known_hashes, known_path_hashes, list_failed_images_for_retry, mark_best_laps,
+};
 use forza_lmstudio::backend::{BackendConfig, LMStudioBackend};
 use forza_lmstudio::load_config::DesiredLoadConfig;
 use forza_lmstudio::prompts;
@@ -67,6 +68,9 @@ pub struct RunParams {
     pub input_dir: PathBuf,
     pub gamertag: String,
     pub force: bool,
+    /// Retry only images whose latest extraction result is `error`.
+    /// Mutually exclusive with `force` (Python run contract).
+    pub retry_errors: bool,
     // LLM
     pub url: String,
     pub model: String,
@@ -92,6 +96,7 @@ impl RunParams {
             input_dir: cfg.input_dir.clone(),
             gamertag: cfg.gamertag.clone(),
             force,
+            retry_errors: false,
             url: cfg.llm.url.clone(),
             model: cfg.llm.model.clone(),
             max_tokens: cfg.llm.max_completion_tokens,
@@ -222,11 +227,12 @@ fn upsert_image_for_run(
     Ok((id, None))
 }
 
-/// Spawn the extraction run on a dedicated thread. `cancel` is checked
-/// cooperatively between images; the current image finishes first.
+/// Spawn the extraction run on a dedicated thread. `control` is honoured
+/// cooperatively at safe checkpoints (between images); the current image
+/// finishes first.
 pub fn spawn_extraction<F>(
     params: RunParams,
-    cancel: Arc<AtomicBool>,
+    control: RunControl,
     on_event: F,
 ) -> std::thread::JoinHandle<()>
 where
@@ -234,11 +240,11 @@ where
 {
     std::thread::Builder::new()
         .name("forza-extraction".into())
-        .spawn(move || run_blocking(params, cancel, on_event))
+        .spawn(move || run_blocking(params, control, on_event))
         .unwrap_or_else(|e| panic!("extraction thread: {e}"))
 }
 
-fn run_blocking<F>(params: RunParams, cancel: Arc<AtomicBool>, on_event: F)
+fn run_blocking<F>(params: RunParams, control: RunControl, on_event: F)
 where
     F: Fn(RunEvent),
 {
@@ -255,12 +261,12 @@ where
     };
 
     let outcome: Result<(usize, usize, usize, usize, usize), String> =
-        runtime.block_on(async { run_async(&params, &cancel, &on_event).await });
+        runtime.block_on(async { run_async(&params, &control, &on_event).await });
 
     match outcome {
         Ok((processed, succeeded, failed, skipped, dupes)) => {
             on_event(RunEvent::Finished {
-                cancelled: cancel.load(Ordering::Relaxed),
+                cancelled: control.is_cancelled(),
                 processed,
                 succeeded,
                 failed,
@@ -274,23 +280,65 @@ where
 
 async fn run_async<F>(
     params: &RunParams,
-    cancel: &Arc<AtomicBool>,
+    control: &RunControl,
     on_event: &F,
 ) -> Result<(usize, usize, usize, usize, usize), String>
 where
     F: Fn(RunEvent),
 {
+    if params.force && params.retry_errors {
+        return Err("--force and --retry-errors cannot be combined.".into());
+    }
     let conn = forza_db::open_connection(&params.database_file).map_err(|e| e.to_string())?;
 
     // ── Discovery + plan ─────────────────────────────────────────────────
-    let images = find_images(&params.input_dir);
-    if images.is_empty() {
-        on_event(RunEvent::Log("no supported images in input folder".into()));
-    }
-    let known_paths: KnownPathHashes = known_path_hashes(&conn).map_err(|e| e.to_string())?;
-    let known_set = known_hashes(&conn).map_err(|e| e.to_string())?;
-    let plan =
-        plan_images(&images, &known_set, &known_paths, params.force).map_err(|e| e.to_string())?;
+    // Retry mode replaces discovery: only images whose latest result is
+    // still `error` are selected (Python `_retry_error_discovery`).
+    let plan = if params.retry_errors {
+        let failed = list_failed_images_for_retry(&conn).map_err(|e| e.to_string())?;
+        let mut new_images = Vec::new();
+        let mut missing = 0usize;
+        for (path, hash) in failed {
+            let candidate = PathBuf::from(&path);
+            if candidate.exists() {
+                new_images.push(forza_pipeline::planning::DiscoveredImage {
+                    path: candidate,
+                    file_hash: hash,
+                });
+            } else {
+                missing += 1;
+            }
+        }
+        if new_images.is_empty() {
+            on_event(RunEvent::Log("No failed images to retry.".into()));
+        } else {
+            on_event(RunEvent::Log(format!(
+                "retry: {} failed image(s) selected{}",
+                new_images.len(),
+                if missing > 0 {
+                    format!(" ({missing} missing on disk ignored)")
+                } else {
+                    String::new()
+                }
+            )));
+        }
+        let total = new_images.len();
+        forza_pipeline::planning::ImageDiscoveryPlan {
+            total,
+            new_images,
+            duplicates: Vec::new(),
+            existing_images: Vec::new(),
+            skipped_images: Vec::new(),
+        }
+    } else {
+        let images = find_images(&params.input_dir);
+        if images.is_empty() {
+            on_event(RunEvent::Log("no supported images in input folder".into()));
+        }
+        let known_paths: KnownPathHashes = known_path_hashes(&conn).map_err(|e| e.to_string())?;
+        let known_set = known_hashes(&conn).map_err(|e| e.to_string())?;
+        plan_images(&images, &known_set, &known_paths, params.force).map_err(|e| e.to_string())?
+    };
 
     let cached = plan
         .duplicates
@@ -311,6 +359,14 @@ where
     });
 
     // ── Run row ──────────────────────────────────────────────────────────
+    // ── Run row ──────────────────────────────────────────────────────────
+    // Phase checkpoint (Python honours pause/cancel between phases too):
+    // blocks while paused, before any run evidence or events are produced.
+    if !control.checkpoint() {
+        on_event(RunEvent::Log(
+            "cancellation requested — stopping before extraction".into(),
+        ));
+    }
     let run_id = now_run_id();
     insert_run(
         &conn,
@@ -391,9 +447,17 @@ where
     };
 
     let total_new = plan.new_images.len();
+    let process_reason = if params.retry_errors {
+        "retry_errors"
+    } else if params.force {
+        "force"
+    } else {
+        "full_run"
+    };
     let mut done = 0usize;
     for image in &plan.new_images {
-        if cancel.load(Ordering::Relaxed) {
+        // Safe checkpoint: pause blocks here; cancel stops between images.
+        if !control.checkpoint() {
             on_event(RunEvent::Log(
                 "cancellation requested — stopping between images".into(),
             ));
@@ -413,12 +477,12 @@ where
             .map_err(|e| e.to_string())?;
 
         // Pending result row before the call (status running).
-        let result_id = insert_input_and_result(
+        let result_id = insert_processed_input(
             &conn,
             &run_id,
             &image_file_id,
-            "process",
-            "running",
+            &image.path.to_string_lossy(),
+            process_reason,
             input_order,
         )
         .map_err(|e| e.to_string())?;
@@ -555,7 +619,7 @@ where
     }
 
     // ── Run counters + derived refresh ────────────────────────────────────
-    let cancelled = cancel.load(Ordering::Relaxed);
+    let cancelled = control.is_cancelled();
     let final_status = if cancelled { "cancelled" } else { "completed" };
     complete_run(
         &conn,

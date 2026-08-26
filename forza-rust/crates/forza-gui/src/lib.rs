@@ -12,8 +12,6 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 
 use slint::{Image, Model, ModelRc, VecModel};
@@ -30,7 +28,7 @@ thread_local! {
     static BESTLAP_MODEL: RefCell<Option<Rc<VecModel<BestLapItem>>>> = const { RefCell::new(None) };
     static GAMERTAG: RefCell<String> = const { RefCell::new(String::new()) };
     static RUN_LOG: RefCell<Option<Rc<VecModel<slint::SharedString>>>> = const { RefCell::new(None) };
-    static RUN_CANCEL: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
+    static RUN_CONTROL: RefCell<Option<forza_app::RunControl>> = const { RefCell::new(None) };
     static RUN_CONFIG: RefCell<Option<forza_app::RunParams>> = const { RefCell::new(None) };
     static DETAIL_CACHE: RefCell<Option<forza_app::ImageDetailData>> = const { RefCell::new(None) };
     static DETAIL_INDEX: RefCell<i32> = const { RefCell::new(-1) };
@@ -491,7 +489,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     // ── Live extraction runner (own thread, cooperative cancel) ──────────
     {
         let ui = main.as_weak();
-        main.on_start_run(move |dry_run, force, _retry| {
+        main.on_start_run(move |dry_run, force, retry| {
             if dry_run {
                 let input_dir = RUN_CONFIG
                     .with(|slot| slot.borrow().as_ref().map(|p| p.input_dir.to_string_lossy().to_string()))
@@ -503,7 +501,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 );
                 return;
             }
-            let already_running = RUN_CANCEL.with(|slot| slot.borrow().is_some());
+            let already_running = RUN_CONTROL.with(|slot| slot.borrow().is_some());
             if already_running {
                 if let Some(w) = ui.upgrade() {
                     set_status(&w, "a run is already active");
@@ -511,19 +509,27 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 return;
             }
             let Some(params) = RUN_CONFIG.with(|slot| slot.borrow().clone()) else { return };
-            let params = forza_app::RunParams { force, ..params };
-            let cancel = Arc::new(AtomicBool::new(false));
-            RUN_CANCEL.with(|slot| *slot.borrow_mut() = Some(cancel.clone()));
+            let params = forza_app::RunParams {
+                force,
+                retry_errors: retry && !force,
+                ..params
+            };
+            let control = forza_app::RunControl::new();
+            RUN_CONTROL.with(|slot| *slot.borrow_mut() = Some(control.clone()));
             if let Some(w) = ui.upgrade() {
                 w.set_run_running(true);
+                w.set_run_paused(false);
                 w.set_run_done(0);
                 w.set_run_total(0);
                 w.set_run_percent(0.0);
             }
-            append_run_log(format!("[start] model={} force={}", params.model, params.force));
+            append_run_log(format!(
+                "[start] model={} force={} retry_errors={}",
+                params.model, params.force, params.retry_errors
+            ));
 
             let ui = ui.clone();
-            let _handle = forza_app::spawn_extraction(params, cancel, move |event| {
+            let _handle = forza_app::spawn_extraction(params, control, move |event| {
                 let ui = ui.clone();
                 let _ = slint::invoke_from_event_loop(move || match event {
                     forza_app::RunEvent::Started { run_id, total } => {
@@ -563,9 +569,10 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         append_run_log(format!(
                             "[done] cancelled={cancelled} processed={processed} ok={succeeded} fail={failed} in {elapsed_s:.1}s"
                         ));
-                        RUN_CANCEL.with(|slot| *slot.borrow_mut() = None);
+                        RUN_CONTROL.with(|slot| *slot.borrow_mut() = None);
                         if let Some(w) = ui.upgrade() {
                             w.set_run_running(false);
+                            w.set_run_paused(false);
                             w.set_run_percent(100.0);
                         }
                         // Refresh derived views after a run.
@@ -577,9 +584,10 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                     }
                     forza_app::RunEvent::Failed(message) => {
                         append_run_log(format!("[failed] {message}"));
-                        RUN_CANCEL.with(|slot| *slot.borrow_mut() = None);
+                        RUN_CONTROL.with(|slot| *slot.borrow_mut() = None);
                         if let Some(w) = ui.upgrade() {
                             w.set_run_running(false);
+                            w.set_run_paused(false);
                             set_status(&w, format!("run failed: {message}").as_str());
                         }
                     }
@@ -590,12 +598,31 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     {
         let ui = main.as_weak();
         main.on_cancel_run(move || {
-            RUN_CANCEL.with(|slot| {
-                if let Some(cancel) = slot.borrow().as_ref() {
-                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            RUN_CONTROL.with(|slot| {
+                if let Some(control) = slot.borrow().as_ref() {
+                    control.request_cancel();
                     if let Some(w) = ui.upgrade() {
+                        w.set_run_paused(false);
                         set_status(&w, "cancellation requested…");
                     }
+                }
+            });
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_toggle_pause(move || {
+            RUN_CONTROL.with(|slot| {
+                if let Some(control) = slot.borrow().as_ref() {
+                    let resuming = control.is_paused();
+                    control
+                        .paused
+                        .store(!resuming, std::sync::atomic::Ordering::Relaxed);
+                    if let Some(w) = ui.upgrade() {
+                        w.set_run_paused(!resuming);
+                        set_status(&w, if resuming { "resumed" } else { "paused" });
+                    }
+                    append_run_log(if resuming { "[resumed]" } else { "[paused]" }.to_string());
                 }
             });
         });

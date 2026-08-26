@@ -33,6 +33,31 @@ pub fn known_hashes(conn: &Connection) -> Result<HashSet<String>, DbError> {
     Ok(out)
 }
 
+/// Available images whose LATEST extraction result is still `error` —
+/// the retry-errors selection (`list_failed_images_for_retry`).
+/// Ordering: newest result first, first occurrence per image wins.
+pub fn list_failed_images_for_retry(conn: &Connection) -> Result<Vec<(String, String)>, DbError> {
+    let mut stmt = conn.prepare(
+        "WITH latest AS (
+             SELECT image_file_id, status,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY image_file_id
+                        ORDER BY created_at DESC, id DESC
+                    ) AS result_rank
+             FROM extraction_results
+         )
+         SELECT i.current_path, i.file_hash
+         FROM image_files i
+         JOIN latest l ON l.image_file_id = i.id AND l.result_rank = 1
+         WHERE i.file_status = 'available' AND l.status = 'error'
+         ORDER BY i.current_name, i.id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
 pub struct ImageFileInsert<'a> {
     pub id: &'a str,
     pub file_hash: &'a str,

@@ -4,6 +4,7 @@ pub mod image_detail;
 pub mod image_inventory;
 pub mod rebuild;
 pub mod review_queue;
+pub mod run_control;
 pub mod settings;
 
 use rusqlite::Connection;
@@ -13,6 +14,7 @@ pub use extraction_runner::{RunEvent, RunParams, spawn_extraction};
 pub use image_detail::{ImageDetailData, load_image_detail};
 pub use rebuild::{RebuildOutcome, rebuild};
 pub use review_queue::{ReviewCaseEntry, decide_case, ignore_case, list_review_cases};
+pub use run_control::RunControl;
 pub use settings::{SettingRow, SettingsSnapshot, settings_snapshot};
 
 /// Best-lap row for GUI/output consumers (thin projection of ExportFlatRow).

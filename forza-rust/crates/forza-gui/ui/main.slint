@@ -103,6 +103,7 @@ export component MainWindow inherits Window {
     callback rebuild-requested();
     callback start-run(bool, bool, bool);
     callback cancel-run();
+    callback toggle-pause();
     callback open-image-detail(int);
     callback detail-tab-changed(string);
     callback detail-prev();
@@ -142,6 +143,7 @@ export component MainWindow inherits Window {
     in property <string> settings-message;
 
     in property <bool> run-running;
+    in property <bool> run-paused;
     in property <float> run-percent;
     in property <int> run-done;
     in property <int> run-total;
@@ -317,8 +319,16 @@ export component MainWindow inherits Window {
                             HorizontalLayout {
                                 spacing: 10px;
                                 CheckBox { text: "Dry-run"; checked <=> root.dry-run-checked; }
-                                CheckBox { text: "Force"; checked <=> root.force-checked; }
-                                CheckBox { text: "Retry errors"; checked <=> root.retry-checked; enabled: false; }
+                                CheckBox {
+                                    text: "Force";
+                                    checked <=> root.force-checked;
+                                    toggled => { if self.checked { root.retry-checked = false; } }
+                                }
+                                CheckBox {
+                                    text: "Retry errors";
+                                    checked <=> root.retry-checked;
+                                    toggled => { if self.checked { root.force-checked = false; } }
+                                }
                                 CheckBox { text: "Debug"; enabled: false; }
                             }
                             Text { text: root.run-info; color: #9aa4b2; font-size: 11px; }
@@ -330,6 +340,11 @@ export component MainWindow inherits Window {
                                 text: root.run-running ? "Running…" : "Run All";
                                 enabled: !root.run-running;
                                 clicked => { root.start-run(root.dry-run-checked, root.force-checked, root.retry-checked); }
+                            }
+                            Button {
+                                text: root.run-paused ? "Resume" : "Pause";
+                                enabled: root.run-running;
+                                clicked => { root.toggle-pause(); }
                             }
                             Button {
                                 text: "Cancel";
@@ -363,7 +378,7 @@ export component MainWindow inherits Window {
                                 }
                             }
                             HorizontalLayout {
-                                Text { text: root.run-running ? "Running" : "Ready"; color: #9aa4b2; horizontal-stretch: 1; }
+                                Text { text: root.run-paused ? "Paused" : root.run-running ? "Running" : "Ready"; color: root.run-paused ? #ffd166 : #9aa4b2; horizontal-stretch: 1; }
                                 Text { text: root.run-done + " / " + root.run-total; color: #9aa4b2; horizontal-stretch: 1; horizontal-alignment: center; }
                                 Text { text: "Rate: " + root.run-rate; color: #9aa4b2; horizontal-stretch: 1; horizontal-alignment: center; }
                                 Text { text: "ETA: " + root.run-eta; color: #9aa4b2; horizontal-stretch: 1; horizontal-alignment: right; }

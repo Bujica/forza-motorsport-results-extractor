@@ -207,6 +207,11 @@ fn cmd_run(
     for warning in &warnings {
         eprintln!("warning: {warning}");
     }
+    if force && retry_errors {
+        return Err(anyhow::anyhow!(
+            "--force and --retry-errors cannot be combined."
+        ));
+    }
     if !dry_run && !force && !retry_errors {
         return Err(anyhow::anyhow!(
             "full runs (LM Studio extraction) are not implemented yet; use --dry-run"
@@ -214,11 +219,38 @@ fn cmd_run(
     }
 
     let conn = forza_db::open_connection(&cfg.database_file)?;
-    let known_paths = forza_db::repositories::images::known_path_hashes(&conn)?;
-    let known_hashes = forza_db::repositories::images::known_hashes(&conn)?;
 
-    let images = forza_pipeline::find_images(&cfg.input_dir);
-    let mut plan = forza_pipeline::plan_images(&images, &known_hashes, &known_paths, force)?;
+    // Retry mode replaces discovery: only images whose latest result is
+    // still `error` are selected (Python `_retry_error_discovery`).
+    let mut inventory_empty = false;
+    let mut plan = if retry_errors {
+        let failed = forza_db::repositories::images::list_failed_images_for_retry(&conn)?;
+        let mut new_images = Vec::new();
+        for (path, hash) in failed {
+            let candidate = PathBuf::from(&path);
+            if candidate.exists() {
+                new_images.push(forza_pipeline::planning::DiscoveredImage {
+                    path: candidate,
+                    file_hash: hash,
+                });
+            }
+        }
+        println!("retry_errors = {} image(s) selected", new_images.len());
+        forza_pipeline::planning::ImageDiscoveryPlan {
+            total: new_images.len(),
+            new_images,
+            duplicates: Vec::new(),
+            existing_images: Vec::new(),
+            skipped_images: Vec::new(),
+        }
+    } else {
+        let known_paths = forza_db::repositories::images::known_path_hashes(&conn)?;
+        let known_hashes = forza_db::repositories::images::known_hashes(&conn)?;
+
+        inventory_empty = known_hashes.is_empty() && known_paths.is_empty();
+        let images = forza_pipeline::find_images(&cfg.input_dir);
+        forza_pipeline::plan_images(&images, &known_hashes, &known_paths, force)?
+    };
 
     if let Some(limit) = limit {
         plan.new_images.truncate(limit);
@@ -226,7 +258,7 @@ fn cmd_run(
 
     println!("input_dir     = {}", cfg.input_dir.display());
     println!("total files   = {}", plan.total);
-    if known_hashes.is_empty() && known_paths.is_empty() {
+    if inventory_empty {
         println!("inventory     = empty (first run: nothing cached yet)");
     }
     println!("new           = {}", plan.process_count());
