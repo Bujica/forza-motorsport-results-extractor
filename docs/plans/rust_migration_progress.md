@@ -360,9 +360,9 @@ skipped (with reason).
 - [x] corrigir projeção para `lap_records`: entradas sem `best_lap` são
       descartadas; piloto é sanitizado; classe da sessão é calculada sobre as
       entradas válidas; `lap_index` segue a convenção Python
-- [~] alinhar `is_best_lap` com a projeção Python; comparação final precisa ser
-      feita em DBs novas equivalentes, pois as DBs de teste atuais têm históricos
-      diferentes e esse campo é derivado globalmente
+- [x] alinhar a projeção persistida com Python em DBs de teste equivalentes:
+      nova execução Rust produziu 47/47 laps idênticos à execução Python,
+      incluindo `is_best_lap`/dirty após normalização dos campos comparados
 - [x] corrigir metadados live: cabeçalho de run sem `seed-*`; `run_inputs`
       processados gravam metadados do arquivo; tentativas/resultados gravam
       formato, MIME, dimensões e bytes do payload enviado
@@ -601,3 +601,11 @@ skipped (with reason).
   antes do primeiro `ensure_loaded`; runs sem imagens não fazem contato com
   LM Studio. Gates direcionados e clippy workspace verdes. Próximo: executar
   smoke com LM Studio real e persistir artifacts/lifecycle.
+
+- Sessão 23 (2026-08-26): smoke real completo executado com o binário Rust
+  recompilado. Run `20260826_190320_rust`: 5/5 resultados OK, 47 laps, todos
+  os `run_inputs`, payloads, prompt/runtime snapshots e lifecycle gravados.
+  Comparação estruturada contra Python `20260826_175250_9beb10b2`: 47/47
+  registros coincidentes, 0 somente-Python e 0 somente-Rust. O preflight
+  encontrou o modelo configurado carregado e saudável. Permanecem pendentes
+  artifacts raw, persistência de Performance e validação visual do PDF.
