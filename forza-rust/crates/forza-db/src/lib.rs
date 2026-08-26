@@ -24,3 +24,7 @@ pub use migration::{SCHEMA_VERSION, SchemaStatus, schema_status, upgrade};
 pub mod test_support {
     pub use crate::repositories::seed_demo_database;
 }
+
+pub mod prelude {
+    pub use crate::repositories::images::{known_hashes, known_path_hashes};
+}

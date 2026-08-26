@@ -25,6 +25,20 @@ struct Cli {
 enum Command {
     /// Launch the graphical interface.
     Gui,
+    /// Process screenshots (only `--dry-run` planning is implemented).
+    Run {
+        /// Plan the run without contacting LM Studio or persisting results.
+        #[arg(long)]
+        dry_run: bool,
+        /// Reprocess images even when the database already knows them.
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        retry_errors: bool,
+        /// Cap the number of processable images.
+        #[arg(long)]
+        limit: Option<usize>,
+    },
     /// Validate the configuration file and print a report.
     ConfigCheck,
     /// Database maintenance operations.
@@ -174,10 +188,97 @@ fn cmd_db_reset(db_path: &Path, yes: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn cmd_run(
+    config_path: &Path,
+    dry_run: bool,
+    force: bool,
+    retry_errors: bool,
+    limit: Option<usize>,
+) -> anyhow::Result<()> {
+    let (cfg, warnings) = forza_config::load_config(config_path, false)?;
+    for warning in &warnings {
+        eprintln!("warning: {warning}");
+    }
+    if !dry_run && !force && !retry_errors {
+        return Err(anyhow::anyhow!(
+            "full runs (LM Studio extraction) are not implemented yet; use --dry-run"
+        ));
+    }
+
+    let conn = forza_db::open_connection(&cfg.database_file)?;
+    let known_paths = forza_db::repositories::images::known_path_hashes(&conn)?;
+    let known_hashes = forza_db::repositories::images::known_hashes(&conn)?;
+
+    let images = forza_pipeline::find_images(&cfg.input_dir);
+    let mut plan = forza_pipeline::plan_images(&images, &known_hashes, &known_paths, force)?;
+
+    if let Some(limit) = limit {
+        plan.new_images.truncate(limit);
+    }
+
+    println!("input_dir     = {}", cfg.input_dir.display());
+    println!("total files   = {}", plan.total);
+    if known_hashes.is_empty() && known_paths.is_empty() {
+        println!("inventory     = empty (first run: nothing cached yet)");
+    }
+    println!("new           = {}", plan.process_count());
+    println!(
+        "cached dupes  = {}",
+        plan.duplicates
+            .iter()
+            .filter(|d| d.reason == "cached")
+            .count()
+    );
+    println!(
+        "batch dupes   = {}",
+        plan.duplicates
+            .iter()
+            .filter(|d| d.reason == "batch")
+            .count()
+    );
+    println!("existing      = {}", plan.existing_images.len());
+    println!("skipped       = {}", plan.skipped_images.len());
+
+    if dry_run {
+        println!();
+        println!("-- dry run plan --");
+        for image in &plan.new_images {
+            println!(
+                "  PROCESS  {}  [{}]",
+                image.path.display(),
+                &image.file_hash[..12]
+            );
+        }
+        for dup in &plan.duplicates {
+            match dup.reason.as_str() {
+                "batch" => println!(
+                    "  DUP-BATCH {}  (matches {})",
+                    dup.path.display(),
+                    dup.canonical_name
+                ),
+                _ => println!("  DUP-CACHED {}", dup.path.display()),
+            }
+        }
+        for existing in &plan.existing_images {
+            println!("  EXISTING {}", existing.path.display());
+        }
+        for skipped in &plan.skipped_images {
+            println!("  SKIP[{}] {}", skipped.reason, skipped.path.display());
+        }
+    }
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Gui => forza_gui::run(&cli.config),
+        Command::Run {
+            dry_run,
+            force,
+            retry_errors,
+            limit,
+        } => cmd_run(&cli.config, dry_run, force, retry_errors, limit),
         Command::ConfigCheck => cmd_config_check(&cli.config),
         Command::Maintenance { command } => match command {
             MaintenanceCommand::Status => cmd_db_status(&database_file(&cli.config)),

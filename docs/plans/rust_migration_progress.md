@@ -137,8 +137,31 @@ skipped (with reason).
             round trip de thread com canal tipado
       - [ ] pendências para Fase 10: navegação entre seções, ícones/estilo,
             paginação da lista, testes de contrato de callbacks .slint
-- [ ] Fase 5 — Benchmark da lista de imagens
-- [ ] Fase 6 — Imagens e planejamento
+- [x] Fase 5 — Benchmark da lista de imagens → MOVIDO PARA O FINAL por
+      decisão do mantenedor (comparação Python↔Rust quando ambas as linhas
+      estiverem completas; medição manual da GUI Python continua pendente)
+- [~] Fase 6 — Imagens e planejamento de execução
+      - [x] descoberta recursiva com extensões suportadas e ordenação
+            name.lower() (`discovery.rs`)
+      - [x] hash sha256hex_size com teste de vetor conhecido
+      - [x] metadados via crate image (dimensões/format/mime/color_mode/
+            bit_depth estimado) — `inspect_metadata`
+      - [x] planejamento com precedência Python exata: hash_failed →
+            existing(path-hash) → cached(hash) → batch(seen_in_batch só
+            registra NOVOS!) → novo único; flag force ignora conhecimento
+      - [x] encode_image_payload: RGB, resize LANCZOS3 se width>max,
+            desaturação HSL-lightness ((max+min)/2), PNG encoder direto,
+            JPEG com quality honrado, webp lossless (divergência documentada:
+            crate image não faz webp lossy), byte_count do payload final
+      - [x] semantic_filename com sanitização Windows + cap 150
+      - [x] `forza run --dry-run [--force] [--limit N]` no CLI operacional —
+            smoke real: 4 arquivos sintéticos, batch dup detectado
+            (race_1_copy ↔ race_1)
+      - [x] erros por arquivo sem abortar o lote (hash_failure isolado testado)
+      - [x] 12 testes novos (discovery/hash/planning/encode/naming/metadata)
+      - [ ] pendência Fase 7/8: persistir run_inputs do plano (decisões no
+            vocabulário completo incl. unsupported/outside_input), retry-errors
+            seleção, integração com LM Studio
 - [ ] Fase 7 — Cliente LM Studio e pipeline
 - [ ] Fase 8 — Runs, revisão e rebuild
 - [ ] Fase 9 — CSV, PDF e telas de resultado
@@ -189,3 +212,14 @@ skipped (with reason).
   pede renomear variantes com prefixo comum (`Db*`) — preservar contratos
   CLI kebab-case com #[command(name)] em vez de renomear. Próximo:
   Fase 5 benchmark da lista + depois pipeline.
+- Sessão 6: Fase 5 MOVIDA para o final (decisão do mantenedor: app
+  funcional primeiro, comparações depois). Fase 6 implementada. Lições:
+  (1) ordenação Python name.lower() coloca "a.jpg" antes de "a.png" — o
+  golden mindset evitou "corrigir" o Rust para a ordem errada do teste;
+  (2) seen_in_batch só registra NOVOS: existing nunca vira canônico de
+  batch-duplicate (semântica sutil do plan_images confirmada no fonte);
+  (3) image 0.25: PngEncoder::write_image usa ExtendedColorType (.into()) e
+  ordem (buf,w,h,color); JpegEncoder honra quality; webp é lossless-only;
+  (4) thiserror rejeita campo String chamado source.
+- Sessão 6b: orza run --dry-run smokeado com imagens sintéticas reais —
+  batch duplicate detectado corretamente entre arquivos idênticos.

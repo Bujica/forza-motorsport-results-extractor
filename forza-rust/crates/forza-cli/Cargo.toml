@@ -16,6 +16,7 @@ anyhow = "1"
 forza-config = { path = "../forza-config" }
 forza-db = { path = "../forza-db" }
 forza-gui = { path = "../forza-gui" }
+forza-pipeline = { path = "../forza-pipeline" }
 
 [lints]
 workspace = true

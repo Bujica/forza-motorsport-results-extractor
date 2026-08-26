@@ -1,7 +1,37 @@
 //! `image_files` repository: identity inserts and existence checks.
 
+use std::collections::{HashMap, HashSet};
+
 use crate::error::DbError;
 use rusqlite::{Connection, params};
+
+/// path -> stored hash for available files (drives existing/duplicate planning).
+pub fn known_path_hashes(conn: &Connection) -> Result<HashMap<String, String>, DbError> {
+    let mut stmt = conn.prepare(
+        "SELECT current_path, file_hash FROM image_files WHERE file_status = 'available'",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut out = HashMap::new();
+    for item in rows {
+        let (path, hash) = item?;
+        out.insert(path, hash);
+    }
+    Ok(out)
+}
+
+/// Distinct hashes already present in the inventory.
+pub fn known_hashes(conn: &Connection) -> Result<HashSet<String>, DbError> {
+    let mut stmt =
+        conn.prepare("SELECT DISTINCT file_hash FROM image_files WHERE file_status = 'available'")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    let mut out = HashSet::new();
+    for hash in rows {
+        out.insert(hash?);
+    }
+    Ok(out)
+}
 
 pub struct ImageFileInsert<'a> {
     pub id: &'a str,

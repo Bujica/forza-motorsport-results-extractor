@@ -6,5 +6,21 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
-[lints]
-workspace = true
+[dependencies]
+base64 = "0.22"
+sha2 = "0.10"
+walkdir = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+# Test fixtures exercise fallible filesystem/image helpers directly, so the
+# unwraps live in test code only.
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
