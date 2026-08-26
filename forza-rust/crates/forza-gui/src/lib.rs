@@ -400,10 +400,16 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     {
         let ui = main.as_weak();
         main.on_selection_changed(move |index| {
+            let image_id = ROW_CACHE.with(|rows| {
+                rows.borrow()
+                    .get(index as usize)
+                    .map(|entry| entry.id.clone())
+            });
             ROW_CACHE.with(|rows| {
                 let guard = rows.borrow();
                 let Some(entry) = guard.get(index as usize) else { return };
                 if let Some(w) = ui.upgrade() {
+                    w.set_detail_has_preview(false);
                     w.set_detail_title(entry.name.clone().into());
                     w.set_detail_lines(
                         format!(
@@ -421,6 +427,9 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                     );
                 }
             });
+            if let Some(image_id) = image_id {
+                send_request(Request::LoadImageDetail { image_id });
+            }
         });
     }
     {

@@ -366,9 +366,28 @@ export component MainWindow inherits Window {
                     }
 
                     VerticalLayout {
-                        width: 260px;
+                        width: 330px;
                         spacing: 6px;
                         Text { text: root.detail-title; color: #d0d0d0; font-weight: 700; }
+                        Rectangle {
+                            height: 190px;
+                            background: #26282c;
+                            border-radius: 6px;
+                            clip: true;
+                            if root.detail-has-preview: Image {
+                                width: parent.width;
+                                height: parent.height;
+                                source: root.detail-preview;
+                                image-fit: contain;
+                            }
+                            if !root.detail-has-preview: Text {
+                                width: parent.width;
+                                y: parent.height / 2 - 9px;
+                                text: "preview unavailable";
+                                color: #6c7683;
+                                horizontal-alignment: center;
+                            }
+                        }
                         Rectangle {
                             background: #26282c;
                             border-radius: 6px;
@@ -840,8 +859,8 @@ export component MainWindow inherits Window {
                             vertical-stretch: 1;
                             clip: true;
                             if root.detail-has-preview: Image {
-                                x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2;
+                                width: parent.width;
+                                height: parent.height;
                                 source: root.detail-preview;
                                 image-fit: contain;
                             }

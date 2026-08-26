@@ -42,6 +42,13 @@ impl WorkerContext {
             .map(|cfg| cfg.gamertag.clone())
             .unwrap_or_default()
     }
+
+    pub fn input_dir(&self) -> PathBuf {
+        self.cfg
+            .lock()
+            .map(|cfg| cfg.input_dir.clone())
+            .unwrap_or_default()
+    }
 }
 
 /// Requests the UI can make.
@@ -141,14 +148,19 @@ pub fn handle_request(
     request: &Request,
 ) -> Response {
     match request {
-        Request::RefreshInventory { filter } => Response::Inventory {
-            result: service.list(filter).map_err(|e| e.to_string()),
-            options: service.options().map_err(|e| e.to_string()),
-            filter_label: filter
-                .processing_status
-                .clone()
-                .unwrap_or_else(|| "all".to_string()),
-        },
+        Request::RefreshInventory { filter } => {
+            let sync_result = service.sync_input_folder(&ctx.input_dir());
+            Response::Inventory {
+                result: sync_result
+                    .and_then(|_| service.list(filter))
+                    .map_err(|e| e.to_string()),
+                options: service.options().map_err(|e| e.to_string()),
+                filter_label: filter
+                    .processing_status
+                    .clone()
+                    .unwrap_or_else(|| "all".to_string()),
+            }
+        }
         Request::ListReviews { bucket } => Response::Reviews {
             result: (|| {
                 let conn =

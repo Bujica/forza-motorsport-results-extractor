@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use forza_db::gui_queries as db;
+use rusqlite::params;
 
 /// One row of the Images list as consumed by the GUI.
 #[derive(Debug, Clone, PartialEq)]
@@ -86,9 +87,109 @@ impl ImageInventoryService {
             .collect())
     }
 
+    /// Register supported files found in the configured input directory.
+    ///
+    /// This is the GUI equivalent of Python's `sync_input_folder`: it only
+    /// updates the inventory and never contacts the model or creates a run.
+    /// Returns the number of files newly registered.
+    pub fn sync_input_folder(&self, input_dir: &Path) -> Result<usize, forza_db::DbError> {
+        let images = forza_pipeline::find_images(input_dir);
+        let conn = forza_db::open_connection(&self.database_file)?;
+        let mut inserted = 0;
+
+        for path in images {
+            let Ok(file_hash) = forza_pipeline::file_hash(&path) else {
+                continue;
+            };
+            let path_text = path.to_string_lossy().to_string();
+            let name = path
+                .file_name()
+                .map(|value| value.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let Some(metadata) = forza_pipeline::inspect_metadata(&path).ok() else {
+                continue;
+            };
+
+            let existing_path: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM image_files WHERE current_path = ?1 LIMIT 1",
+                    [&path_text],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if let Some(id) = existing_path {
+                conn.execute(
+                    "UPDATE image_files
+                     SET current_name=?2, file_hash=?3, file_status='available',
+                         size_bytes=?4, width_px=?5, height_px=?6,
+                         last_seen_at=datetime('now'), updated_at=datetime('now')
+                     WHERE id=?1",
+                    params![
+                        id,
+                        name,
+                        file_hash,
+                        metadata.file_size_bytes as i64,
+                        metadata.width_px as i64,
+                        metadata.height_px as i64,
+                    ],
+                )?;
+                continue;
+            }
+
+            let canonical_id: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM image_files WHERE file_hash = ?1 ORDER BY created_at, id LIMIT 1",
+                    [&file_hash],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let base_id = format!("img-{file_hash}");
+            let mut id = base_id.clone();
+            let mut suffix = 1;
+            while conn
+                .query_row(
+                    "SELECT 1 FROM image_files WHERE id=?1 LIMIT 1",
+                    [&id],
+                    |_row| Ok(()),
+                )
+                .optional()?
+                .is_some()
+            {
+                id = format!("{base_id}-{suffix}");
+                suffix += 1;
+            }
+            let extension = metadata.image_format.to_lowercase();
+            conn.execute(
+                "INSERT INTO image_files
+                 (id, file_hash, current_name, current_path, size_bytes,
+                  width_px, height_px, image_format, mime_type, file_status,
+                  best_lap_status, duplicate_of_image_file_id,
+                  first_seen_at, last_seen_at, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'available','pending',?10,
+                         datetime('now'),datetime('now'),datetime('now'),datetime('now'))",
+                params![
+                    id,
+                    file_hash,
+                    name,
+                    path_text,
+                    metadata.file_size_bytes as i64,
+                    metadata.width_px as i64,
+                    metadata.height_px as i64,
+                    extension,
+                    metadata.mime_type,
+                    canonical_id,
+                ],
+            )?;
+            inserted += 1;
+        }
+        Ok(inserted)
+    }
+
     pub fn options(&self) -> Result<ImageInventoryOptions, forza_db::DbError> {
         let conn = forza_db::open_connection(&self.database_file)?;
         let (tracks, runs) = db::image_inventory_options(&conn)?;
         Ok(ImageInventoryOptions { tracks, runs })
     }
 }
+
+use rusqlite::OptionalExtension;

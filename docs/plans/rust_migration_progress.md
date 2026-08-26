@@ -620,3 +620,13 @@ skipped (with reason).
   `cargo test -p forza-db --test gui_inventory`, `cargo test -p forza-app`,
   `cargo test -p forza-gui --test worker_round_trip`, clippy workspace e
   `cargo build -p forza-gui` verdes.
+
+- Sessão 25 (2026-08-26): corrigido o fluxo de inventário para arquivos
+  adicionados após o último run. O refresh da GUI agora sincroniza a pasta
+  `paths.input_dir` com `image_files` (hash, metadados, status disponível e
+  vínculo de duplicata), sem contato com o LM Studio; antes ele apenas relia
+  a DB. A seleção em Images agora carrega o mesmo preview usado em Image
+  Detail. Os dois previews usam `image-fit: contain` com dimensões limitadas
+  ao card, evitando renderização no tamanho intrínseco original. Build e
+  testes direcionados passaram; confirmar visualmente executando o novo
+  `forza-gui.exe` a partir de `forza-rust/target/debug`.
