@@ -331,6 +331,20 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         }
                     }
                 },
+                Response::Logs(result) => match result {
+                    Ok((app_log, error_log)) => {
+                        if let Some(w) = ui.upgrade() {
+                            w.set_app_log_text(app_log.into());
+                            w.set_error_log_text(error_log.into());
+                            w.set_status_text("logs loaded".into());
+                        }
+                    }
+                    Err(message) => {
+                        if let Some(w) = ui.upgrade() {
+                            set_status(&w, format!("error: {message}").as_str());
+                        }
+                    }
+                },
             });
         });
     }
@@ -477,7 +491,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     }
     {
         main.on_page_changed(move |page| {
-            // Lazy settings/debug loads on first entry (GUI state rules).
+            // Lazy settings/debug/logs loads on first entry (GUI state rules).
             if page == "settings" && !SETTINGS_LOADED.with(|slot| *slot.borrow()) {
                 SETTINGS_LOADED.with(|slot| *slot.borrow_mut() = true);
                 send_request(Request::LoadSettings);
@@ -486,6 +500,9 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 send_request(Request::ListImageDebugCases {
                     filter: forza_app::ImageDebugFilter::default(),
                 });
+            }
+            if page == "logs" {
+                send_request(Request::LoadLogs);
             }
         });
     }
@@ -600,6 +617,12 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 &ui,
                 "loading image detail…",
             );
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_logs_reload_requested(move || {
+            enqueue(Request::LoadLogs, &ui, "reloading logs…");
         });
     }
 

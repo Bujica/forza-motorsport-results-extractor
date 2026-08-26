@@ -137,6 +137,7 @@ export component MainWindow inherits Window {
     callback debug-result-selected(string);
     callback open-image-debug(string);
     callback debug-open-image-detail();
+    callback logs-reload-requested();
 
     in property <[ImageItem]> images;
     in property <[ReviewItem]> reviews;
@@ -183,6 +184,10 @@ export component MainWindow inherits Window {
     in property <string> debug-laps-reviews-text;
     in property <string> debug-timeline-text;
 
+    in property <string> app-log-text;
+    in property <string> error-log-text;
+    in-out property <string> logs-tab: "app";
+
     in property <bool> run-running;
     in property <bool> run-paused;
     in property <float> run-percent;
@@ -223,6 +228,7 @@ export component MainWindow inherits Window {
                 { key: "best-laps", label: "Best Laps" },
                 { key: "diagnostics", label: "Diagnostics" },
                 { key: "image-debug", label: "Image Debug" },
+                { key: "logs", label: "Logs" },
                 { key: "settings", label: "Settings" },
             ]: TouchArea {
                 height: 34px;
@@ -680,6 +686,59 @@ export component MainWindow inherits Window {
                               root.debug-tab == "parsed" ? root.debug-parsed-text :
                               root.debug-tab == "laps" ? root.debug-laps-reviews-text :
                               root.debug-timeline-text;
+                        color: #cfd6dd;
+                        wrap: word-wrap;
+                        font-size: 11px;
+                    }
+                }
+            }
+
+            // ══ Logs page ══
+            if root.page == "logs": VerticalLayout {
+                spacing: 8px;
+
+                HorizontalLayout {
+                    height: 32px;
+                    spacing: 8px;
+                    Text { text: "Technical Logs"; color: #d0d0d0; font-weight: 700; width: 140px; }
+                    Rectangle {}
+                    Button { text: "Reload"; clicked => { root.logs-reload-requested(); } }
+                }
+
+                HorizontalLayout {
+                    height: 30px;
+                    spacing: 4px;
+                    for tab in [
+                        { key: "app", label: "Application Log" },
+                        { key: "errors", label: "Errors" },
+                    ]: Rectangle {
+                        border-radius: 4px;
+                        background: root.logs-tab == tab.key ? #3a4048 : #26282c;
+                        width: 150px;
+                        TouchArea {
+                            clicked => { root.logs-tab = tab.key; }
+                            Text {
+                                text: tab.label;
+                                color: root.logs-tab == tab.key ? #ffffff : #9aa4b2;
+                                font-size: 11px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                width: parent.width;
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    background: #26282c;
+                    border-radius: 6px;
+                    vertical-stretch: 1;
+                    clip: true;
+                    Text {
+                        x: 10px; y: 8px;
+                        width: parent.width - 20px;
+                        height: parent.height - 16px;
+                        text: root.logs-tab == "app" ? root.app-log-text : root.error-log-text;
                         color: #cfd6dd;
                         wrap: word-wrap;
                         font-size: 11px;

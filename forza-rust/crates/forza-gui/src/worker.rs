@@ -10,7 +10,7 @@
 //! live-provider rule.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::mpsc;
 
@@ -91,6 +91,8 @@ pub enum Request {
     LoadImageDebugByResult {
         extraction_result_id: String,
     },
+    // ── Logs ─────────────────────────────────────────────────────────
+    LoadLogs,
 }
 
 /// Outcome of a settings load/preview/save — always carries a fresh
@@ -127,6 +129,7 @@ pub enum Response {
     ImageDetail(Result<Option<forza_app::ImageDetailData>, String>),
     ImageDebugCases(Result<Vec<forza_db::image_debug::ImageDebugCase>, String>),
     ImageDebugDetail(Result<Option<forza_db::image_debug::ImageDebugDetail>, String>),
+    Logs(Result<(String, String), String>),
     Settings(Result<SettingsOutcome, String>),
 }
 
@@ -326,6 +329,43 @@ pub fn handle_request(
             let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
             load_debug_detail_by_result(&conn, extraction_result_id)
         })()),
+        Request::LoadLogs => Response::Logs((|| {
+            let cfg = ctx.cfg.lock().map_err(|e| e.to_string())?.clone();
+            let app_log = read_log_file(&cfg.log_file);
+            let error_log = read_log_file(&errors_log_path(&cfg.log_file));
+            Ok((app_log, error_log))
+        })()),
+    }
+}
+
+fn errors_log_path(log_file: &Path) -> PathBuf {
+    let stem = log_file
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "forza".into());
+    let suffix = log_file
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    log_file
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(format!("{stem}_errors{suffix}"))
+}
+
+fn read_log_file(path: &Path) -> String {
+    if !path.exists() {
+        return format!("Log file not found: {}", path.display());
+    }
+    match std::fs::read_to_string(path) {
+        Ok(content) if content.len() > 200_000 => {
+            let tail = &content[content.len() - 200_000..];
+            // Avoid cutting in the middle of a UTF-8 sequence: find next char boundary.
+            let start = tail.char_indices().next().map(|(i, _)| i).unwrap_or(0);
+            format!("… [truncated to last 200KB] …\n{}", &tail[start..])
+        }
+        Ok(content) => content,
+        Err(e) => format!("Could not read log file: {}\n{e}", path.display()),
     }
 }
 
