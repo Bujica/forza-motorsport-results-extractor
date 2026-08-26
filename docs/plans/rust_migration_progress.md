@@ -334,9 +334,18 @@ skipped (with reason).
             - [x] Slint página Image Debug (lista + 8 tabs + result ComboBox + deeplink
                   "Open image debug" no Image Detail); navegação lazy via page-changed
             - [ ] testes headless de round trip do Image Debug (pendente)
-      - [ ] pendências F10: Records (adiado por decisão do mantenedor — redesign futuro),
-            Performance dashboard, Logs view dedicada
-- [ ] Fase 11 — Empacotamento e acabamento
+      - [~] 10f — Logs view dedicada:
+            - [x] worker `LoadLogs` lê `log_file` + irmão `_errors` com truncagem 200KB
+            - [x] Slint página Logs (Application Log / Errors, Reload, lazy via page-changed)
+      - [~] 10g — Performance placeholder:
+            - [x] sidebar "Performance" + página com policy atual e nota de métricas live
+      - [ ] pendências F10: Records (adiado por decisão do mantenedor — redesign futuro)
+- [~] Fase 11 — Empacotamento e acabamento
+      - [x] build dev ok (6.3s), assets embutidos via include_str!, slint-build, config inicial via db-upgrade
+      - [x] máquina limpa smoke (temp dir, db-upgrade → dry-run → GUI viva 8s)
+      - [ ] build release completo (pesado, adiado)
+      - [ ] renderer visual PDF (genpdf), benchmark final (Fase 5)
+      - [ ] bump versão 0.1.0 → 0.21.0-beta.x, THIRD_PARTY licenças, docs uso
 
 ## Session log
 
@@ -493,5 +502,32 @@ skipped (with reason).
   Slint página Image Debug com lista + header + result ComboBox +
   8 tabs (Overview/Metadata/Results/Attempts/Response/Parsed/Laps&Reviews/
   Timeline) e deeplink "Open image debug" no Image Detail. Compila e smoke
-  GUI viva 8s; clippy ainda com type-complexity pendente de permitir no
-  HashMap de 11 tuplas.
+  GUI viva 8s; clippy type-complexity permitido no HashMap de 11 tuplas.
+
+- Sessão 15 (2026-08-26): 10f Logs view dedicada.
+  Worker `LoadLogs` (`forza-gui/src/worker.rs:330`) lê `log_file` +
+  `*_errors.log` (irmão com `_errors` no stem, Python
+  `logs_view.py:212`), truncagem 200KB, erro amigável se ausente.
+  Slint página Logs (`forza-gui/ui/main.slint:640`) com header Reload,
+  tabs Application Log / Errors (in-out `logs-tab`), texto word-wrap;
+  lazy load via `page-changed` ("logs"). Smoke com `app.log`/`app_errors.log`
+  sintéticos.
+
+- Sessão 16 (2026-08-26): 10g Performance placeholder.
+  Sidebar ganhou "Performance" (`forza-gui/ui/main.slint:217`), página com
+  policy atual (performance_tps_floor / reload_elapsed / reload_streak)
+  e nota "live metrics aparecerão após runs — history em Image Debug →
+  Attempts". Sem worker adicional (histórico já em attempts). Compila,
+  fmt/clippy/test verdes, GUI viva 8s.
+
+- Sessão 17 (2026-08-26): Fase 11 parcial — Empacotamento verificado.
+  `cargo build` dev ok (6.3s), `cargo check` release ok, assets em
+  `forza-rust/assets/` (cars/tracks/prompt) embutidos via `include_str!`,
+  `forza-gui/build.rs:5` slint-build, Slint royalty-free (MIT, já em
+  Cargo.lock), `forza_config.ini` criado via `db-upgrade` em máquina
+  limpa (temp dir). Versão workspace `0.1.0` (Python 0.21.0-beta.1, bump
+  pendente para release). CLI `forza --help` lista todos subcomandos
+  (gui/run/rebuild/export/maintenance). Smoke máquina limpa:
+  `forza maintenance db-upgrade` → `forza run --dry-run` → GUI viva 8s.
+  Pendente: `cargo build --release` completo (pesado, adiado), `genpdf`
+  renderer visual do PDF, benchmark final (Fase 5).
