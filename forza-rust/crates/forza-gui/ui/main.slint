@@ -114,7 +114,7 @@ export component MainWindow inherits Window {
     min-height: 620px;
     preferred-width: 1240px;
     preferred-height: 760px;
-    background: #1e1f22;
+    background: #f5f7fa;
 
     callback refresh-requested(string, string, string, string, string, string);
     callback selection-changed(int);
@@ -235,8 +235,8 @@ export component MainWindow inherits Window {
             padding: 8px;
             spacing: 4px;
 
-            Text { text: "FM Results"; color: #e6e6e6; font-weight: 800; font-size: 15px; }
-            Text { text: root.context-gamertag; color: #9aa4b2; font-size: 11px; }
+            Text { text: "FM Results"; color: #1f2937; font-weight: 800; font-size: 15px; }
+            Text { text: root.context-gamertag; color: #667085; font-size: 11px; }
             Rectangle { height: 8px; }
 
             for entry in [
@@ -261,7 +261,7 @@ export component MainWindow inherits Window {
                     Text {
                         x: 10px;
                         text: entry.label;
-                        color: #dfe3e8;
+                        color: #344054;
                         vertical-alignment: center;
                     }
                 }
@@ -276,7 +276,7 @@ export component MainWindow inherits Window {
             }
         }
 
-        Rectangle { width: 1px; background: #2c2f33; }
+        Rectangle { width: 1px; background: #d0d5dd; }
 
         // ── Main column ──
         VerticalLayout {
@@ -285,7 +285,7 @@ export component MainWindow inherits Window {
 
             Text {
                 text: root.status-text;
-                color: #9aa4b2;
+                color: #667085;
                 horizontal-alignment: right;
                 height: 22px;
             }
@@ -342,7 +342,7 @@ export component MainWindow inherits Window {
                     vertical-stretch: 1;
 
                     Rectangle {
-                        background: #26282c;
+background: #ffffff;
                         border-radius: 6px;
                         clip: true;
                         vertical-stretch: 1;
@@ -384,7 +384,7 @@ export component MainWindow inherits Window {
                         Text { text: root.detail-title; color: #d0d0d0; font-weight: 700; }
                         Rectangle {
                             height: 190px;
-                            background: #26282c;
+background: #ffffff;
                             border-radius: 6px;
                             clip: true;
                             if root.detail-has-preview: Image {
@@ -402,7 +402,7 @@ export component MainWindow inherits Window {
                             }
                         }
                         Rectangle {
-                            background: #26282c;
+background: #ffffff;
                             border-radius: 6px;
                             vertical-stretch: 1;
                             Text { x: 10px; y: 8px; width: parent.width - 20px;
@@ -436,7 +436,7 @@ export component MainWindow inherits Window {
 
                 // Run Config card
                 Rectangle {
-                    background: #26282c;
+background: #ffffff;
                     border-radius: 6px;
                     HorizontalLayout {
                         padding: 10px;
@@ -484,7 +484,7 @@ export component MainWindow inherits Window {
 
                 // Progress card
                 Rectangle {
-                    background: #26282c;
+background: #ffffff;
                     border-radius: 6px;
                     HorizontalLayout {
                         padding: 10px;
@@ -516,7 +516,7 @@ export component MainWindow inherits Window {
 
                 // Event Log card
                 Rectangle {
-                    background: #26282c;
+background: #ffffff;
                     border-radius: 6px;
                     vertical-stretch: 1;
                     clip: true;
@@ -553,7 +553,7 @@ export component MainWindow inherits Window {
                 }
 
                 Rectangle {
-                    background: #26282c;
+background: #ffffff;
                     border-radius: 6px;
                     clip: true;
                     vertical-stretch: 1;
@@ -600,7 +600,7 @@ export component MainWindow inherits Window {
 
                 Rectangle {
                     height: 42px;
-                    background: #26282c;
+background: #ffffff;
                     border-radius: 6px;
                     Text { x: 12px; y: 12px; text: root.best-laps-summary; color: #cfd6dd; }
                 }
@@ -614,7 +614,7 @@ export component MainWindow inherits Window {
                 }
 
                 Rectangle {
-                    background: #26282c;
+background: #ffffff;
                     border-radius: 6px;
                     clip: true;
                     vertical-stretch: 1;
@@ -624,17 +624,17 @@ export component MainWindow inherits Window {
                         spacing: 4px;
                         Rectangle {
                             height: 26px;
-                            background: #30343a;
+                            background: #eaecf0;
                             HorizontalLayout {
                                 padding-left: 8px;
-                                Text { text: "Track"; horizontal-stretch: 2; color: #cfd6dd; vertical-alignment: center; }
-                                Text { text: "Class"; width: 70px; color: #9aa4b2; vertical-alignment: center; }
-                                Text { text: "Driver"; horizontal-stretch: 1; color: #cfd6dd; vertical-alignment: center; }
-                                Text { text: "Car"; horizontal-stretch: 1; color: #9aa4b2; vertical-alignment: center; }
-                                Text { text: "Best lap"; width: 130px; color: #cfd6dd; vertical-alignment: center; }
-                                Text { text: "Weather"; width: 75px; color: #9aa4b2; vertical-alignment: center; }
-                                Text { text: "Temp"; width: 65px; color: #9aa4b2; vertical-alignment: center; }
-                                Text { text: "Source"; width: 100px; color: #9aa4b2; vertical-alignment: center; }
+                                Text { text: "Track"; width: 300px; color: #344054; vertical-alignment: center; overflow: elide; }
+                                Text { text: "Class"; width: 65px; color: #667085; vertical-alignment: center; }
+                                Text { text: "Driver"; width: 130px; color: #344054; vertical-alignment: center; }
+                                Text { text: "Car"; width: 170px; color: #667085; vertical-alignment: center; overflow: elide; }
+                                Text { text: "Best lap"; width: 105px; color: #344054; vertical-alignment: center; }
+                                Text { text: "Weather"; width: 70px; color: #667085; vertical-alignment: center; }
+                                Text { text: "Temp"; width: 60px; color: #667085; vertical-alignment: center; }
+                                Text { text: "Source"; width: 100px; color: #667085; vertical-alignment: center; }
                             }
                         }
                         blv := ListView {
@@ -643,17 +643,17 @@ export component MainWindow inherits Window {
                             for lap in root.best-laps: Rectangle {
                                 height: 30px;
                                 horizontal-stretch: 1;
-                                background: lap.mine ? #3a3325 : (lap.dirty ? #3a2525 : transparent);
+                                background: lap.mine ? #fff4cc : (lap.dirty ? #fee4e2 : transparent);
                                 HorizontalLayout {
                                     padding-left: 8px;
-                                    Text { text: lap.track; color: #e6e6e6; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
-                                    Text { text: lap.class; color: #9aa4b2; width: 70px; vertical-alignment: center; }
-                                    Text { text: lap.driver; color: lap.mine ? #ffd166 : #cfd6dd; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                    Text { text: lap.car; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                    Text { text: lap.time; color: lap.dirty ? #ef6b6b : #7bd88f; width: 130px; vertical-alignment: center; }
-                                    Text { text: lap.weather; color: #9aa4b2; width: 75px; overflow: elide; vertical-alignment: center; }
-                                    Text { text: lap.temp; color: #9aa4b2; width: 65px; vertical-alignment: center; }
-                                    Text { text: lap.source; color: #9aa4b2; width: 100px; overflow: elide; vertical-alignment: center; }
+                                    Text { text: lap.track; color: #344054; width: 300px; overflow: elide; vertical-alignment: center; }
+                                    Text { text: lap.class; color: #667085; width: 65px; vertical-alignment: center; }
+                                    Text { text: lap.driver; color: lap.mine ? #946f00 : #344054; width: 130px; overflow: elide; vertical-alignment: center; }
+                                    Text { text: lap.car; color: #667085; width: 170px; overflow: elide; vertical-alignment: center; }
+                                    Text { text: lap.time; color: lap.dirty ? #b42318 : #087443; width: 105px; vertical-alignment: center; }
+                                    Text { text: lap.weather; color: #667085; width: 70px; overflow: elide; vertical-alignment: center; }
+                                    Text { text: lap.temp; color: #667085; width: 60px; vertical-alignment: center; }
+                                    Text { text: lap.source; color: #667085; width: 100px; overflow: elide; vertical-alignment: center; }
                                 }
                             }
                         }
@@ -679,7 +679,7 @@ export component MainWindow inherits Window {
                 }
 
                 Rectangle {
-                    background: #26282c;
+background: #ffffff;
                     border-radius: 6px;
                     vertical-stretch: 1;
                     Text {
@@ -706,7 +706,7 @@ export component MainWindow inherits Window {
 
                 // Cases list
                 Rectangle {
-                    background: #26282c;
+background: #ffffff;
                     border-radius: 6px;
                     height: 260px;
                     clip: true;
@@ -785,7 +785,7 @@ export component MainWindow inherits Window {
                 }
 
                 Rectangle {
-                    background: #26282c;
+background: #ffffff;
                     border-radius: 6px;
                     vertical-stretch: 1;
                     clip: true;
@@ -845,7 +845,7 @@ export component MainWindow inherits Window {
                 }
 
                 Rectangle {
-                    background: #26282c;
+background: #ffffff;
                     border-radius: 6px;
                     vertical-stretch: 1;
                     clip: true;
@@ -873,7 +873,7 @@ export component MainWindow inherits Window {
                 }
 
                 Rectangle {
-                    background: #26282c;
+background: #ffffff;
                     border-radius: 6px;
                     vertical-stretch: 1;
                     Text {
@@ -896,7 +896,7 @@ export component MainWindow inherits Window {
                     spacing: 8px;
                     Text {
                         text: root.detail-title;
-                        color: #e6e6e6;
+color: #344054;
                         font-weight: 800;
                         font-size: 16px;
                         horizontal-stretch: 1;
@@ -916,7 +916,7 @@ export component MainWindow inherits Window {
                         spacing: 6px;
                         Text { text: "Preview"; color: #d0d0d0; font-weight: 700; }
                         Rectangle {
-                            background: #26282c;
+background: #ffffff;
                             border-radius: 6px;
                             vertical-stretch: 1;
                             clip: true;
@@ -972,7 +972,7 @@ export component MainWindow inherits Window {
                         }
 
                         Rectangle {
-                            background: #26282c;
+background: #ffffff;
                             border-radius: 6px;
                             vertical-stretch: 1;
                             clip: true;
@@ -1127,7 +1127,7 @@ export component MainWindow inherits Window {
 
                 // Validation bar
                 Rectangle {
-                    background: #26282c;
+background: #ffffff;
                     border-radius: 6px;
                     height: 44px;
                     HorizontalLayout {
@@ -1174,7 +1174,7 @@ export component MainWindow inherits Window {
 
                 // Rows
                 Rectangle {
-                    background: #26282c;
+background: #ffffff;
                     border-radius: 6px;
                     vertical-stretch: 1;
                     clip: true;
@@ -1190,7 +1190,7 @@ export component MainWindow inherits Window {
                                 Text {
                                     x: 10px;
                                     text: row.group;
-                                    color: #e6e6e6;
+color: #344054;
                                     font-weight: 700;
                                     font-size: 11px;
                                     vertical-alignment: center;

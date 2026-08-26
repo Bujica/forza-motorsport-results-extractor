@@ -665,3 +665,10 @@ skipped (with reason).
   visual para suportar a evolução da tabela. O Review recebeu cabeçalho de
   colunas equivalente. `cargo check -p forza-gui` passou sem os novos loops de
   layout.
+
+- Sessão 30 (2026-08-26): refinado o tema visual. Best Laps usa larguras
+  fixas compartilhadas entre cabeçalho e linhas (Track 300, Class 65, Driver
+  130, Car 170, Best lap 105, Weather 70, Temp 60, Source 100), eliminando o
+  desalinhamento por `stretch`. A paleta principal foi clareada, com cartões
+  brancos, textos escuros, cabeçalho cinza-claro e destaques suaves para piloto
+  próprio/volta suja. `cargo check -p forza-gui` passou.
