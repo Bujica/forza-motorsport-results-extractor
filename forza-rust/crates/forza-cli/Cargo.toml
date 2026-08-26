@@ -17,6 +17,7 @@ forza-config = { path = "../forza-config" }
 forza-db = { path = "../forza-db" }
 forza-app = { path = "../forza-app" }
 forza-gui = { path = "../forza-gui" }
+forza-output = { path = "../forza-output" }
 forza-pipeline = { path = "../forza-pipeline" }
 
 [lints]

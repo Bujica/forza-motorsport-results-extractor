@@ -223,7 +223,24 @@ skipped (with reason).
             (scoped), integração run_service completa com backend live
       - [ ] PerformanceService/dashboard/gaps + telas GUI correspondentes →
             planejado junto da Fase 10 (superposição reconhecida no plano)
-- [ ] Fase 9 — CSV, PDF e telas de resultado
+- [~] Fase 9 — CSV, PDF e telas de resultado
+      - [x] CSV byte-fiel ao writer Python: BOM utf-8-sig, CRLF, QUOTE_MINIMAL,
+            headers/ordem idênticos, None→vazio, bool capitalizado (True/
+            False), floats str()-compatíveis — GOLDEN: bytes idênticos
+            contra `export_csv` real do Python
+            (`fixtures/expected/output_golden.json`)
+      - [x] PDF content plan determinístico (`pdf.rs::build_pdf_plan`):
+            data_map track→class→rows com sort (time asc, player antes em
+            tie), ordem canônica de tracks via assets, class_order + cores,
+            GOLDEN estrutural contra _build_data_map real do Python
+      - [x] read model list_clean_flat (best-only join image metadata)
+      - [x] comando CLI `forza export [--out FILE]` operacional (CSV;
+            smoke em banco vazio → mensagem clara)
+      - [x] 2 testes golden novos
+      - [ ] pendências Fase 10/11: RENDERER visual do PDF (genpdf/printpdf —
+            spike pendente; conteúdo já garantido pelo plan testado),
+            records/community merge no plan, artifacts de export,
+            abertura do arquivo pela GUI
 - [ ] Fase 10 — GUI completa
 - [ ] Fase 11 — Empacotamento e acabamento
 
@@ -300,3 +317,13 @@ skipped (with reason).
   review dirty_lap existe (impacto em output). Corrigir dirty não altera o
   tempo — a lap corrigida segue dominando legitimamente. CLI ganhou
   orza rebuild. Pendências movidas para 8½/Fase 10 conforme checklist.
+
+- Sessão 9: Fase 9 implementada com estratégia plan-vs-render: o CONTEÚDO
+  do PDF (a lista) é uma estrutura tipada determinística testada contra
+  golden das funções Python REAIS (_build_data_map + ordering + cores); o
+  RENDERER visual fica para F10/11 (spike genpdf/printpdf pendente). CSV
+  byte-idêntico confirmado. Lições: (1) Python csv usa utf-8-sig (BOM) e
+  CRLF; bool vira True/False capitalizado via str(); floats str() mantêm
+  .0; (2) source_file vive em lap_records, race_date em image_files —
+  conferir PRAGMA antes de escrever JOINs; (3) sort do bucket é por
+  time_sec numérico, nunca pela string.

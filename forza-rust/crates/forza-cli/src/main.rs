@@ -41,6 +41,12 @@ enum Command {
     },
     /// Recompute best laps and review cases without model calls.
     Rebuild,
+    /// Export the clean best-lap table to CSV (PDF renderer lands with F10).
+    Export {
+        /// Destination CSV path.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// Validate the configuration file and print a report.
     ConfigCheck,
     /// Database maintenance operations.
@@ -295,6 +301,40 @@ fn main() -> anyhow::Result<()> {
             retry_errors,
             limit,
         } => cmd_run(&cli.config, dry_run, force, retry_errors, limit),
+        Command::Export { out } => {
+            let (cfg, _) = forza_config::load_config(&cli.config, false)?;
+            let conn = forza_db::open_connection(&cfg.database_file)?;
+            let rows =
+                forza_db::repositories::laps::list_clean_flat(&conn, &cfg.gamertag.to_lowercase())?;
+            if rows.is_empty() {
+                println!("export: no best-lap rows to export");
+                return Ok(());
+            }
+            let dest = out.unwrap_or_else(|| PathBuf::from("output/exports/results.csv"));
+            let export_rows: Vec<forza_output::csv::ExportRow> = rows
+                .iter()
+                .map(|r| forza_output::csv::ExportRow {
+                    track: r.track.clone(),
+                    race_class: r.race_class.clone(),
+                    weather: r.weather.clone(),
+                    temp_f: r.temp_f,
+                    temp_c: r.temp_c,
+                    driver: r.driver.clone(),
+                    car: r.car.clone(),
+                    best_lap: r.best_lap.clone(),
+                    best_lap_ms: r.best_lap_ms,
+                    dirty: r.dirty,
+                    source_file: r.source_file.clone(),
+                    race_date: r.race_date.clone(),
+                    image_format: r.image_format.clone(),
+                    width_px: r.width_px,
+                    height_px: r.height_px,
+                })
+                .collect();
+            let n = forza_output::csv::export_csv(&export_rows, &dest)?;
+            println!("exported {n} rows -> {}", dest.display());
+            Ok(())
+        }
         Command::ConfigCheck => cmd_config_check(&cli.config),
         Command::Maintenance { command } => match command {
             MaintenanceCommand::Status => cmd_db_status(&database_file(&cli.config)),

@@ -1671,6 +1671,7 @@ dependencies = [
  "forza-config",
  "forza-db",
  "forza-gui",
+ "forza-output",
  "forza-pipeline",
 ]
 
@@ -1743,6 +1744,13 @@ dependencies = [
 [[package]]
 name = "forza-output"
 version = "0.1.0"
+dependencies = [
+ "base64",
+ "forza-domain",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+]
 
 [[package]]
 name = "forza-pipeline"

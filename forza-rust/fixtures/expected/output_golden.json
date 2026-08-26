@@ -1,0 +1,79 @@
+{
+  "csv_b64": "77u/dHJhY2sscmFjZV9jbGFzcyx3ZWF0aGVyLHRlbXBfZix0ZW1wX2MsZHJpdmVyLGNhcixiZXN0X2xhcCxiZXN0X2xhcF9tcyxkaXJ0eSxzb3VyY2VfZmlsZSxyYWNlX2RhdGUsaW1hZ2VfZm9ybWF0LHdpZHRoX3B4LGhlaWdodF9weA0KRnVqaSBTcGVlZHdheSxBLGRyeSw4MC4wLDI2LjcsUml2YWwgT25lLEJNVyBNNCBHVDMsMToyOS4wMDAsODkwMDAsRmFsc2UsLCwsLA0KRnVqaSBTcGVlZHdheSxBLGRyeSw4MC4wLDI2LjcsVGVzdERyaXZlcixBdWRpIFI4IExNUywxOjMwLjUwMCDilrIsOTA1MDAsVHJ1ZSxzaG90X3BsYXllci5wbmcsMjAyNi0wOC0wMSxwbmcsMzg0MCwyMTYwDQpMZSBNYW5zIEZ1bGwgQ2lyY3VpdCxUQ1IscmFpbiw2MS4wLDE2LjEsVGVzdERyaXZlcixIb25kYSAjNzMgQ2l2aWMsMjowNS4xMjMsMTI1MTIzLEZhbHNlLHNob3RfbG0ucG5nLDIwMjYtMDctMjAsanBlZywxOTIwLDEwODANCg==",
+  "pdf_plan": {
+    "gamertag": "TestDriver",
+    "stats": {
+      "tracks": 2,
+      "classes": 2,
+      "laps": 3
+    },
+    "sections": [
+      {
+        "track": "Fuji Speedway",
+        "tables": [
+          {
+            "class": "A",
+            "color_hex": "#992800",
+            "rows": [
+              {
+                "driver": "Rival One",
+                "car": "BMW M4 GT3",
+                "time_str": "1:29.000",
+                "time_ms": 89000,
+                "dirty": false,
+                "mine": false,
+                "temp": 26.7
+              },
+              {
+                "driver": "TestDriver",
+                "car": "Audi R8 LMS",
+                "time_str": "1:30.500 ▲",
+                "time_ms": 90500,
+                "dirty": true,
+                "mine": true,
+                "temp": 26.7
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "track": "Le Mans Full Circuit",
+        "tables": [
+          {
+            "class": "TCR",
+            "color_hex": "#1E90FF",
+            "rows": [
+              {
+                "driver": "TestDriver",
+                "car": "Honda #73 Civic",
+                "time_str": "2:05.123",
+                "time_ms": 125123,
+                "dirty": false,
+                "mine": true,
+                "temp": 16.1
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "csv_fields": [
+    "track",
+    "race_class",
+    "weather",
+    "temp_f",
+    "temp_c",
+    "driver",
+    "car",
+    "best_lap",
+    "best_lap_ms",
+    "dirty",
+    "source_file",
+    "race_date",
+    "image_format",
+    "width_px",
+    "height_px"
+  ]
+}

@@ -12,7 +12,7 @@ pub mod runs;
 pub use best_laps::mark_best_laps;
 pub use corrections::apply_manual_correction;
 pub use images::{ImageFileInsert, insert_image_file, known_hashes, known_path_hashes};
-pub use laps::{LapRecordInsert, insert_lap_record};
+pub use laps::{ExportFlatRow, LapRecordInsert, insert_lap_record, list_clean_flat};
 pub use reviews::{
     ReviewCaseInsert, insert_review_case, query_review_candidates, upsert_review_cases,
 };
