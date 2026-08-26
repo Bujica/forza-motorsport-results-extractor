@@ -39,6 +39,8 @@ enum Command {
         #[arg(long)]
         limit: Option<usize>,
     },
+    /// Recompute best laps and review cases without model calls.
+    Rebuild,
     /// Validate the configuration file and print a report.
     ConfigCheck,
     /// Database maintenance operations.
@@ -273,6 +275,20 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Gui => forza_gui::run(&cli.config),
+        Command::Rebuild => {
+            let (cfg, _) = forza_config::load_config(&cli.config, false)?;
+            let conn = forza_db::open_connection(&cfg.database_file)?;
+            let outcome = forza_app::services::rebuild::rebuild(&conn, &cfg.gamertag)
+                .map_err(|e| anyhow::anyhow!(e))?;
+            println!(
+                "rebuild: {} best-lap winner(s); reviews +{} kept {} auto-resolved {}",
+                outcome.best_lap_winners,
+                outcome.review_inserted,
+                outcome.review_kept,
+                outcome.review_auto_resolved
+            );
+            Ok(())
+        }
         Command::Run {
             dry_run,
             force,

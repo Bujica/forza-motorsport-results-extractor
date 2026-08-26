@@ -2,14 +2,20 @@
 //! query, and CLI maintenance commands. Fuller repositories land with their
 //! consuming phases (runs/review in Fase 8).
 
+pub mod best_laps;
+pub mod corrections;
 pub mod images;
 pub mod laps;
 pub mod reviews;
 pub mod runs;
 
-pub use images::{ImageFileInsert, insert_image_file};
+pub use best_laps::mark_best_laps;
+pub use corrections::apply_manual_correction;
+pub use images::{ImageFileInsert, insert_image_file, known_hashes, known_path_hashes};
 pub use laps::{LapRecordInsert, insert_lap_record};
-pub use reviews::{ReviewCaseInsert, insert_review_case};
+pub use reviews::{
+    ReviewCaseInsert, insert_review_case, query_review_candidates, upsert_review_cases,
+};
 pub use runs::{RunInsert, insert_run};
 
 use crate::error::DbError;

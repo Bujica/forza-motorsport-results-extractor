@@ -10,6 +10,7 @@ pub mod car_names;
 pub mod difflib;
 pub mod enums;
 pub mod errors;
+pub mod frontier;
 pub mod lap;
 pub mod ordering;
 pub mod race_class;

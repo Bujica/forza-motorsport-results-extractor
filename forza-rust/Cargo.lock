@@ -1667,6 +1667,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "forza-app",
  "forza-config",
  "forza-db",
  "forza-gui",
@@ -1686,6 +1687,7 @@ dependencies = [
 name = "forza-db"
 version = "0.1.0"
 dependencies = [
+ "forza-domain",
  "r2d2",
  "r2d2_sqlite",
  "rusqlite",

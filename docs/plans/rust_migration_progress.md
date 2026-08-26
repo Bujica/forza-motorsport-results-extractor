@@ -193,7 +193,36 @@ skipped (with reason).
       - [ ] pendência Fase 8: runtime snapshots/prompt snapshots persistidos,
             unload/load automático quando incompatível, artifacts raw,
             integração run_service completa
-- [ ] Fase 8 — Runs, revisão e rebuild
+- [~] Fase 8 — Runs, revisão e rebuild
+      - [x] CRITÉRIO CENTRAL ATENDIDO (e2e em banco de teste):
+            `processar → revisar → corrigir → rebuild` sem nova chamada ao
+            modelo (`forza-app/tests/run_flow.rs`) — replay 3 imagens,
+            fronteira vencida por volta suja do player (semântica Python),
+            review dirty_lap gerado, correção manual aplica+resolve,
+            rebuild recomputa tudo e doctor fica saudável
+      - [x] FrontierCalculator portado para forza-domain/frontier.rs (puro)
+            — incluindo a sutileza de que clean_frontier_rows NÃO filtra
+            dirty no lado do player
+      - [x] mark_best_laps (latest-run-per-image + winners + status das
+            images); simple path sem gamertag
+      - [x] review candidates com regras fiéis (dirty&best, weather unknown,
+            track unknown/unresolved/not-in-reference, class invalid,
+            driver triggers, car empty/not-in-reference) + business_key
+            canônica (lap-scoped vs image-scoped vs fallback)
+      - [x] upsert preservando decisões do operador; condições sumidas →
+            auto_resolved
+      - [x] correções manuais: apply_manual_correction aplica na lap
+            (normalizando track/car), grava evidence em review_corrections
+            (stable_key), resolve case como confirmed
+      - [x] RebuildService em forza-app (best laps + reviews + contadores);
+            comando CLI `forza rebuild` operacional
+      - [ ] pendências 8½: persistência de run lifecycle completo
+            (pending→running→completed com counters reais), reconciliation
+            de runs abandonados, runtime/prompt snapshots no backend live,
+            artifacts raw, rain_time_suspicious, mark_best_laps_for_groups
+            (scoped), integração run_service completa com backend live
+      - [ ] PerformanceService/dashboard/gaps + telas GUI correspondentes →
+            planejado junto da Fase 10 (superposição reconhecida no plano)
 - [ ] Fase 9 — CSV, PDF e telas de resultado
 - [ ] Fase 10 — GUI completa
 - [ ] Fase 11 — Empacotamento e acabamento
@@ -264,3 +293,10 @@ skipped (with reason).
   condição — usar em vez de ifs aninhados.
 - Sessão 6b: orza run --dry-run smokeado com imagens sintéticas reais —
   batch duplicate detectado corretamente entre arquivos idênticos.
+
+- Sessão 8: Fase 8 núcleo concluída — critério e2e verde. ACHADO DE
+  SEMÂNTICA: clean_frontier_rows NÃO filtra dirty no lado do player; volta
+  suja define o limite, vence a fronteira e é exatamente por isso que o
+  review dirty_lap existe (impacto em output). Corrigir dirty não altera o
+  tempo — a lap corrigida segue dominando legitimamente. CLI ganhou
+  orza rebuild. Pendências movidas para 8½/Fase 10 conforme checklist.
