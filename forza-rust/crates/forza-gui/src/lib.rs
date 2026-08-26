@@ -125,6 +125,12 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     let inventory_model = Rc::new(VecModel::<ImageItem>::from(Vec::new()));
     main.set_images(ModelRc::from(inventory_model.clone()));
     LIST_MODEL.with(|slot| *slot.borrow_mut() = Some(inventory_model.clone()));
+    let review_model = Rc::new(VecModel::<ReviewItem>::from(Vec::new()));
+    main.set_reviews(ModelRc::from(review_model.clone()));
+    REVIEW_MODEL.with(|slot| *slot.borrow_mut() = Some(review_model));
+    let bestlap_model = Rc::new(VecModel::<BestLapItem>::from(Vec::new()));
+    main.set_best_laps(ModelRc::from(bestlap_model.clone()));
+    BESTLAP_MODEL.with(|slot| *slot.borrow_mut() = Some(bestlap_model));
     GAMERTAG.with(|slot| *slot.borrow_mut() = cfg.gamertag.clone());
     CONFIG_PATH.with(|slot| *slot.borrow_mut() = config_path.to_path_buf());
 

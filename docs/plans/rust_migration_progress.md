@@ -649,3 +649,11 @@ skipped (with reason).
   ter sido registrada no refresh. O cartão Best Laps recebeu altura explícita
   para impedir o colapso visual do `ListView`; a consulta já retornava as 15
   linhas. Build GUI passou após o ajuste.
+
+- Sessão 28 (2026-08-26): diagnosticado o falso estado vazio de Best Laps.
+  O worker retornava 27 linhas, mas `BESTLAP_MODEL` nunca era inicializado
+  nem ligado à propriedade `root.best-laps`; por isso apenas o contador de
+  status aparecia. A inicialização dos modelos de Best Laps e Review foi
+  adicionada em `forza-gui/src/lib.rs`. `cargo check -p forza-gui` passou.
+  O executável em uso precisa ser fechado antes de substituir/recompilar o
+  `.exe`, pois a instância aberta mantém o arquivo bloqueado no Windows.
