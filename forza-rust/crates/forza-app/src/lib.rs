@@ -5,4 +5,8 @@
 
 pub mod services;
 
-pub use services::{ImageInventoryEntry, ImageInventoryFilter, ImageInventoryService};
+pub use services::{
+    BestLapEntry, DoctorSummary, ImageInventoryEntry, ImageInventoryFilter, ImageInventoryService,
+    RebuildOutcome, ReviewCaseEntry, decide_case, ignore_case, list_clean_flat_entries,
+    list_review_cases, rebuild, run_doctor,
+};

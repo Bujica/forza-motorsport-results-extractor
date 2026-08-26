@@ -241,7 +241,25 @@ skipped (with reason).
             spike pendente; conteúdo já garantido pelo plan testado),
             records/community merge no plan, artifacts de export,
             abertura do arquivo pela GUI
-- [ ] Fase 10 — GUI completa
+- [~] Fase 10 — GUI completa
+      - [x] navegação sidebar entre seções (Images/Review/Best Laps/
+            Diagnostics) com página condicional no Slint
+      - [x] Review Queue operacional: buckets open/resolved/all, decisões
+            Not-dirty/Dirty aplicam correção + rebuild derivado; Ignore
+            resolve como ignorado — tudo via worker tipado
+      - [x] Best Laps: tabela clean-flat com highlight mine/dirty + botão
+            Rebuild derived state
+      - [x] Diagnostics: DB Doctor on-demand com relatório textual
+      - [x] worker protocol estendido (ListReviews/DecideCase/IgnoreCase/
+            ListBestLaps/RunDoctor/RunRebuild) — handlers puros testáveis
+            headless (2 testes de round trip verdes)
+      - [x] SMOKE REAL end-to-end: banco criado via CLI, 15 laps seedadas
+            das 3 fixtures aceitas reais, `forza rebuild` → 5 winners,
+            `forza export` → CSV com dados reais, GUI viva 10s navegável
+      - [ ] pendências F10b: Settings editável (.ini write), Image Detail
+            completo (tabs), Image Debug/Diagnostics avançados, Records +
+            import externo, Performance dashboard/worker/telas, Logs view,
+            process view com progresso/cancelamento do backend live
 - [ ] Fase 11 — Empacotamento e acabamento
 
 ## Session log
@@ -327,3 +345,10 @@ skipped (with reason).
   .0; (2) source_file vive em lap_records, race_date em image_files —
   conferir PRAGMA antes de escrever JOINs; (3) sort do bucket é por
   time_sec numérico, nunca pela string.
+
+- Sessão 10: Fase 10 parcial — shell multi-página operacional consumindo
+  services reais (review decisions disparam rebuild derivado). Smoke e2e:
+  15 laps das fixtures reais → rebuild → export CSV → GUI navegando.
+  Lições Slint: (1) ListView precisa dimensões x/y/w/h via parent explícito
+  (binding loop senão); (2) sem public em callbacks; (3) font-family
+  monospace não existe; (4) LocalKey<OnceCell> exige .with() para get/set.
