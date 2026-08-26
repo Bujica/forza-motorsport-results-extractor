@@ -85,6 +85,25 @@ export struct SettingItem {
     group: string,
 }
 
+export struct DebugCaseItem {
+    image-file-id: string,
+    image-name: string,
+    file-status: string,
+    processing: string,
+    best-lap: string,
+    latest-status: string,
+    run-id: string,
+    model: string,
+    attempts: int,
+    laps: int,
+    reviews: int,
+}
+
+export struct DebugResultComboItem {
+    id: string,
+    label: string,
+}
+
 export component MainWindow inherits Window {
     title: "Forza Motorsport Results Extractor";
     min-width: 1000px;
@@ -113,6 +132,11 @@ export component MainWindow inherits Window {
     callback discard-settings();
     callback save-settings();
     callback page-changed(string);
+    callback debug-refresh-requested();
+    callback debug-case-selected(int);
+    callback debug-result-selected(string);
+    callback open-image-debug(string);
+    callback debug-open-image-detail();
 
     in property <[ImageItem]> images;
     in property <[ReviewItem]> reviews;
@@ -133,6 +157,7 @@ export component MainWindow inherits Window {
     in property <string> detail-meta;
     in property <string> detail-badges;
     in property <string> detail-path;
+    in property <string> detail-image-id;
     in property <string> detail-tab;
     in property <bool> detail-loaded;
 
@@ -141,6 +166,22 @@ export component MainWindow inherits Window {
     in property <string> settings-validation-text;
     in property <bool> settings-dirty;
     in property <string> settings-message;
+
+    in property <[DebugCaseItem]> debug-cases;
+    in property <[DebugResultComboItem]> debug-results;
+    in property <[string]> debug-result-labels;
+    in property <string> debug-title;
+    in property <string> debug-selected-image-id;
+    in property <string> debug-selected-result-id;
+    in-out property <string> debug-tab: "overview";
+    in property <string> debug-overview-text;
+    in property <string> debug-metadata-text;
+    in property <string> debug-results-text;
+    in property <string> debug-attempts-text;
+    in property <string> debug-response-text;
+    in property <string> debug-parsed-text;
+    in property <string> debug-laps-reviews-text;
+    in property <string> debug-timeline-text;
 
     in property <bool> run-running;
     in property <bool> run-paused;
@@ -181,6 +222,7 @@ export component MainWindow inherits Window {
                 { key: "review", label: "Review" },
                 { key: "best-laps", label: "Best Laps" },
                 { key: "diagnostics", label: "Diagnostics" },
+                { key: "image-debug", label: "Image Debug" },
                 { key: "settings", label: "Settings" },
             ]: TouchArea {
                 height: 34px;
@@ -529,6 +571,122 @@ export component MainWindow inherits Window {
                 }
             }
 
+            // ══ Image Debug page ══
+            if root.page == "image-debug": VerticalLayout {
+                spacing: 8px;
+
+                HorizontalLayout {
+                    height: 32px;
+                    spacing: 8px;
+                    Text { text: "Image Debug"; color: #d0d0d0; font-weight: 700; width: 120px; }
+                    Button { text: "Refresh"; clicked => { root.debug-refresh-requested(); } }
+                    Text { text: root.debug-selected-image-id; color: #6c7683; font-size: 10px; overflow: elide; horizontal-stretch: 1; }
+                }
+
+                // Cases list
+                Rectangle {
+                    background: #26282c;
+                    border-radius: 6px;
+                    height: 260px;
+                    clip: true;
+                    dcv := ListView {
+                        x: 4px; y: 4px;
+                        width: parent.width - 8px;
+                        height: parent.height - 8px;
+                        for item[index] in root.debug-cases: TouchArea {
+                            height: 28px;
+                            width: dcv.width;
+                            clicked => { root.debug-case-selected(index); }
+                            Rectangle {
+                                x: 1px; y: 1px;
+                                width: parent.width - 2px;
+                                height: parent.height - 2px;
+                                border-radius: 4px;
+                                background: root.debug-selected-image-id == item.image-file-id ? #3a4048 : transparent;
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    spacing: 6px;
+                                    Text { text: item.image-name; color: #e6e6e6; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
+                                    Text { text: item.processing; color: item.processing == "processed_ok" ? #7bd88f : item.processing == "processed_error" ? #ef6b6b : #9aa4b2; width: 110px; vertical-alignment: center; }
+                                    Text { text: item.latest-status; color: #9aa4b2; width: 90px; vertical-alignment: center; }
+                                    Text { text: item.model; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                    Text { text: item.attempts + " att"; color: #6c7683; width: 60px; vertical-alignment: center; }
+                                    Text { text: item.laps + " laps"; color: #6c7683; width: 70px; vertical-alignment: center; }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Detail header
+                HorizontalLayout {
+                    height: 32px;
+                    spacing: 8px;
+                    Text { text: root.debug-title; color: #e6e6e6; font-weight: 700; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                    ComboBox {
+                        width: 220px;
+                        model: root.debug-result-labels;
+                        current-index: 0;
+                        selected(value) => { root.debug-result-selected(root.debug-results[self.current-index].id); }
+                    }
+                    Button { text: "Image details"; clicked => { root.debug-open-image-detail(); } }
+                }
+
+                // Tabs
+                HorizontalLayout {
+                    height: 30px;
+                    spacing: 4px;
+                    for tab in [
+                        { key: "overview", label: "Overview" },
+                        { key: "metadata", label: "Metadata" },
+                        { key: "results", label: "Results" },
+                        { key: "attempts", label: "Attempts" },
+                        { key: "response", label: "Response" },
+                        { key: "parsed", label: "Parsed" },
+                        { key: "laps", label: "Laps & Reviews" },
+                        { key: "timeline", label: "Timeline" },
+                    ]: Rectangle {
+                        border-radius: 4px;
+                        background: root.debug-tab == tab.key ? #3a4048 : #26282c;
+                        width: 110px;
+                        TouchArea {
+                            clicked => { root.debug-tab = tab.key; }
+                            Text {
+                                text: tab.label;
+                                color: root.debug-tab == tab.key ? #ffffff : #9aa4b2;
+                                font-size: 11px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                width: parent.width;
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    background: #26282c;
+                    border-radius: 6px;
+                    vertical-stretch: 1;
+                    clip: true;
+                    Text {
+                        x: 10px; y: 8px;
+                        width: parent.width - 20px;
+                        height: parent.height - 16px;
+                        text: root.debug-tab == "overview" ? root.debug-overview-text :
+                              root.debug-tab == "metadata" ? root.debug-metadata-text :
+                              root.debug-tab == "results" ? root.debug-results-text :
+                              root.debug-tab == "attempts" ? root.debug-attempts-text :
+                              root.debug-tab == "response" ? root.debug-response-text :
+                              root.debug-tab == "parsed" ? root.debug-parsed-text :
+                              root.debug-tab == "laps" ? root.debug-laps-reviews-text :
+                              root.debug-timeline-text;
+                        color: #cfd6dd;
+                        wrap: word-wrap;
+                        font-size: 11px;
+                    }
+                }
+            }
+
             // ══ Image Detail page ══
             if root.page == "image-detail": VerticalLayout {
                 spacing: 8px;
@@ -740,6 +898,7 @@ export component MainWindow inherits Window {
                     spacing: 8px;
                     Button { text: "← Previous"; clicked => { root.detail-prev(); } }
                     Button { text: "Next →"; clicked => { root.detail-next(); } }
+                    Button { text: "Open image debug"; enabled: root.detail-loaded; clicked => { root.open-image-debug(root.detail-image-id); } }
                     Rectangle {}
                     Button { text: "Close"; clicked => { root.detail-close(); } }
                 }

@@ -15,8 +15,9 @@ use std::sync::Mutex;
 use std::sync::mpsc;
 
 use forza_app::{
-    ImageInventoryFilter, ImageInventoryService, ReviewCaseEntry, decide_case, ignore_case,
-    list_clean_flat_entries, list_review_cases, load_image_detail, rebuild, settings_snapshot,
+    ImageDebugFilter, ImageInventoryFilter, ImageInventoryService, ReviewCaseEntry, decide_case,
+    ignore_case, list_clean_flat_entries, list_debug_cases, list_review_cases, load_debug_detail,
+    load_debug_detail_by_result, load_image_detail, rebuild, settings_snapshot,
 };
 
 /// Live configuration owned by the worker thread.
@@ -79,6 +80,17 @@ pub enum Request {
     SaveSettings {
         changes: BTreeMap<String, String>,
     },
+    // ── Image Debug ────────────────────────────────────────────────────
+    ListImageDebugCases {
+        filter: ImageDebugFilter,
+    },
+    LoadImageDebugDetail {
+        image_file_id: String,
+        selected_result_id: Option<String>,
+    },
+    LoadImageDebugByResult {
+        extraction_result_id: String,
+    },
 }
 
 /// Outcome of a settings load/preview/save — always carries a fresh
@@ -113,6 +125,8 @@ pub enum Response {
     Rebuild(Result<forza_app::RebuildOutcome, String>),
     RunDryRunDone(String),
     ImageDetail(Result<Option<forza_app::ImageDetailData>, String>),
+    ImageDebugCases(Result<Vec<forza_db::image_debug::ImageDebugCase>, String>),
+    ImageDebugDetail(Result<Option<forza_db::image_debug::ImageDebugDetail>, String>),
     Settings(Result<SettingsOutcome, String>),
 }
 
@@ -295,6 +309,23 @@ pub fn handle_request(
             })();
             Response::Settings(outcome)
         }
+        Request::ListImageDebugCases { filter } => Response::ImageDebugCases((|| {
+            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            list_debug_cases(&conn, filter)
+        })()),
+        Request::LoadImageDebugDetail {
+            image_file_id,
+            selected_result_id,
+        } => Response::ImageDebugDetail((|| {
+            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            load_debug_detail(&conn, image_file_id, selected_result_id.as_deref())
+        })()),
+        Request::LoadImageDebugByResult {
+            extraction_result_id,
+        } => Response::ImageDebugDetail((|| {
+            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            load_debug_detail_by_result(&conn, extraction_result_id)
+        })()),
     }
 }
 

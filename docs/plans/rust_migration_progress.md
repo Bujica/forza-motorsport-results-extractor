@@ -317,9 +317,24 @@ skipped (with reason).
                   load/preview/save com backup+recompute+invalid (1),
                   snapshot rows/pending/override/path-status (4), ini
                   parse/render (4), save INI (5)
-      - [ ] pendências F10b/c: Pause (placeholder), retry-errors seleção,
-            Image Debug (com deeplink a partir do detail), Records
-            (adiado por decisão do mantenedor — redesign futuro),
+      - [~] 10d — retry-errors + Pause:
+            - [x] RunControl cooperativo (`forza-app/src/services/run_control.rs:1`)
+                  com checkpoint (pause bloqueia entre fases/imagens, cancel vence);
+                  `retry_errors` mutuamente exclusivo com `force` (mensagem Python);
+                  `list_failed_images_for_retry` (`forza-db`) + `insert_processed_input`
+                  com `process_reason` em `run_inputs`
+            - [x] GUI Process: checkbox Retry habilitada com exclusão mútua contra Force,
+                  botão Pause/Resume com estado `run-paused` e `toggle-pause`
+            - [x] CLI `forza run --retry-errors` no dry-run com seleção real
+            - [x] testes retry (3) + runner pause/force×retry (3)
+      - [~] 10e — Image Debug com deeplink:
+            - [x] `forza-db/src/image_debug.rs:1` list + detail (counts, ROW_NUMBER latest),
+                  `forza-app/src/services/image_debug.rs:1` filtragem post-fetch
+            - [x] worker `ListImageDebugCases`/`LoadImageDebugDetail`/`LoadImageDebugByResult`
+            - [x] Slint página Image Debug (lista + 8 tabs + result ComboBox + deeplink
+                  "Open image debug" no Image Detail); navegação lazy via page-changed
+            - [ ] testes headless de round trip do Image Debug (pendente)
+      - [ ] pendências F10: Records (adiado por decisão do mantenedor — redesign futuro),
             Performance dashboard, Logs view dedicada
 - [ ] Fase 11 — Empacotamento e acabamento
 
@@ -445,3 +460,38 @@ skipped (with reason).
   viva 8s com banco novo via db-upgrade; fmt/clippy -D warnings/test
   workspace 100% verdes. Próximo: retry-errors + Pause no Process,
   depois Image Debug com deeplink.
+
+- Sessão 13 (2026-08-26): 10d retry-errors + Pause no Process completos.
+  RunControl (`forza-app/src/services/run_control.rs:1`) com checkpoint
+  cooperativo (pause bloqueia entre fases/imagens, cancel vence pause —
+  semântica Python `RunControl`). Runner ganhou `retry_errors: bool` +
+  validação `force×retry` mutuamente exclusivos, seleção real via
+  `list_failed_images_for_retry` (`forza-db/src/repositories/images.rs:36`)
+  (latest result `error` + `file_status='available'`, ROW_NUMBER tiebreak
+  `created_at DESC, id DESC`), `process_reason` gravado em `run_inputs`
+  via `insert_processed_input` (`forza-db/src/repositories/runs.rs:40`) e
+  checkpoint antes do loop. GUI Process: checkbox Retry habilitada com
+  exclusão mútua contra Force, botão Pause/Resume com `run-paused` e
+  `toggle-pause`, RunControl em `thread_local!` (`forza-gui/src/lib.rs:506`);
+  Slint `forza-gui/ui/main.slint:215` com `run-paused` e estado "Paused".
+  CLI `forza run --retry-errors` lista seleção real no dry-run e recusa
+  `force×retry` (mesma mensagem Python). Testes: 3 casos retry (only-latest-
+  error, older-ok vs newer-error) + 3 runner (empty, cancel, force×retry,
+  retry vazio, pause bloqueia e cancel libera). Smoke GUI viva 8s.
+
+- Sessão 14 (2026-08-26): 10e Image Debug com deeplink iniciado. Leitura
+  completa do `forza/gui/views/image_debug_view.py:1` e
+  `controllers/image_debug_controller.py:1` + reads Python
+  `application/gui_read/image_debug_reads.py:1`: contrato lista sem auto-
+  load do primeiro detalhe, seleção carrega só tab visível, deeplink
+  preserva subtab. Rust: `forza-db/src/image_debug.rs:1`
+  (list_image_debug_cases + get_image_debug_detail +
+  get_image_debug_detail_by_result, counts por imagem, ROW_NUMBER latest),
+  `forza-app/src/services/image_debug.rs:1` (filtragem post-fetch
+  `matches` idêntica ao Python), worker `ListImageDebugCases`/
+  `LoadImageDebugDetail`/`LoadImageDebugByResult` (`forza-gui/src/worker.rs:80`),
+  Slint página Image Debug com lista + header + result ComboBox +
+  8 tabs (Overview/Metadata/Results/Attempts/Response/Parsed/Laps&Reviews/
+  Timeline) e deeplink "Open image debug" no Image Detail. Compila e smoke
+  GUI viva 8s; clippy ainda com type-complexity pendente de permitir no
+  HashMap de 11 tuplas.

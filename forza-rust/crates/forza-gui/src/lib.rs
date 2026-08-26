@@ -40,6 +40,10 @@ thread_local! {
     static PENDING_SETTINGS: RefCell<BTreeMap<String, String>> =
         const { RefCell::new(BTreeMap::new()) };
     static SETTINGS_LOADED: RefCell<bool> = const { RefCell::new(false) };
+    static DEBUG_CASE_MODEL: RefCell<Option<Rc<VecModel<DebugCaseItem>>>> = const { RefCell::new(None) };
+    static DEBUG_RESULT_MODEL: RefCell<Option<Rc<VecModel<DebugResultComboItem>>>> = const { RefCell::new(None) };
+    static DEBUG_DETAIL_CACHE: RefCell<Option<forza_db::image_debug::ImageDebugDetail>> = const { RefCell::new(None) };
+    static DEBUG_CASES_CACHE: RefCell<Vec<forza_db::image_debug::ImageDebugCase>> = const { RefCell::new(Vec::new()) };
     static CONFIG_PATH: RefCell<PathBuf> = const { RefCell::new(PathBuf::new()) };
 }
 
@@ -102,7 +106,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
         .with(|slot| *slot.borrow_mut() = Some(forza_app::RunParams::from_config(&cfg, false)));
     main.set_run_info(run_info_line(&cfg).into());
 
-    // Detail + settings models.
+    // Detail + settings + debug models.
     let detail_lap_model = Rc::new(VecModel::<DetailLapItem>::from(Vec::new()));
     main.set_detail_laps(ModelRc::from(detail_lap_model.clone()));
     DETAIL_LAP_MODEL.with(|slot| *slot.borrow_mut() = Some(detail_lap_model));
@@ -118,6 +122,12 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     let settings_model = Rc::new(VecModel::<SettingItem>::from(Vec::new()));
     main.set_settings_rows(ModelRc::from(settings_model.clone()));
     SETTINGS_MODEL.with(|slot| *slot.borrow_mut() = Some(settings_model));
+    let debug_case_model = Rc::new(VecModel::<DebugCaseItem>::from(Vec::new()));
+    main.set_debug_cases(ModelRc::from(debug_case_model.clone()));
+    DEBUG_CASE_MODEL.with(|slot| *slot.borrow_mut() = Some(debug_case_model));
+    let debug_result_model = Rc::new(VecModel::<DebugResultComboItem>::from(Vec::new()));
+    main.set_debug_results(ModelRc::from(debug_result_model.clone()));
+    DEBUG_RESULT_MODEL.with(|slot| *slot.borrow_mut() = Some(debug_result_model));
 
     // Context header values.
     main.set_context_db(db_path.display().to_string().into());
@@ -305,6 +315,22 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         }
                     }
                 },
+                Response::ImageDebugCases(result) => {
+                    apply_debug_cases(&ui, result);
+                }
+                Response::ImageDebugDetail(result) => match result {
+                    Ok(Some(detail)) => apply_debug_detail(&ui, detail),
+                    Ok(None) => {
+                        if let Some(w) = ui.upgrade() {
+                            set_status(&w, "image not found");
+                        }
+                    }
+                    Err(message) => {
+                        if let Some(w) = ui.upgrade() {
+                            set_status(&w, format!("error: {message}").as_str());
+                        }
+                    }
+                },
             });
         });
     }
@@ -451,10 +477,15 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     }
     {
         main.on_page_changed(move |page| {
-            // Lazy settings load on first entry (GUI state rules).
+            // Lazy settings/debug loads on first entry (GUI state rules).
             if page == "settings" && !SETTINGS_LOADED.with(|slot| *slot.borrow()) {
                 SETTINGS_LOADED.with(|slot| *slot.borrow_mut() = true);
                 send_request(Request::LoadSettings);
+            }
+            if page == "image-debug" {
+                send_request(Request::ListImageDebugCases {
+                    filter: forza_app::ImageDebugFilter::default(),
+                });
             }
         });
     }
@@ -483,6 +514,92 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 return;
             }
             enqueue(Request::SaveSettings { changes }, &ui, "saving settings…");
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_debug_refresh_requested(move || {
+            enqueue(
+                Request::ListImageDebugCases {
+                    filter: forza_app::ImageDebugFilter::default(),
+                },
+                &ui,
+                "loading debug cases…",
+            );
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_debug_case_selected(move |index| {
+            let id = DEBUG_CASES_CACHE.with(|c| {
+                c.borrow()
+                    .get(index as usize)
+                    .map(|case| case.image_file_id.clone())
+            });
+            let Some(id) = id else { return };
+            enqueue(
+                Request::LoadImageDebugDetail {
+                    image_file_id: id,
+                    selected_result_id: None,
+                },
+                &ui,
+                "loading debug detail…",
+            );
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_debug_result_selected(move |result_id| {
+            let image_id = DEBUG_DETAIL_CACHE
+                .with(|c| c.borrow().as_ref().map(|d| d.image_file_id.clone()))
+                .unwrap_or_default();
+            if image_id.is_empty() {
+                return;
+            }
+            enqueue(
+                Request::LoadImageDebugDetail {
+                    image_file_id: image_id,
+                    selected_result_id: Some(result_id.to_string()),
+                },
+                &ui,
+                "loading result detail…",
+            );
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_open_image_debug(move |image_file_id| {
+            if let Some(w) = ui.upgrade() {
+                w.set_page("image-debug".into());
+            }
+            enqueue(
+                Request::LoadImageDebugDetail {
+                    image_file_id: image_file_id.to_string(),
+                    selected_result_id: None,
+                },
+                &ui,
+                "opening image debug…",
+            );
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_debug_open_image_detail(move || {
+            let image_id = DEBUG_DETAIL_CACHE
+                .with(|c| c.borrow().as_ref().map(|d| d.image_file_id.clone()))
+                .unwrap_or_default();
+            if image_id.is_empty() {
+                return;
+            }
+            // Navigate to Image Detail page.
+            if let Some(w) = ui.upgrade() {
+                w.set_page("image-detail".into());
+            }
+            enqueue(
+                Request::LoadImageDetail { image_id },
+                &ui,
+                "loading image detail…",
+            );
         });
     }
 
@@ -808,6 +925,7 @@ fn apply_image_detail(ui: &slint::Weak<MainWindow>, data: forza_app::ImageDetail
                 .unwrap_or_else(|| meta.id.clone())
                 .into(),
         );
+        w.set_detail_image_id(meta.id.clone().into());
         w.set_detail_meta(meta_lines.into());
         w.set_detail_badges(
             format!(
@@ -886,6 +1004,262 @@ fn apply_settings(ui: &slint::Weak<MainWindow>, outcome: worker::SettingsOutcome
     RUN_CONFIG.with(|slot| {
         *slot.borrow_mut() = Some(forza_app::RunParams::from_config(&outcome.config, false));
     });
+}
+
+fn apply_debug_cases(
+    ui: &slint::Weak<MainWindow>,
+    result: Result<Vec<forza_db::image_debug::ImageDebugCase>, String>,
+) {
+    match result {
+        Ok(cases) => {
+            let count = cases.len();
+            DEBUG_CASES_CACHE.with(|slot| *slot.borrow_mut() = cases.clone());
+            DEBUG_CASE_MODEL.with(|slot| {
+                if let Some(model) = slot.borrow().as_ref() {
+                    let items: Vec<DebugCaseItem> = cases
+                        .iter()
+                        .map(|c| DebugCaseItem {
+                            image_file_id: c.image_file_id.clone().into(),
+                            image_name: c.image_name.clone().into(),
+                            file_status: c.file_status.clone().into(),
+                            processing: c.processing_status.clone().into(),
+                            best_lap: c.best_lap_status.clone().into(),
+                            latest_status: c
+                                .latest_result_status
+                                .clone()
+                                .unwrap_or_else(|| "—".into())
+                                .into(),
+                            run_id: c.run_id.clone().unwrap_or_default().into(),
+                            model: c.model.clone().unwrap_or_default().into(),
+                            attempts: c.attempt_count as i32,
+                            laps: c.lap_count as i32,
+                            reviews: c.review_count as i32,
+                        })
+                        .collect();
+                    model.set_vec(items);
+                }
+            });
+            if let Some(w) = ui.upgrade() {
+                w.set_status_text(format!("{count} debug case(s)").into());
+            }
+        }
+        Err(message) => {
+            if let Some(w) = ui.upgrade() {
+                w.set_status_text(format!("error: {message}").into());
+            }
+        }
+    }
+}
+
+fn apply_debug_detail(
+    ui: &slint::Weak<MainWindow>,
+    detail: forza_db::image_debug::ImageDebugDetail,
+) {
+    DEBUG_DETAIL_CACHE.with(|slot| *slot.borrow_mut() = Some(detail.clone()));
+    DEBUG_RESULT_MODEL.with(|slot| {
+        if let Some(model) = slot.borrow().as_ref() {
+            let items: Vec<DebugResultComboItem> = detail
+                .results
+                .iter()
+                .map(|r| DebugResultComboItem {
+                    id: r.id.clone().into(),
+                    label: format!(
+                        "{} · {} · {}",
+                        r.status,
+                        r.run_id,
+                        r.created_at.clone().unwrap_or_else(|| "—".into())
+                    )
+                    .into(),
+                })
+                .collect();
+            model.set_vec(items);
+        }
+    });
+    let labels: Vec<slint::SharedString> = detail
+        .results
+        .iter()
+        .map(|r| {
+            format!(
+                "{} · {} · {}",
+                r.status,
+                r.run_id,
+                r.created_at.clone().unwrap_or_else(|| "—".into())
+            )
+            .into()
+        })
+        .collect();
+
+    // Build tab texts (mirrors Python image_debug_view helpers, simplified).
+    let overview = format!(
+        "Image: {}\nFile: {} · Process: {} · Best lap: {}\nSelected result: {}\nAttempts: {} · Laps: {} · Reviews: {}\nRaw evidence: {}\n",
+        detail.image_name,
+        detail
+            .cases
+            .first()
+            .map(|c| c.file_status.as_str())
+            .unwrap_or("—"),
+        detail
+            .cases
+            .first()
+            .map(|c| c.processing_status.as_str())
+            .unwrap_or("—"),
+        detail
+            .cases
+            .first()
+            .map(|c| c.best_lap_status.as_str())
+            .unwrap_or("—"),
+        detail
+            .selected_result_id
+            .clone()
+            .unwrap_or_else(|| "—".into()),
+        detail.attempts.len(),
+        detail.laps.len(),
+        detail.reviews.len(),
+        if detail.raw_response.is_some() {
+            "present"
+        } else {
+            "missing"
+        }
+    );
+    let metadata = {
+        let case = detail.cases.first();
+        format!(
+            "id: {}\nname: {}\nfile: {} · best: {}\nlatest: {} · run: {}\nmodel: {}\n",
+            detail.image_file_id,
+            detail.image_name,
+            case.map(|c| c.file_status.as_str()).unwrap_or("—"),
+            case.map(|c| c.best_lap_status.as_str()).unwrap_or("—"),
+            case.and_then(|c| c.latest_result_status.clone())
+                .unwrap_or_else(|| "—".into()),
+            case.and_then(|c| c.run_id.clone())
+                .unwrap_or_else(|| "—".into()),
+            case.and_then(|c| c.model.clone())
+                .unwrap_or_else(|| "—".into()),
+        )
+    };
+    let results_text = if detail.results.is_empty() {
+        "No extraction results.".into()
+    } else {
+        detail
+            .results
+            .iter()
+            .map(|r| {
+                format!(
+                    "{} · {} · run={} · model={} · attempts={} · error={} · id={}",
+                    r.created_at.clone().unwrap_or_else(|| "—".into()),
+                    r.status,
+                    r.run_id,
+                    r.model.clone().unwrap_or_else(|| "—".into()),
+                    r.attempt_count,
+                    r.error_message.clone().unwrap_or_else(|| "—".into()),
+                    r.id
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let attempts_text = if detail.attempts.is_empty() {
+        "No attempts for the selected result.".into()
+    } else {
+        detail
+            .attempts
+            .iter()
+            .map(|a| {
+                format!(
+                    "#{} · {} · reason={} · model={} · duration={} ms · tps={}",
+                    a.attempt_number,
+                    if a.accepted {
+                        "accepted"
+                    } else {
+                        a.status.as_str()
+                    },
+                    a.attempt_reason,
+                    a.model.clone().unwrap_or_else(|| "—".into()),
+                    a.duration_ms
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "—".into()),
+                    a.tokens_per_second
+                        .map(|v| format!("{v:.1}"))
+                        .unwrap_or_else(|| "—".into()),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let laps_reviews = {
+        let mut lines = vec!["Laps".to_string()];
+        if detail.laps.is_empty() {
+            lines.push("No laps.".into());
+        } else {
+            for lap in &detail.laps {
+                let flags = match (lap.dirty, lap.is_best_lap) {
+                    (true, true) => "dirty/best",
+                    (true, false) => "dirty",
+                    (false, true) => "best",
+                    _ => "clean",
+                };
+                lines.push(format!(
+                    "#{} · {} · {} · {} · {} · {} · {}",
+                    lap.lap_index,
+                    lap.track,
+                    lap.race_class,
+                    lap.driver,
+                    lap.car,
+                    lap.best_lap,
+                    flags
+                ));
+            }
+        }
+        lines.push(String::new());
+        lines.push("Reviews".to_string());
+        if detail.reviews.is_empty() {
+            lines.push("No review cases.".into());
+        } else {
+            for rev in &detail.reviews {
+                lines.push(format!(
+                    "#{} · {} · {} · outcome={} · field={} · model={}",
+                    rev.case_number,
+                    rev.status,
+                    rev.reason,
+                    rev.outcome,
+                    rev.decision_field.clone().unwrap_or_else(|| "—".into()),
+                    rev.model_value.clone().unwrap_or_else(|| "—".into()),
+                ));
+            }
+        }
+        lines.join("\n")
+    };
+
+    if let Some(w) = ui.upgrade() {
+        w.set_debug_title(detail.image_name.clone().into());
+        w.set_debug_selected_image_id(detail.image_file_id.clone().into());
+        w.set_debug_selected_result_id(
+            detail.selected_result_id.clone().unwrap_or_default().into(),
+        );
+        w.set_debug_result_labels(ModelRc::new(VecModel::from(labels)));
+        w.set_debug_tab("overview".into());
+        w.set_debug_overview_text(overview.into());
+        w.set_debug_metadata_text(metadata.into());
+        w.set_debug_results_text(results_text.into());
+        w.set_debug_attempts_text(attempts_text.into());
+        w.set_debug_response_text(
+            detail
+                .raw_response
+                .clone()
+                .unwrap_or_else(|| "—".into())
+                .into(),
+        );
+        w.set_debug_parsed_text(
+            detail
+                .parsed_json
+                .clone()
+                .unwrap_or_else(|| "—".into())
+                .into(),
+        );
+        w.set_debug_laps_reviews_text(laps_reviews.into());
+        w.set_debug_timeline_text(detail.timeline.join("\n").into());
+        w.set_status_text("debug detail loaded".into());
+    }
 }
 
 thread_local! {
