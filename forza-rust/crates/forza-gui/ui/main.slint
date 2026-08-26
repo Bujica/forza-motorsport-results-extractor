@@ -632,6 +632,9 @@ export component MainWindow inherits Window {
                                 Text { text: "Driver"; horizontal-stretch: 1; color: #cfd6dd; vertical-alignment: center; }
                                 Text { text: "Car"; horizontal-stretch: 1; color: #9aa4b2; vertical-alignment: center; }
                                 Text { text: "Best lap"; width: 130px; color: #cfd6dd; vertical-alignment: center; }
+                                Text { text: "Weather"; width: 75px; color: #9aa4b2; vertical-alignment: center; }
+                                Text { text: "Temp"; width: 65px; color: #9aa4b2; vertical-alignment: center; }
+                                Text { text: "Source"; width: 100px; color: #9aa4b2; vertical-alignment: center; }
                             }
                         }
                         blv := ListView {
@@ -648,6 +651,9 @@ export component MainWindow inherits Window {
                                     Text { text: lap.driver; color: lap.mine ? #ffd166 : #cfd6dd; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
                                     Text { text: lap.car; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
                                     Text { text: lap.time; color: lap.dirty ? #ef6b6b : #7bd88f; width: 130px; vertical-alignment: center; }
+                                    Text { text: lap.weather; color: #9aa4b2; width: 75px; overflow: elide; vertical-alignment: center; }
+                                    Text { text: lap.temp; color: #9aa4b2; width: 65px; vertical-alignment: center; }
+                                    Text { text: lap.source; color: #9aa4b2; width: 100px; overflow: elide; vertical-alignment: center; }
                                 }
                             }
                         }
