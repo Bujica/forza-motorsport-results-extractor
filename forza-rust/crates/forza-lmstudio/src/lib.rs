@@ -10,7 +10,7 @@ pub mod load_config;
 pub mod protocol;
 pub mod response;
 
-pub use backend::LMStudioBackend;
+pub use backend::{LMStudioBackend, RuntimeSnapshot};
 pub use client::{RuntimeClient, RuntimeModel};
 pub use error::LlmError;
 pub use protocol::{AttemptStatus, ModelAttemptRecord, ModelExtractionResult, RequestKind};

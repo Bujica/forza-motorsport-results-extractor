@@ -159,9 +159,11 @@ skipped (with reason).
             (race_1_copy ↔ race_1)
       - [x] erros por arquivo sem abortar o lote (hash_failure isolado testado)
       - [x] 12 testes novos (discovery/hash/planning/encode/naming/metadata)
-      - [ ] pendência Fase 7/8: persistir run_inputs do plano (decisões no
+      - [~] pendência Fase 7/8: persistir run_inputs do plano (decisões no
             vocabulário completo incl. unsupported/outside_input), retry-errors
-            seleção, integração com LM Studio
+            seleção, integração com LM Studio; caminho live já grava file_hash,
+            file_name, extensão, path normalizado, tamanho e mtime para entradas
+            processadas
 - [~] Fase 7 — Cliente LM Studio e pipeline
       - [x] `forza-lmstudio`: RuntimeClient (health/list_models/
             runtime_status com warnings fiéis — physical_batch_size
@@ -190,9 +192,10 @@ skipped (with reason).
             17 modelos, modelo configurado carregado; detectou mismatch REAL
             de eval_batch_size carregado ≠ 1024 desejado (registrar para
             investigar no app Python também!)
-      - [ ] pendência Fase 8: runtime snapshots/prompt snapshots persistidos,
-            unload/load automático quando incompatível, artifacts raw,
-            integração run_service completa
+      - [~] pendência Fase 8: prompt snapshot já é persistido de forma imutável
+            no caminho live, com hash/ID byte-compatíveis ao Python; runtime
+            snapshots, unload/load automático quando incompatível, artifacts
+            raw e integração run_service completa ainda pendentes
 - [~] Fase 8 — Runs, revisão e rebuild
       - [x] CRITÉRIO CENTRAL ATENDIDO (e2e em banco de teste):
             `processar → revisar → corrigir → rebuild` sem nova chamada ao
@@ -216,7 +219,7 @@ skipped (with reason).
             (stable_key), resolve case como confirmed
       - [x] RebuildService em forza-app (best laps + reviews + contadores);
             comando CLI `forza rebuild` operacional
-      - [ ] pendências 8½: persistência de run lifecycle completo
+      - [~] pendências 8½: persistência de run lifecycle completo
             (pending→running→completed com counters reais), reconciliation
             de runs abandonados, runtime/prompt snapshots no backend live,
             artifacts raw, rain_time_suspicious, mark_best_laps_for_groups
@@ -360,10 +363,13 @@ skipped (with reason).
 - [~] alinhar `is_best_lap` com a projeção Python; comparação final precisa ser
       feita em DBs novas equivalentes, pois as DBs de teste atuais têm históricos
       diferentes e esse campo é derivado globalmente
-- [ ] corrigir metadados live: cabeçalho de run sem `seed-*`, `run_inputs`
-      completos e metadados do payload nas tentativas
-- [ ] persistir prompt/runtime snapshots, artifacts e ciclo de vida completo
-      no caminho live
+- [x] corrigir metadados live: cabeçalho de run sem `seed-*`; `run_inputs`
+      processados gravam metadados do arquivo; tentativas/resultados gravam
+      formato, MIME, dimensões e bytes do payload enviado
+- [~] persistir prompt/runtime snapshots, artifacts e ciclo de vida completo
+      no caminho live: prompt snapshot concluído e validado contra o hash Python;
+      snapshot preflight do runtime implementado antes de `ensure_loaded`,
+      pendem smoke real contra LM Studio, artifacts e lifecycle
 - [ ] implementar Performance real; a tela atual é somente placeholder
 - [ ] completar renderer visual PDF, artifacts de export e testes headless de
       Image Debug
@@ -573,3 +579,25 @@ skipped (with reason).
   contrato adicionado para filtragem/classe/índice. Gates: workspace `cargo test`
   e `cargo clippy --workspace --all-targets -- -D warnings` verdes. A regra
   global de `is_best_lap` fica para comparação em DBs novas equivalentes.
+
+- Sessão 20 (2026-08-26): persistência live de metadados do run concluída.
+  O cabeçalho deixa de depender dos valores `seed-*`; `run_inputs` processados
+  agora registram hash, nome, extensão, path normalizado, tamanho e mtime; e
+  tentativas/resultados registram formato, MIME, dimensões e bytes da imagem
+  enviada. Teste de contrato cobre a substituição dos defaults. Commit
+  `936fd66`.
+
+- Sessão 21 (2026-08-26): snapshot imutável do prompt concluído. O caminho
+  live grava `prompt_snapshots`, liga `extraction_runs.prompt_snapshot_id` e
+  usa hash canônico byte-compatível com Python (`0a9cd9...c945977`). Teste
+  explícito valida a identidade Python/Rust; fmt, testes direcionados e
+  clippy workspace passaram. Commit `38bc050`. Próximo: snapshot de runtime
+  LM Studio, artifacts e lifecycle completo.
+
+- Sessão 22 (2026-08-26): snapshot preflight do runtime implementado. O
+  backend reutiliza `RuntimeClient::list_models`, identifica o modelo
+  configurado e a primeira instância carregada, e persiste capacidades,
+  metadados e configurações desejada/efetiva em `model_runtime_snapshots`
+  antes do primeiro `ensure_loaded`; runs sem imagens não fazem contato com
+  LM Studio. Gates direcionados e clippy workspace verdes. Próximo: executar
+  smoke com LM Studio real e persistir artifacts/lifecycle.

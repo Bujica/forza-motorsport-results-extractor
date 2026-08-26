@@ -79,6 +79,30 @@ pub struct PerformancePolicy {
     pub reload_streak: i64,
 }
 
+#[derive(Debug, Clone)]
+pub struct RuntimeSnapshot {
+    pub endpoint: String,
+    pub configured_model: String,
+    pub matched_model: Option<String>,
+    pub loaded_model: Option<String>,
+    pub instance_id: Option<String>,
+    pub display_name: Option<String>,
+    pub publisher: Option<String>,
+    pub architecture: Option<String>,
+    pub format: Option<String>,
+    pub params_string: Option<String>,
+    pub quantization: Option<String>,
+    pub selected_variant: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub max_context_length: Option<i64>,
+    pub capabilities_json: Option<String>,
+    pub desired_load_config_json: String,
+    pub effective_load_config_json: Option<String>,
+    pub health_ok: bool,
+    pub health_message: String,
+    pub model_matches_config: Option<bool>,
+}
+
 /// Slow-streak state machine (persisted fields land with Fase 8).
 #[derive(Debug, Default)]
 pub struct PerformanceTracker {
@@ -134,6 +158,76 @@ impl LMStudioBackend {
 
     pub fn performance(&self) -> &PerformanceTracker {
         &self.performance
+    }
+
+    /// Capture the runtime state used by the run lifecycle's preflight row.
+    pub async fn preflight_snapshot(
+        &self,
+        desired: &DesiredLoadConfig,
+    ) -> Result<RuntimeSnapshot, LlmError> {
+        let desired_json = self.desired_load_config(desired);
+        let models = self.runtime.list_models().await?;
+        let model = models.iter().find(|model| {
+            model.id == self.cfg.model
+                || model.path == self.cfg.model
+                || model.display_name == self.cfg.model
+        });
+        let Some(model) = model else {
+            return Ok(RuntimeSnapshot {
+                endpoint: self.cfg.url.clone(),
+                configured_model: self.cfg.model.clone(),
+                matched_model: None,
+                loaded_model: None,
+                instance_id: None,
+                display_name: None,
+                publisher: None,
+                architecture: None,
+                format: None,
+                params_string: None,
+                quantization: None,
+                selected_variant: None,
+                size_bytes: None,
+                max_context_length: None,
+                capabilities_json: None,
+                desired_load_config_json: desired_json.to_string(),
+                effective_load_config_json: None,
+                health_ok: false,
+                health_message: format!("Configured model not found ({})", self.cfg.model),
+                model_matches_config: Some(false),
+            });
+        };
+        let instance = model.loaded_instances.first();
+        Ok(RuntimeSnapshot {
+            endpoint: self.cfg.url.clone(),
+            configured_model: self.cfg.model.clone(),
+            matched_model: Some(model.id.clone()),
+            loaded_model: instance.map(|_| model.id.clone()),
+            instance_id: instance.map(|value| value.id.clone()),
+            display_name: Some(model.display_name.clone()),
+            publisher: Some(model.publisher.clone()),
+            architecture: Some(model.architecture.clone()),
+            format: Some(model.format.clone()),
+            params_string: Some(model.params_string.clone()),
+            quantization: Some(model.quantization.clone()),
+            selected_variant: Some(model.selected_variant.clone()),
+            size_bytes: model.size_bytes,
+            max_context_length: model.max_context_length,
+            capabilities_json: Some(model.capabilities.to_string()),
+            desired_load_config_json: desired_json.to_string(),
+            effective_load_config_json: instance.map(|value| value.config.to_string()),
+            health_ok: true,
+            health_message: format!("{} model(s) available", models.len()),
+            model_matches_config: Some(true),
+        })
+    }
+
+    fn desired_load_config(&self, desired: &DesiredLoadConfig) -> Value {
+        self.cfg.desired_load_config(
+            desired.eval_batch_size,
+            desired.physical_batch_size,
+            desired.flash_attention,
+            desired.offload_kv_cache_to_gpu,
+        )
     }
 
     fn user_text(kind: RequestKind, detail: Option<&str>) -> String {

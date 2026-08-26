@@ -38,6 +38,29 @@ pub struct RunMetadata<'a> {
     pub timeout_read: i64,
 }
 
+pub struct RuntimeSnapshotInsert<'a> {
+    pub endpoint: &'a str,
+    pub configured_model: &'a str,
+    pub matched_model: Option<&'a str>,
+    pub loaded_model: Option<&'a str>,
+    pub instance_id: Option<&'a str>,
+    pub display_name: Option<&'a str>,
+    pub publisher: Option<&'a str>,
+    pub architecture: Option<&'a str>,
+    pub format: Option<&'a str>,
+    pub params_string: Option<&'a str>,
+    pub quantization: Option<&'a str>,
+    pub selected_variant: Option<&'a str>,
+    pub size_bytes: Option<i64>,
+    pub max_context_length: Option<i64>,
+    pub capabilities_json: Option<&'a str>,
+    pub desired_load_config_json: &'a str,
+    pub effective_load_config_json: Option<&'a str>,
+    pub health_ok: bool,
+    pub health_message: &'a str,
+    pub model_matches_config: Option<bool>,
+}
+
 /// Insert an immutable prompt snapshot and return its deterministic identity.
 /// Reusing an existing identical snapshot is allowed; changing the payload
 /// under the same identity is rejected by the unique key and the caller's
@@ -69,6 +92,51 @@ pub fn link_run_prompt_snapshot(
     conn.execute(
         "UPDATE extraction_runs SET prompt_snapshot_id=?2, prompt_hash=?3 WHERE id=?1",
         params![run_id, snapshot_id, prompt_hash],
+    )?;
+    Ok(())
+}
+
+pub fn insert_runtime_snapshot(
+    conn: &Connection,
+    run_id: &str,
+    snapshot_id: &str,
+    snapshot: &RuntimeSnapshotInsert<'_>,
+) -> Result<(), DbError> {
+    conn.execute(
+        "INSERT INTO model_runtime_snapshots
+            (id, run_id, snapshot_kind, endpoint, configured_model, matched_model,
+             loaded_model, instance_id, display_name, publisher, architecture,
+             format, params_string, quantization, selected_variant, size_bytes,
+             max_context_length, capabilities_json, desired_load_config_json,
+             effective_load_config_json, health_ok, health_message,
+             model_matches_config, captured_at)
+         VALUES (?1, ?2, 'preflight', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                 ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22,
+                 datetime('now'))",
+        params![
+            snapshot_id,
+            run_id,
+            snapshot.endpoint,
+            snapshot.configured_model,
+            snapshot.matched_model,
+            snapshot.loaded_model,
+            snapshot.instance_id,
+            snapshot.display_name,
+            snapshot.publisher,
+            snapshot.architecture,
+            snapshot.format,
+            snapshot.params_string,
+            snapshot.quantization,
+            snapshot.selected_variant,
+            snapshot.size_bytes,
+            snapshot.max_context_length,
+            snapshot.capabilities_json,
+            snapshot.desired_load_config_json,
+            snapshot.effective_load_config_json,
+            if snapshot.health_ok { 1 } else { 0 },
+            snapshot.health_message,
+            snapshot.model_matches_config,
+        ],
     )?;
     Ok(())
 }

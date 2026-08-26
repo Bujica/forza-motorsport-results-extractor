@@ -11,9 +11,9 @@ use rusqlite::Connection;
 use crate::services::run_control::RunControl;
 use forza_config::AppConfig;
 use forza_db::repositories::runs::{
-    RunInsert, RunMetadata, complete_run, find_image_id_by_hash, insert_processed_input,
-    insert_prompt_snapshot, insert_run, insert_run_input_only, link_run_prompt_snapshot,
-    mark_run_running, update_run_metadata,
+    RunInsert, RunMetadata, RuntimeSnapshotInsert, complete_run, find_image_id_by_hash,
+    insert_processed_input, insert_prompt_snapshot, insert_run, insert_run_input_only,
+    insert_runtime_snapshot, link_run_prompt_snapshot, mark_run_running, update_run_metadata,
 };
 use forza_db::repositories::{
     known_hashes, known_path_hashes, list_failed_images_for_retry, mark_best_laps,
@@ -493,6 +493,37 @@ where
     } else {
         "full_run"
     };
+    if total_new > 0 {
+        let snapshot = backend
+            .preflight_snapshot(&desired)
+            .await
+            .map_err(|e| e.to_string())?;
+        let snapshot_id = format!("runtime-{run_id}-preflight");
+        let insert = RuntimeSnapshotInsert {
+            endpoint: &snapshot.endpoint,
+            configured_model: &snapshot.configured_model,
+            matched_model: snapshot.matched_model.as_deref(),
+            loaded_model: snapshot.loaded_model.as_deref(),
+            instance_id: snapshot.instance_id.as_deref(),
+            display_name: snapshot.display_name.as_deref(),
+            publisher: snapshot.publisher.as_deref(),
+            architecture: snapshot.architecture.as_deref(),
+            format: snapshot.format.as_deref(),
+            params_string: snapshot.params_string.as_deref(),
+            quantization: snapshot.quantization.as_deref(),
+            selected_variant: snapshot.selected_variant.as_deref(),
+            size_bytes: snapshot.size_bytes,
+            max_context_length: snapshot.max_context_length,
+            capabilities_json: snapshot.capabilities_json.as_deref(),
+            desired_load_config_json: &snapshot.desired_load_config_json,
+            effective_load_config_json: snapshot.effective_load_config_json.as_deref(),
+            health_ok: snapshot.health_ok,
+            health_message: &snapshot.health_message,
+            model_matches_config: snapshot.model_matches_config,
+        };
+        insert_runtime_snapshot(&conn, &run_id, &snapshot_id, &insert)
+            .map_err(|e| e.to_string())?;
+    }
     let mut done = 0usize;
     for image in &plan.new_images {
         // Safe checkpoint: pause blocks here; cancel stops between images.
