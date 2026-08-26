@@ -278,6 +278,13 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                                     driver: b.driver.clone().into(),
                                     car: b.car.clone().into(),
                                     time: b.best_lap.clone().unwrap_or_default().into(),
+                                    weather: b.weather.clone().into(),
+                                    temp: b
+                                        .temp_c
+                                        .map(|v| format!("{v:.0}°C"))
+                                        .unwrap_or_default()
+                                        .into(),
+                                    source: "screenshots".into(),
                                     dirty: b.dirty,
                                     mine: b.mine,
                                 })
@@ -288,6 +295,17 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                     if let Some(w) = ui.upgrade() {
                         match result {
                             Ok(rows) => {
+                                let clean = rows.iter().filter(|row| !row.dirty).count();
+                                let dirty = rows.len() - clean;
+                                let tracks = rows
+                                    .iter()
+                                    .map(|row| &row.track)
+                                    .collect::<std::collections::HashSet<_>>()
+                                    .len();
+                                w.set_best_laps_summary(format!(
+                                    "Tracks: {tracks} · Clean: {clean} · Dirty: {dirty} · Screenshots: {} · External: 0",
+                                    rows.len()
+                                ).into());
                                 w.set_status_text(format!("{} best lap(s)", rows.len()).into())
                             }
                             Err(message) => w.set_status_text(format!("error: {message}").into()),

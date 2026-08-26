@@ -28,6 +28,9 @@ export struct BestLapItem {
     driver: string,
     car: string,
     time: string,
+    weather: string,
+    temp: string,
+    source: string,
     dirty: bool,
     mine: bool,
 }
@@ -148,6 +151,7 @@ export component MainWindow inherits Window {
     in property <[ReviewItem]> reviews;
     in property <[BestLapItem]> best-laps;
     in property <string> status-text;
+    in property <string> best-laps-summary;
     in property <string> detail-title;
     in property <string> detail-lines;
     in property <string> doctor-report;
@@ -592,6 +596,15 @@ export component MainWindow inherits Window {
             if root.page == "best-laps": VerticalLayout {
                 spacing: 6px;
 
+                Text { text: "Relational frontier equivalent to the PDF/CSV output."; color: #9aa4b2; font-size: 11px; }
+
+                Rectangle {
+                    height: 42px;
+                    background: #26282c;
+                    border-radius: 6px;
+                    Text { x: 12px; y: 12px; text: root.best-laps-summary; color: #cfd6dd; }
+                }
+
                 HorizontalLayout {
                     height: 32px;
                     spacing: 8px;
@@ -606,21 +619,36 @@ export component MainWindow inherits Window {
                     clip: true;
                     vertical-stretch: 1;
                     height: 420px;
-                    blv := ListView {
-                        x: 4px; y: 4px;
-                        width: parent.width - 8px;
-                        height: parent.height - 8px;
-                        for lap in root.best-laps: Rectangle {
-                            height: 30px;
-                            width: blv.width;
-                            background: lap.mine ? #3a3325 : (lap.dirty ? #3a2525 : transparent);
+                    VerticalLayout {
+                        padding: 4px;
+                        spacing: 4px;
+                        Rectangle {
+                            height: 26px;
+                            background: #30343a;
                             HorizontalLayout {
-                                padding-left: 10px;
-                                Text { text: lap.track; color: #e6e6e6; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
-                                Text { text: lap.class; color: #9aa4b2; width: 70px; vertical-alignment: center; }
-                                Text { text: lap.driver; color: lap.mine ? #ffd166 : #cfd6dd; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                Text { text: lap.car; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                Text { text: lap.time; color: lap.dirty ? #ef6b6b : #7bd88f; width: 130px; vertical-alignment: center; }
+                                padding-left: 8px;
+                                Text { text: "Track"; horizontal-stretch: 2; color: #cfd6dd; vertical-alignment: center; }
+                                Text { text: "Class"; width: 70px; color: #9aa4b2; vertical-alignment: center; }
+                                Text { text: "Driver"; horizontal-stretch: 1; color: #cfd6dd; vertical-alignment: center; }
+                                Text { text: "Car"; horizontal-stretch: 1; color: #9aa4b2; vertical-alignment: center; }
+                                Text { text: "Best lap"; width: 130px; color: #cfd6dd; vertical-alignment: center; }
+                            }
+                        }
+                        blv := ListView {
+                            horizontal-stretch: 1;
+                            vertical-stretch: 1;
+                            for lap in root.best-laps: Rectangle {
+                                height: 30px;
+                                horizontal-stretch: 1;
+                                background: lap.mine ? #3a3325 : (lap.dirty ? #3a2525 : transparent);
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    Text { text: lap.track; color: #e6e6e6; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
+                                    Text { text: lap.class; color: #9aa4b2; width: 70px; vertical-alignment: center; }
+                                    Text { text: lap.driver; color: lap.mine ? #ffd166 : #cfd6dd; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                    Text { text: lap.car; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                    Text { text: lap.time; color: lap.dirty ? #ef6b6b : #7bd88f; width: 130px; vertical-alignment: center; }
+                                }
                             }
                         }
                     }

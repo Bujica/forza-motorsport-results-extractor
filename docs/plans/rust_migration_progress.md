@@ -657,3 +657,11 @@ skipped (with reason).
   adicionada em `forza-gui/src/lib.rs`. `cargo check -p forza-gui` passou.
   O executável em uso precisa ser fechado antes de substituir/recompilar o
   `.exe`, pois a instância aberta mantém o arquivo bloqueado no Windows.
+
+- Sessão 29 (2026-08-26): aproximado o visual de Best Laps ao Python. A tela
+  agora possui subtítulo explicativo, cartão de resumo (tracks/clean/dirty/
+  screenshots), cabeçalho de colunas e linhas com stretch responsivo; os
+  dados de clima, temperatura e origem também passam a fazer parte do modelo
+  visual para suportar a evolução da tabela. O Review recebeu cabeçalho de
+  colunas equivalente. `cargo check -p forza-gui` passou sem os novos loops de
+  layout.
