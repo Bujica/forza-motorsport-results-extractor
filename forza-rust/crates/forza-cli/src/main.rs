@@ -46,6 +46,9 @@ enum Command {
         /// Destination CSV path.
         #[arg(long)]
         out: Option<PathBuf>,
+        /// Render a PDF report instead of CSV.
+        #[arg(long)]
+        pdf: bool,
     },
     /// Validate the configuration file and print a report.
     ConfigCheck,
@@ -398,7 +401,7 @@ fn main() -> anyhow::Result<()> {
             retry_errors,
             limit,
         } => cmd_run(&cli.config, dry_run, force, retry_errors, limit),
-        Command::Export { out } => {
+        Command::Export { out, pdf } => {
             let (cfg, _) = forza_config::load_config(&cli.config, false)?;
             let conn = forza_db::open_connection(&cfg.database_file)?;
             let rows =
@@ -407,7 +410,6 @@ fn main() -> anyhow::Result<()> {
                 println!("export: no best-lap rows to export");
                 return Ok(());
             }
-            let dest = out.unwrap_or_else(|| PathBuf::from("output/exports/results.csv"));
             let export_rows: Vec<forza_output::csv::ExportRow> = rows
                 .iter()
                 .map(|r| forza_output::csv::ExportRow {
@@ -428,8 +430,20 @@ fn main() -> anyhow::Result<()> {
                     height_px: r.height_px,
                 })
                 .collect();
-            let n = forza_output::csv::export_csv(&export_rows, &dest)?;
-            println!("exported {n} rows -> {}", dest.display());
+            if pdf {
+                let dest = out.unwrap_or_else(|| cfg.pdf_file.clone());
+                let plan = forza_output::build_pdf_plan(&export_rows, &cfg.gamertag, &[]);
+                forza_output::render_pdf(&plan, &dest).map_err(|error| anyhow::anyhow!(error))?;
+                println!(
+                    "exported PDF with {} rows -> {}",
+                    plan.stats.laps,
+                    dest.display()
+                );
+            } else {
+                let dest = out.unwrap_or_else(|| PathBuf::from("output/exports/results.csv"));
+                let n = forza_output::csv::export_csv(&export_rows, &dest)?;
+                println!("exported {n} rows -> {}", dest.display());
+            }
             Ok(())
         }
         Command::ConfigCheck => cmd_config_check(&cli.config),

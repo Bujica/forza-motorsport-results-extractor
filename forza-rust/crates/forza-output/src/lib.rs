@@ -4,4 +4,6 @@ pub mod csv;
 pub mod pdf;
 
 pub use csv::{ExportError, export_csv};
-pub use pdf::{PdfDocumentPlan, PdfRow, PdfSection, PdfTable, build_pdf_plan};
+pub use pdf::{
+    PdfDocumentPlan, PdfRenderError, PdfRow, PdfSection, PdfTable, build_pdf_plan, render_pdf,
+};

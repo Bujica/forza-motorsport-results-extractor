@@ -685,3 +685,12 @@ skipped (with reason).
   `cargo check --offline -p forza-cli` e Clippy do crate passaram. A validação
   do doctor na raiz encontrou a DB Python em estado `needs_upgrade`, esperado
   para bancos de ambientes de teste separados; não houve alteração de dados.
+
+- Sessão 32 (2026-08-26): o CLI ganhou `export --pdf [--out PATH]`. O crate
+  `forza-output` agora possui um renderer nativo mínimo, sem dependência
+  externa: gera PDF válido com capa/índice, agrupamento por pista e classe,
+  ordenação já definida pelo `PdfDocumentPlan`, flags de piloto/volta suja e
+  quebra de página. Um teste real gerou 27 linhas em
+  `target/debug/output/rust-best-laps.pdf`. Ainda não é a equivalência visual
+  final do ReportLab: fontes, tabela, cores e layout avançado serão refinados
+  após instalar/usar uma ferramenta de renderização para inspeção visual.
