@@ -65,3 +65,4 @@ forza-rust/fixtures/python_outputs/best_laps.csv
 forza-rust/fixtures/python_outputs/best_laps.pdf
 forza-rust/fixtures/python_outputs/artifacts/
 forza-rust/target/
+/forza-rust/docs/migration

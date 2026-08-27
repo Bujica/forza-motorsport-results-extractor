@@ -12,10 +12,14 @@ pub mod runs;
 pub use best_laps::mark_best_laps;
 pub use corrections::apply_manual_correction;
 pub use images::{
-    ImageFileInsert, insert_image_file, known_hashes, known_path_hashes,
-    list_failed_images_for_retry,
+    ImageFileEntity, ImageFileInsert, UpsertParams, insert_image_file, known_hashes,
+    known_path_hashes, list_failed_images_for_retry, upsert_image_file,
 };
-pub use laps::{ExportFlatRow, LapRecordInsert, insert_lap_record, list_clean_flat};
+pub use laps::{
+    ExportFlatRow, ExtractionResultEntity, LapRecordEntity, LapRecordInsert,
+    LapRecordInsertWithRun, ReviewCase, add_result, append_rain_time_review_candidates,
+    for_image_file, insert_lap_record, list_by_run, list_clean_flat,
+};
 pub use reviews::{
     ReviewCaseInsert, insert_review_case, query_review_candidates, upsert_review_cases,
 };

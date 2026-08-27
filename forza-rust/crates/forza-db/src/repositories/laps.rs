@@ -1,4 +1,6 @@
-//! `lap_records` repository: insert path plus the clean-flat export read model.
+//! `lap_records` repository: insert path, queries, and review candidate detection.
+
+use std::collections::HashMap;
 
 use crate::error::DbError;
 use rusqlite::{Connection, params};
@@ -114,5 +116,276 @@ pub fn insert_lap_record(conn: &Connection, row: &LapRecordInsert<'_>) -> Result
             row.dirty,
         ],
     )?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LapRecordEntity {
+    pub id: String,
+    pub extraction_result_id: Option<String>,
+    pub image_file_id: String,
+    pub lap_index: i32,
+    pub driver: String,
+    pub car: String,
+    pub race_class: String,
+    pub track: String,
+    pub weather: String,
+    pub temp_f: f64,
+    pub best_lap: String,
+    pub best_lap_ms: i64,
+    pub dirty: bool,
+    pub created_at: Option<String>,
+}
+
+pub fn list_by_run(conn: &Connection, run_id: &str) -> Result<Vec<LapRecordEntity>, DbError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, extraction_result_id, image_file_id, lap_index, driver, car, race_class,
+                track, weather, temp_f, best_lap, best_lap_ms, dirty, created_at
+          FROM lap_records WHERE run_id=?1 ORDER BY image_file_id, lap_index",
+    )?;
+    let rows = stmt.query_map(params![run_id], |row| {
+        Ok(LapRecordEntity {
+            id: row.get(0)?,
+            extraction_result_id: row.get(1)?,
+            image_file_id: row.get(2)?,
+            lap_index: row.get::<_, i64>(3)?.try_into().unwrap_or(0),
+            driver: row.get(4)?,
+            car: row.get(5)?,
+            race_class: row.get(6)?,
+            track: row.get(7)?,
+            weather: row.get(8)?,
+            temp_f: row.get(9)?,
+            best_lap: row.get(10)?,
+            best_lap_ms: row.get(11)?,
+            dirty: row.get::<_, i64>(12)? != 0,
+            created_at: row.get(13)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+pub fn for_image_file(
+    conn: &Connection,
+    image_file_id: &str,
+) -> Result<Vec<LapRecordEntity>, DbError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, extraction_result_id, image_file_id, lap_index, driver, car, race_class,
+                track, weather, temp_f, best_lap, best_lap_ms, dirty, created_at
+          FROM lap_records WHERE image_file_id=?1 ORDER BY created_at DESC, lap_index",
+    )?;
+    let rows = stmt.query_map(params![image_file_id], |row| {
+        Ok(LapRecordEntity {
+            id: row.get(0)?,
+            extraction_result_id: row.get(1)?,
+            image_file_id: row.get(2)?,
+            lap_index: row.get::<_, i64>(3)?.try_into().unwrap_or(0),
+            driver: row.get(4)?,
+            car: row.get(5)?,
+            race_class: row.get(6)?,
+            track: row.get(7)?,
+            weather: row.get(8)?,
+            temp_f: row.get(9)?,
+            best_lap: row.get(10)?,
+            best_lap_ms: row.get(11)?,
+            dirty: row.get::<_, i64>(12)? != 0,
+            created_at: row.get(13)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+#[derive(Debug, Clone)]
+pub struct ExtractionResultEntity {
+    pub id: String,
+    pub run_id: String,
+    pub image_file_id: String,
+    pub status: String,
+    pub error_type: Option<String>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LapRecordInsertWithRun {
+    pub lap_index: i64,
+    pub driver: String,
+    pub car: String,
+    pub race_class: String,
+    pub track: String,
+    pub weather: String,
+    pub temp_f: f64,
+    pub best_lap: String,
+    pub best_lap_ms: i64,
+    pub dirty: bool,
+}
+
+pub fn add_result(
+    conn: &Connection,
+    result: &ExtractionResultEntity,
+    run_id: &str,
+    image_file_id: &str,
+    entries: &[LapRecordInsertWithRun],
+) -> Result<Vec<LapRecordEntity>, DbError> {
+    let extraction_result_id =
+        if !result.id.is_empty() {
+            result.id.clone()
+        } else {
+            let existing: Option<String> = conn.query_row(
+            "SELECT id FROM extraction_results WHERE run_id=?1 AND image_file_id=?2 LIMIT 1",
+            params![run_id, image_file_id],
+            |r| r.get::<_, String>(0),
+        ).ok();
+
+            match existing {
+                Some(id) => id,
+                None => {
+                    let new_id = format!(
+                        "res-{:x}",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_nanos() as u64)
+                            .unwrap_or(0)
+                    );
+                    conn.execute(
+                        "INSERT INTO extraction_results
+                        (id, run_id, image_file_id, status, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, 'ok', datetime('now'), datetime('now'))",
+                        params![&new_id, run_id, image_file_id],
+                    )?;
+                    new_id
+                }
+            }
+        };
+
+    let mut created = Vec::new();
+
+    for entry in entries {
+        let exists: bool = conn.query_row(
+            "SELECT COUNT(*) FROM lap_records WHERE extraction_result_id=?1 AND lap_index=?2",
+            params![&extraction_result_id, entry.lap_index],
+            |r| r.get::<_, i64>(0),
+        )? > 0;
+
+        if exists {
+            continue;
+        }
+
+        let id = format!("lap-{}-{}", image_file_id, entry.lap_index);
+        let best_lap_clean = entry.best_lap.trim_start_matches('*').to_string();
+
+        conn.execute(
+            "INSERT INTO lap_records
+                (id, run_id, image_file_id, extraction_result_id, lap_index,
+                 driver, driver_normalized, car, car_normalized,
+                 race_class, track, track_normalized, weather, temp_f, temp_c,
+                 best_lap, best_lap_ms, dirty, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, LOWER(?6), ?7, LOWER(?7),
+                     ?8, ?9, LOWER(?9), ?10, ?11, ROUND((?11 - 32.0) * 5.0 / 9.0, 1),
+                     ?12, ?13, ?14, datetime('now'))",
+            params![
+                id,
+                run_id,
+                image_file_id,
+                &extraction_result_id,
+                entry.lap_index,
+                &entry.driver,
+                &entry.car,
+                &entry.race_class,
+                &entry.track,
+                &entry.weather,
+                entry.temp_f,
+                best_lap_clean,
+                entry.best_lap_ms,
+                if entry.dirty { 1 } else { 0 },
+            ],
+        )?;
+
+        created.push(LapRecordEntity {
+            id: id.clone(),
+            extraction_result_id: Some(extraction_result_id.clone()),
+            image_file_id: image_file_id.to_string(),
+            lap_index: entry.lap_index.try_into().unwrap_or(0),
+            driver: entry.driver.clone(),
+            car: entry.car.clone(),
+            race_class: entry.race_class.clone(),
+            track: entry.track.clone(),
+            weather: entry.weather.clone(),
+            temp_f: entry.temp_f,
+            best_lap: best_lap_clean.clone(),
+            best_lap_ms: entry.best_lap_ms,
+            dirty: entry.dirty,
+            created_at: None,
+        });
+    }
+
+    Ok(created)
+}
+
+#[derive(Debug, Clone)]
+pub struct ReviewCase {
+    pub reason: String,
+    pub trigger_name: String,
+    pub image_file_id: String,
+    pub lap_index: i64,
+    pub driver: String,
+    pub track: String,
+    pub race_class: String,
+    pub weather: String,
+    pub best_lap_ms: i64,
+}
+
+pub fn append_rain_time_review_candidates(
+    conn: &Connection,
+    candidates: &mut Vec<ReviewCase>,
+) -> Result<(), DbError> {
+    let mut stmt = conn.prepare(
+        "SELECT track, race_class, weather, best_lap_ms, image_file_id, lap_index, driver
+         FROM lap_records WHERE is_best_lap=1 ORDER BY track, race_class, weather, best_lap_ms",
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, String>(6)?,
+        ))
+    })?;
+
+    let laps: Vec<(String, String, String, i64, String, i64, String)> =
+        rows.collect::<Result<_, _>>()?;
+
+    let mut best_by_key: HashMap<(String, String), i64> = HashMap::new();
+    for (track, race_class, weather, best_lap_ms, _, _, _) in &laps {
+        let key = (track.clone(), race_class.clone());
+        if weather.eq_ignore_ascii_case("dry") {
+            best_by_key.entry(key).or_insert(*best_lap_ms);
+        }
+    }
+
+    for (track, race_class, weather, best_lap_ms, image_file_id, lap_index, driver) in &laps {
+        if !weather.eq_ignore_ascii_case("rain") {
+            continue;
+        }
+        let key = (track.clone(), race_class.clone());
+        if let Some(&dry_best) = best_by_key.get(&key)
+            && *best_lap_ms < dry_best
+        {
+            candidates.push(ReviewCase {
+                reason: "weather".to_string(),
+                trigger_name: "rain_time_suspicious".to_string(),
+                image_file_id: image_file_id.clone(),
+                lap_index: *lap_index,
+                driver: driver.clone(),
+                track: track.clone(),
+                race_class: race_class.clone(),
+                weather: weather.clone(),
+                best_lap_ms: *best_lap_ms,
+            });
+        }
+    }
+
     Ok(())
 }
