@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand};
 use forza_db::doctor;
 use forza_db::migration::{SchemaStatus, schema_status, upgrade};
+use rusqlite::Connection;
 
 #[derive(Parser)]
 #[command(
@@ -15,6 +16,10 @@ struct Cli {
     /// Path to the configuration file.
     #[arg(long, default_value = "forza_config.ini")]
     config: PathBuf,
+
+    /// Enable verbose debug output.
+    #[arg(long)]
+    debug: bool,
 
     /// Subcommand to run.
     #[command(subcommand)]
@@ -90,6 +95,12 @@ fn database_file(config_path: &Path) -> PathBuf {
     }
 }
 
+/// Count rows in a table; returns 0 if the table does not exist.
+fn table_count(conn: &Connection, name: &str) -> i64 {
+    conn.query_row(&format!("SELECT COUNT(*) FROM \"{name}\""), [], |r| r.get(0))
+        .unwrap_or(0)
+}
+
 fn cmd_config_check(config_path: &Path) -> anyhow::Result<()> {
     let (cfg, warnings) = forza_config::load_config(config_path, false)?;
     for warning in &warnings {
@@ -117,22 +128,67 @@ fn cmd_db_status(db_path: &Path) -> anyhow::Result<()> {
     let label = match status {
         SchemaStatus::Empty => "empty",
         SchemaStatus::Current => "current",
-        SchemaStatus::Incompatible { .. } => "incompatible",
+        SchemaStatus::Incompatible { found } => {
+            println!("database_file = {}", db_path.display());
+            println!("schema_state  = incompatible (user_version={found})");
+            std::process::exit(1);
+        }
     };
-    let extra = match status {
-        SchemaStatus::Incompatible { found } => format!(" (user_version={found})"),
-        _ => String::new(),
-    };
+
     println!("database_file = {}", db_path.display());
-    println!("schema_state  = {label}{extra}");
-    if status != SchemaStatus::Current {
+    println!("schema_state  = {label}");
+
+    if status == SchemaStatus::Empty {
         std::process::exit(1);
     }
+
+    let conn = forza_db::open_connection(db_path)?;
+
+    let image_files = table_count(&conn, "image_files");
+    let extraction_runs = table_count(&conn, "extraction_runs");
+    let extraction_results = table_count(&conn, "extraction_results");
+    let extraction_attempts = table_count(&conn, "extraction_attempts");
+    let lap_records = table_count(&conn, "lap_records");
+    let review_cases = table_count(&conn, "review_cases");
+    let review_corrections = table_count(&conn, "review_corrections");
+    let image_flags = table_count(&conn, "image_flags");
+    let export_artifacts = table_count(&conn, "export_artifacts");
+    let reference_tracks = table_count(&conn, "reference_tracks");
+    let reference_cars = table_count(&conn, "reference_cars");
+    let external_record_imports = table_count(&conn, "external_record_imports");
+    let external_lap_records = table_count(&conn, "external_lap_records");
+
+    println!("");
+    println!("Relational store");
+    println!("  image_files         : {image_files}");
+    println!("  extraction_runs     : {extraction_runs}");
+    println!("  extraction_results  : {extraction_results}");
+    println!("  extraction_attempts : {extraction_attempts}");
+    println!("  lap_records         : {lap_records}");
+    println!("  review_cases        : {review_cases}");
+    println!("  review_corrections  : {review_corrections}");
+    println!("  image_flags         : {image_flags}");
+    println!("  export_artifacts    : {export_artifacts}");
+    println!("  reference_tracks    : {reference_tracks}");
+    println!("  reference_cars      : {reference_cars}");
+    println!("  external_record_imports : {external_record_imports}");
+    println!("  external_lap_records    : {external_lap_records}");
+
     Ok(())
 }
 
 fn cmd_db_doctor(db_path: &Path, json: bool) -> anyhow::Result<()> {
-    let report = doctor::doctor_on_path(db_path)?;
+    let schema_label = report_schema_status(db_path)?;
+    let report = if schema_label == "empty" {
+        // Empty/missing DB — use the lightweight doctor that doesn't query tables.
+        doctor::doctor_on_path(db_path)?
+    } else {
+        // Schema present — run the full battery.
+        doctor::run_full_doctor(
+            &forza_db::open_connection(db_path)?,
+            schema_label,
+        )?
+    };
     if json {
         let checks: Vec<_> = report
             .checks
@@ -140,9 +196,14 @@ fn cmd_db_doctor(db_path: &Path, json: bool) -> anyhow::Result<()> {
             .map(|check| {
                 serde_json::json!({
                     "key": check.key,
-                    "severity": "error",
+                    "severity": match check.severity {
+                        doctor::DoctorSeverity::Error => "error",
+                        doctor::DoctorSeverity::Warning => "warning",
+                        doctor::DoctorSeverity::Info => "info",
+                    },
                     "count": if check.ok { 0 } else { 1 },
                     "detail": check.detail,
+                    "ok": check.ok,
                 })
             })
             .collect();
@@ -160,19 +221,64 @@ fn cmd_db_doctor(db_path: &Path, json: bool) -> anyhow::Result<()> {
         println!("Schema:   {}", report.schema_status);
         println!("OK:       {}", report.ok);
         for check in &report.checks {
-            println!(
-                "[{}] {}: {} - {}",
-                if check.ok { "OK" } else { "ERROR" },
-                check.key,
-                if check.ok { 0 } else { 1 },
-                check.detail
-            );
+            let status = if check.ok {
+                "OK"
+            } else {
+                match check.severity {
+                    doctor::DoctorSeverity::Error => "ERROR",
+                    doctor::DoctorSeverity::Warning => "WARN",
+                    doctor::DoctorSeverity::Info => "INFO",
+                }
+            };
+            let count = if check.ok { 0 } else { 1 };
+            println!("[{status}] {key}: {count} - {detail}", key = check.key, detail = check.detail);
         }
     }
     if !report.ok {
-        std::process::exit(1);
+        std::process::exit(2);
     }
     Ok(())
+}
+
+fn report_schema_status(db_path: &Path) -> anyhow::Result<String> {
+    let status = schema_status(db_path)?;
+    Ok(match status {
+        SchemaStatus::Empty => "empty".to_string(),
+        SchemaStatus::Current => "current".to_string(),
+        SchemaStatus::Incompatible { found } => format!("incompatible (user_version={found})"),
+    })
+}
+
+/// Verify no other connection holds the database by requesting an EXCLUSIVE lock.
+fn ensure_exclusive_access(db_path: &Path) -> anyhow::Result<()> {
+    let conn = Connection::open(db_path)?;
+    // Try BEGIN EXCLUSIVE; COMMIT to acquire the lock.
+    // On Windows the bundled SQLite may reject locking_mode=EXCLUSIVE pragma,
+    // so we fall back to just BEGIN EXCLUSIVE and catch SQLITE_BUSY.
+    match conn.execute("BEGIN EXCLUSIVE", []) {
+        Ok(_) => {
+            let conn2 = Connection::open(db_path)?;
+            let _ = conn2.execute("COMMIT", []);
+            Ok(())
+        }
+        Err(e) => {
+            let msg = format!("{e}");
+            if msg.contains("not a database") || msg.contains("file is not a database") {
+                // Not a valid SQLite file — resetting is the legitimate fix.
+                Ok(())
+            } else if msg.contains("database is locked") || msg.contains("locked") || msg.contains("BUSY") {
+                Err(anyhow::anyhow!(
+                    "Refusing to reset database: {} appears to be in use by another connection (database locked). Close any running Forza processes (GUI, CLI runs, or scripts) and try again.",
+                    db_path.display()
+                ))
+            } else {
+                Err(anyhow::anyhow!(
+                    "Refusing to reset database: {} appears to be in use by another connection ({e}). Close any running Forza processes (GUI, CLI runs, or scripts) and try again.",
+                    db_path.display()
+                ))
+            }
+        }
+    }
 }
 
 fn cmd_db_reset(db_path: &Path, yes: bool) -> anyhow::Result<()> {
@@ -180,6 +286,24 @@ fn cmd_db_reset(db_path: &Path, yes: bool) -> anyhow::Result<()> {
         PathBuf::from(format!("{}-wal", db_path.display())),
         PathBuf::from(format!("{}-shm", db_path.display())),
     ];
+
+    if db_path.exists() {
+        ensure_exclusive_access(db_path)?;
+    }
+
+    // Check for stale WAL/SHM sidecars after exclusive lock check
+    for sidecar in &sidecars {
+        if sidecar.exists() {
+            let name = sidecar
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown");
+            println!(
+                "WARNING: {name} sidecar file present — a connection may have held the database recently.",
+            );
+        }
+    }
+
     println!("This deletes:");
     for path in std::iter::once(db_path.to_path_buf()).chain(sidecars.iter().cloned()) {
         if path.exists() {
@@ -201,12 +325,13 @@ fn cmd_db_reset(db_path: &Path, yes: bool) -> anyhow::Result<()> {
 
 fn cmd_run(
     config_path: &Path,
+    debug: bool,
     dry_run: bool,
     force: bool,
     retry_errors: bool,
     limit: Option<usize>,
 ) -> anyhow::Result<()> {
-    let (cfg, warnings) = forza_config::load_config(config_path, false)?;
+    let (cfg, warnings) = forza_config::load_config(config_path, debug)?;
     for warning in &warnings {
         eprintln!("warning: {warning}");
     }
@@ -379,10 +504,11 @@ fn cmd_live_run(
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    let debug = cli.debug;
     match cli.command {
         Command::Gui => forza_gui::run(&cli.config),
         Command::Rebuild => {
-            let (cfg, _) = forza_config::load_config(&cli.config, false)?;
+            let (cfg, _) = forza_config::load_config(&cli.config, debug)?;
             let conn = forza_db::open_connection(&cfg.database_file)?;
             let outcome = forza_app::services::rebuild::rebuild(&conn, &cfg.gamertag)
                 .map_err(|e| anyhow::anyhow!(e))?;
@@ -400,9 +526,9 @@ fn main() -> anyhow::Result<()> {
             force,
             retry_errors,
             limit,
-        } => cmd_run(&cli.config, dry_run, force, retry_errors, limit),
+        } => cmd_run(&cli.config, debug, dry_run, force, retry_errors, limit),
         Command::Export { out, pdf } => {
-            let (cfg, _) = forza_config::load_config(&cli.config, false)?;
+            let (cfg, _) = forza_config::load_config(&cli.config, debug)?;
             let conn = forza_db::open_connection(&cfg.database_file)?;
             let rows =
                 forza_db::repositories::laps::list_clean_flat(&conn, &cfg.gamertag.to_lowercase())?;
