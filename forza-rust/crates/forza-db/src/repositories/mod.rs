@@ -10,7 +10,7 @@ pub mod reviews;
 pub mod runs;
 
 pub use best_laps::mark_best_laps;
-pub use corrections::apply_manual_correction;
+pub use corrections::{apply_all, apply_manual_correction};
 pub use images::{
     ImageFileEntity, ImageFileInsert, UpsertParams, insert_image_file, known_hashes,
     known_path_hashes, list_failed_images_for_retry, upsert_image_file,
@@ -25,7 +25,8 @@ pub use reviews::{
 };
 pub use runs::{
     RunInsert, RunMetadata, RuntimeSnapshotInsert, insert_prompt_snapshot, insert_run,
-    insert_runtime_snapshot, link_run_prompt_snapshot, update_run_metadata,
+    insert_runtime_snapshot, link_run_prompt_snapshot, reconcile_abandoned_runs,
+    update_run_metadata,
 };
 
 use crate::error::DbError;

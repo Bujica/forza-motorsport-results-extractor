@@ -111,3 +111,72 @@ pub fn apply_manual_correction(
 
     Ok(lap_id)
 }
+
+/// Apply every persisted correction to its matching lap_record, then clear
+/// dirty markers on best-lap rows whose dirty flag was just reset.
+/// Returns the number of corrections applied.
+pub fn apply_all(conn: &Connection) -> Result<usize, DbError> {
+    let mut stmt = conn.prepare(
+        "SELECT rc.field, rc.corrected_value, r.lap_record_id
+         FROM review_corrections rc
+         JOIN review_cases r ON r.id = rc.review_case_id
+         ORDER BY rc.created_at",
+    )?;
+
+    let rows: Vec<(String, String, Option<String>)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(DbError::from)?
+        .filter_map(|row| row.ok())
+        .collect();
+
+    let mut applied = 0usize;
+
+    for (field, corrected_value, lap_id_opt) in rows {
+        let Some(lap_id) = lap_id_opt else {
+            continue;
+        };
+        match field.as_str() {
+            "dirty" => {
+                let flag = matches!(
+                    corrected_value.to_lowercase().as_str(),
+                    "false" | "0" | "no"
+                );
+                conn.execute(
+                    "UPDATE lap_records SET dirty=?2 WHERE id=?1",
+                    params![lap_id, if flag { 0 } else { 1 }],
+                )?;
+            }
+            "track" => {
+                let refs = forza_domain::reference_data::embedded_reference_data();
+                let normalized = forza_domain::normalizer::fix_track_name(&corrected_value, &refs)
+                    .unwrap_or_else(|| corrected_value.clone());
+                let sql = "UPDATE lap_records SET track=?2, track_normalized=LOWER(?2) WHERE id=?1";
+                conn.execute(sql, params![lap_id, normalized])?;
+            }
+            "weather" => {
+                let sql =
+                    "UPDATE lap_records SET weather=?2, weather_normalized=LOWER(?2) WHERE id=?1";
+                conn.execute(sql, params![lap_id, corrected_value])?;
+            }
+            "race_class" => {
+                let sql = "UPDATE lap_records SET race_class=?2, race_class_normalized=LOWER(?2) WHERE id=?1";
+                conn.execute(sql, params![lap_id, corrected_value])?;
+            }
+            "car" => {
+                let refs = forza_domain::reference_data::embedded_reference_data();
+                let normalized = forza_domain::normalizer::fix_car_name(&corrected_value, &refs);
+                let sql = "UPDATE lap_records SET car=?2, car_normalized=LOWER(?2) WHERE id=?1";
+                conn.execute(sql, params![lap_id, normalized])?;
+            }
+            "driver" => {
+                let sql =
+                    "UPDATE lap_records SET driver=?2, driver_normalized=LOWER(?2) WHERE id=?1";
+                conn.execute(sql, params![lap_id, corrected_value])?;
+            }
+            _ => continue,
+        }
+        applied += 1;
+    }
+
+    Ok(applied)
+}

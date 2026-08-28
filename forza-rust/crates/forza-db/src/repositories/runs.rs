@@ -217,8 +217,7 @@ pub fn insert_input_and_result(
         params![run_id, image_file_id, decision, input_order],
         |row| row.get(0),
     )?;
-    let _ = input_id;
-    let result_id = format!("res-{run_id}-{input_order}");
+    let result_id = format!("res-{run_id}-{input_id}");
     conn.execute(
         "INSERT INTO extraction_results
             (id, run_id, run_input_id, image_file_id, status, attempt_count, created_at, updated_at)
@@ -253,8 +252,7 @@ pub fn insert_processed_input(
         ],
         |row| row.get(0),
     )?;
-    let _ = input_id;
-    let result_id = format!("res-{run_id}-{input_order}");
+    let result_id = format!("res-{run_id}-{input_id}");
     conn.execute(
         "INSERT INTO extraction_results
             (id, run_id, run_input_id, image_file_id, status, attempt_count, created_at, updated_at)
@@ -521,4 +519,64 @@ pub fn insert_accepted_attempt(
         params![attempt_id, result_id, run_id, image_file_id],
     )?;
     Ok(attempt_id)
+}
+
+/// Reconcile abandoned runs: every extraction_run still marked `running` at
+/// the start of a new invocation is cancelled, its pending/running results
+/// are set to `cancelled`, and the run receives an operational error code.
+/// Returns the number of abandoned runs recovered.
+///
+/// Each run is wrapped in try/except so one corrupt run does not prevent
+/// recovery of the others (Python `_reconcile_abandoned_runs` semantics).
+pub fn reconcile_abandoned_runs(conn: &Connection) -> Result<usize, DbError> {
+    let mut stmt =
+        conn.prepare("SELECT id FROM extraction_runs WHERE status='running' ORDER BY created_at")?;
+
+    let run_ids: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .map_err(DbError::from)?
+        .filter_map(|row| row.ok())
+        .collect();
+
+    let mut recovered = 0usize;
+
+    for run_id in run_ids {
+        if let Err(e) = reconcile_one_abandoned_run(conn, &run_id) {
+            // One corrupt run does NOT prevent recovery of others.
+            let _ = e;
+            continue;
+        }
+        recovered += 1;
+    }
+
+    Ok(recovered)
+}
+
+fn reconcile_one_abandoned_run(conn: &Connection, run_id: &str) -> Result<(), DbError> {
+    // Update all pending/running extraction_results to cancelled.
+    conn.execute(
+        "UPDATE extraction_results
+         SET status='cancelled', updated_at=datetime('now')
+         WHERE run_id=?1 AND status IN ('pending', 'running')",
+        params![run_id],
+    )?;
+
+    // Update all running extraction_results to cancelled.
+    conn.execute(
+        "UPDATE extraction_results
+         SET status='cancelled', updated_at=datetime('now')
+         WHERE run_id=?1 AND status='running'",
+        params![run_id],
+    )?;
+
+    // Set operational error code on the run entity.
+    conn.execute(
+        "UPDATE extraction_runs
+         SET status='cancelled', operational_error_code='abandoned',
+             finished_at=datetime('now'), updated_at=datetime('now')
+         WHERE id=?1 AND status='running'",
+        params![run_id],
+    )?;
+
+    Ok(())
 }

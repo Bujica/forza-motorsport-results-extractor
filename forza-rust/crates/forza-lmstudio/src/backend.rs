@@ -17,6 +17,25 @@ use crate::response::{parse_and_validate_response, semantic_retry_issues};
 const TRANSIENT_STATUS: [u16; 7] = [409, 423, 429, 500, 502, 503, 504];
 const RUNTIME_MAX_ATTEMPTS: usize = 5;
 
+/// Global async mutex keyed by `(api_base, model)` to serialize model
+/// management across all backend instances.  Matches Python's
+/// `_model_lock` / `_MODEL_LOCKS` pattern so that concurrent workers
+/// cannot unload each other's loaded instances.
+static MODEL_LOCKS: std::sync::LazyLock<
+    tokio::sync::Mutex<
+        std::collections::HashMap<(String, String), std::sync::Arc<tokio::sync::Mutex<()>>>,
+    >,
+> = std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::HashMap::new()));
+
+async fn model_lock(api_base: &str, model: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    let mut locks = MODEL_LOCKS.lock().await;
+    let key = (api_base.to_string(), model.to_string());
+    locks
+        .entry(key)
+        .or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
+
 #[derive(Debug, Clone)]
 pub struct BackendConfig {
     pub url: String,
@@ -348,13 +367,16 @@ impl LMStudioBackend {
             let payload = self.build_payload(image_b64, mime, &user_text);
 
             let started = Instant::now();
-            let response_result = self
-                .http
-                .post(self.cfg.chat_url())
-                .timeout(Duration::from_secs(self.cfg.timeout_read_secs))
-                .json(&payload)
-                .send()
-                .await;
+            let response_result = {
+                let mutex = model_lock(&self.cfg.api_base(), &self.cfg.model).await;
+                let _lock = mutex.lock().await;
+                self.http
+                    .post(self.cfg.chat_url())
+                    .timeout(Duration::from_secs(self.cfg.timeout_read_secs))
+                    .json(&payload)
+                    .send()
+                    .await
+            };
 
             let elapsed_ms = started.elapsed().as_millis() as i64;
             let (http_status, body): (Option<u16>, Option<Value>) = match response_result {
@@ -588,7 +610,15 @@ impl LMStudioBackend {
     }
 
     /// Ensure the configured model is loaded with a compatible load config.
+    ///
+    /// Serialized by a global async mutex keyed by `(api_base, model)` so
+    /// that concurrent workers cannot race on `/models` / `/models/load` and
+    /// unload each other's loaded instances.  Matches Python's
+    /// `_model_lock` / `_MODEL_LOCKS` pattern.
     pub async fn ensure_loaded(&mut self, desired: &DesiredLoadConfig) -> Result<(), LlmError> {
+        let lock = model_lock(&self.cfg.api_base(), &self.cfg.model).await;
+        let _guard = lock.lock().await;
+
         let models = self.runtime.list_models().await?;
         let Some(model) = models.iter().find(|m| m.id == self.cfg.model) else {
             return Err(LlmError::Runtime(format!(

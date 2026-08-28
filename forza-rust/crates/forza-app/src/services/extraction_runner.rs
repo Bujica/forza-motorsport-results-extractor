@@ -4,16 +4,26 @@
 //! GUI (progress, per-image outcomes, log lines).
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::mpsc::channel;
 use std::time::Instant;
 
 use rusqlite::Connection;
+
+/// Owned image data for worker threads (avoids borrowing `plan` across threads).
+#[derive(Debug, Clone)]
+struct WorkerImage {
+    path: PathBuf,
+    file_hash: String,
+}
 
 use crate::services::run_control::RunControl;
 use forza_config::AppConfig;
 use forza_db::repositories::runs::{
     RunInsert, RunMetadata, RuntimeSnapshotInsert, complete_run, find_image_id_by_hash,
     insert_processed_input, insert_prompt_snapshot, insert_run, insert_run_input_only,
-    insert_runtime_snapshot, link_run_prompt_snapshot, mark_run_running, update_run_metadata,
+    insert_runtime_snapshot, link_run_prompt_snapshot, mark_run_running, reconcile_abandoned_runs,
+    update_run_metadata,
 };
 use forza_db::repositories::{
     known_hashes, known_path_hashes, list_failed_images_for_retry, mark_best_laps,
@@ -76,6 +86,8 @@ pub struct RunParams {
     pub selected_image_file_ids: Option<Vec<String>>,
     /// Optional CLI cap for the number of images sent to extraction.
     pub max_images: Option<usize>,
+    /// Number of parallel extraction workers (1 = sequential).
+    pub workers: u32,
     // LLM
     pub url: String,
     pub model: String,
@@ -104,6 +116,7 @@ impl RunParams {
             retry_errors: false,
             selected_image_file_ids: None,
             max_images: None,
+            workers: cfg.workers as u32,
             url: cfg.llm.url.clone(),
             model: cfg.llm.model.clone(),
             max_tokens: cfg.llm.max_completion_tokens,
@@ -236,7 +249,8 @@ fn upsert_image_for_run(
 
 /// Spawn the extraction run on a dedicated thread. `control` is honoured
 /// cooperatively at safe checkpoints (between images); the current image
-/// finishes first.
+/// finishes first. When `params.workers > 1` images are processed in
+/// parallel across that many Tokio worker tasks.
 pub fn spawn_extraction<F>(
     params: RunParams,
     control: RunControl,
@@ -297,6 +311,14 @@ where
         return Err("--force and --retry-errors cannot be combined.".into());
     }
     let conn = forza_db::open_connection(&params.database_file).map_err(|e| e.to_string())?;
+
+    // ── Abandoned run reconciliation ──────────────────────────────────────
+    let abandoned = reconcile_abandoned_runs(&conn).map_err(|e| e.to_string())?;
+    if abandoned > 0 {
+        on_event(RunEvent::Log(format!(
+            "reconciled {abandoned} abandoned run(s)"
+        )));
+    }
 
     // ── Discovery + plan ─────────────────────────────────────────────────
     // Retry mode replaces discovery: only images whose latest result is
@@ -424,7 +446,7 @@ where
             input_dir: &input_dir,
             prompt_name: &params.prompt_id,
             prompt_hash: Some(&prompt_hash),
-            workers: 1,
+            workers: i64::from(params.workers),
             image_format: &params.image_format,
             max_width: i64::from(params.max_width),
             encode_quality: i64::from(params.encode_quality),
@@ -446,9 +468,9 @@ where
     });
 
     let mut input_order = 0i64;
-    let mut processed = 0usize;
-    let mut succeeded = 0usize;
-    let mut failed = 0usize;
+    let _processed = 0usize;
+    let _succeeded = 0usize;
+    let _failed = 0usize;
 
     // Inventory decisions for everything the run considered.
     for existing in &plan.existing_images {
@@ -497,17 +519,6 @@ where
         .map_err(|e| e.to_string())?;
     }
 
-    // ── Live backend ─────────────────────────────────────────────────────
-    let mut backend = LMStudioBackend::new(params.backend_config(), Default::default())
-        .map_err(|e| e.to_string())?;
-    let desired = DesiredLoadConfig {
-        context_length: params.context_length,
-        eval_batch_size: None,
-        physical_batch_size: None,
-        flash_attention: true,
-        offload_kv_cache_to_gpu: true,
-    };
-
     let total_new = plan.new_images.len();
     let process_reason = if params.retry_errors {
         "retry_errors"
@@ -516,11 +527,38 @@ where
     } else {
         "full_run"
     };
-    if total_new > 0 {
-        let snapshot = backend
-            .preflight_snapshot(&desired)
-            .await
-            .map_err(|e| e.to_string())?;
+
+    let (processed, succeeded, failed) = if params.workers > 1 && total_new > 0 {
+        // ── Multi-worker parallel extraction ────────────────────────────
+        let workers = params.workers as usize;
+        let (event_tx, event_rx) = channel();
+        let control = Arc::new(control.clone());
+
+        // Split images into worker batches (round-robin for fairness).
+        let mut batches: Vec<Vec<WorkerImage>> = vec![Vec::new(); workers];
+        for (idx, image) in plan.new_images.iter().enumerate() {
+            batches[idx % workers].push(WorkerImage {
+                path: image.path.clone(),
+                file_hash: image.file_hash.clone(),
+            });
+        }
+
+        // Spawn preflight snapshot on the main connection (single call).
+        let snapshot = {
+            let backend = LMStudioBackend::new(params.backend_config(), Default::default())
+                .map_err(|e| e.to_string())?;
+            let desired = DesiredLoadConfig {
+                context_length: params.context_length,
+                eval_batch_size: None,
+                physical_batch_size: None,
+                flash_attention: true,
+                offload_kv_cache_to_gpu: true,
+            };
+            backend
+                .preflight_snapshot(&desired)
+                .await
+                .map_err(|e| e.to_string())?
+        };
         let snapshot_id = format!("runtime-{run_id}-preflight");
         let insert = RuntimeSnapshotInsert {
             endpoint: &snapshot.endpoint,
@@ -546,216 +584,342 @@ where
         };
         insert_runtime_snapshot(&conn, &run_id, &snapshot_id, &insert)
             .map_err(|e| e.to_string())?;
-    }
-    let mut done = 0usize;
-    for image in &plan.new_images {
-        // Safe checkpoint: pause blocks here; cancel stops between images.
-        if !control.checkpoint() {
-            on_event(RunEvent::Log(
-                "cancellation requested — stopping between images".into(),
-            ));
-            break;
+
+        // Spawn worker threads (each owns its own Connection + single-thread rt).
+        let mut handles = Vec::new();
+        for (w_idx, batch) in batches.into_iter().enumerate() {
+            let params_clone = params.clone();
+            let conn_path = params.database_file.clone();
+            let run_id_clone = run_id.clone();
+            let control_clone = Arc::clone(&control);
+            let event_tx_clone = event_tx.clone();
+            let process_reason_clone = process_reason.to_string();
+
+            handles.push(
+                std::thread::Builder::new()
+                    .name(format!("forza-worker-{w_idx}"))
+                    .spawn(move || {
+                        let rt = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .unwrap_or_else(|e| panic!("worker {w_idx} tokio runtime: {e}"));
+                        rt.block_on(async {
+                            worker_loop(
+                                w_idx,
+                                conn_path,
+                                &run_id_clone,
+                                batch,
+                                &params_clone,
+                                control_clone,
+                                event_tx_clone,
+                                &process_reason_clone,
+                            )
+                            .await
+                        });
+                    })
+                    .unwrap_or_else(|e| panic!("worker {w_idx} thread spawn: {e}")),
+            );
         }
-        input_order += 1;
-        processed += 1;
-        let name = image
-            .path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-        on_event(RunEvent::ImageStarted { name: name.clone() });
+        drop(event_tx);
 
-        // Inventory row for this processed image.
-        let (image_file_id, _) = upsert_image_for_run(&conn, &image.path, &image.file_hash)
-            .map_err(|e| e.to_string())?;
+        // Collect worker results and events.
+        let mut w_succeeded = 0usize;
+        let mut w_failed = 0usize;
 
-        // Pending result row before the call (status running).
-        let result_id = insert_processed_input(
-            &conn,
-            &run_id,
-            &image_file_id,
-            &image.path.to_string_lossy(),
-            process_reason,
-            input_order,
-        )
-        .map_err(|e| e.to_string())?;
-        let file_metadata = std::fs::metadata(&image.path).ok();
-        let extension = image
-            .path
-            .extension()
-            .map(|value| value.to_string_lossy().to_lowercase());
-        let size_bytes = file_metadata.as_ref().map(|metadata| metadata.len() as i64);
-        let mtime_ns = file_metadata
-            .and_then(|metadata| metadata.modified().ok())
-            .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|duration| duration.as_nanos().min(i64::MAX as u128) as i64);
-        conn.execute(
-            "UPDATE run_inputs SET file_hash=?2, file_name=?3, extension=?4,
-                    normalized_path=?5, size_bytes=?6, mtime_ns=?7
-             WHERE run_id=?1 AND input_order=?8",
-            rusqlite::params![
-                run_id,
-                image.file_hash,
-                name,
-                extension,
-                image.path.to_string_lossy().to_string(),
-                size_bytes,
-                mtime_ns,
-                input_order,
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-
-        // Encode.
-        let encoded = match encode_image_payload(
-            &image.path,
-            params.max_width,
-            params.encode_quality,
-            &params.image_format,
-            params.grayscale,
-        ) {
-            Ok(payload) => payload,
-            Err(e) => {
-                failed += 1;
-                on_event(RunEvent::ImageDone {
-                    name: name.clone(),
-                    ok: false,
-                    laps: 0,
-                });
-                on_event(RunEvent::Progress {
-                    done,
-                    total: total_new,
-                });
-                conn.execute(
-                    "UPDATE extraction_results SET status='error', error_type='encode', error_message=?2, updated_at=datetime('now') WHERE id=?1",
-                    rusqlite::params![result_id, e.to_string()],
-                )
-                .map_err(|e| e.to_string())?;
-                continue;
+        while let Ok(event) = event_rx.recv() {
+            match event {
+                RunEvent::Progress { done, total: _ } => {
+                    on_event(RunEvent::Progress {
+                        done,
+                        total: total_new,
+                    });
+                }
+                RunEvent::ImageStarted { name: _ } => {
+                    on_event(event);
+                }
+                RunEvent::ImageDone {
+                    name: _,
+                    ok,
+                    laps: _,
+                } => {
+                    on_event(event);
+                    if ok {
+                        w_succeeded += 1;
+                    } else {
+                        w_failed += 1;
+                    }
+                }
+                RunEvent::Log(line) => {
+                    on_event(RunEvent::Log(line));
+                }
+                _ => {}
             }
+        }
+
+        // Wait for all workers to finish.
+        for handle in handles {
+            let _ = handle.join();
+        }
+
+        let w_processed = w_succeeded + w_failed;
+        (w_processed, w_succeeded, w_failed)
+    } else {
+        // ── Sequential (single-worker) extraction ───────────────────────
+        let mut backend = LMStudioBackend::new(params.backend_config(), Default::default())
+            .map_err(|e| e.to_string())?;
+        let desired = DesiredLoadConfig {
+            context_length: params.context_length,
+            eval_batch_size: None,
+            physical_batch_size: None,
+            flash_attention: true,
+            offload_kv_cache_to_gpu: true,
         };
 
-        // Ensure the model is loaded (first image or after config change).
-        backend
-            .ensure_loaded(&desired)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        // Extract with attempt persistence.
-        let mut attempt_count = 0i64;
-        let mut accepted_row: Option<String> = None;
-        let extract_result = {
-            let conn_ref = &conn;
-            let run_id_ref = run_id.clone();
-            let image_id = image_file_id.clone();
-            let result_id_ref = result_id.clone();
-            let model_name = params.model.clone();
-            backend
-                .extract(
-                    &encoded.data_b64,
-                    &encoded.mime_type,
-                    &name,
-                    Some(&image.file_hash),
-                    &mut |record: &ModelAttemptRecord| {
-                        attempt_count += 1;
-                        let mut insert = crate::services::extraction_replay::to_attempt_insert(
-                            record,
-                            &model_name,
-                        );
-                        insert.request_image_format = Some(&encoded.format);
-                        insert.request_image_mime_type = Some(&encoded.mime_type);
-                        insert.request_image_width = Some(i64::from(encoded.width_px));
-                        insert.request_image_height = Some(i64::from(encoded.height_px));
-                        insert.request_image_bytes = Some(encoded.byte_count as i64);
-                        if let Ok(row_id) = insert_attempt_full_checked(
-                            conn_ref,
-                            &run_id_ref,
-                            &image_id,
-                            &result_id_ref,
-                            &insert,
-                        ) && record.accepted
-                        {
-                            accepted_row = Some(row_id);
-                        }
-                    },
-                )
+        if total_new > 0 {
+            let snapshot = backend
+                .preflight_snapshot(&desired)
                 .await
-        };
-
-        match extract_result {
-            Ok(result) => {
-                let laps = crate::services::extraction_replay::derive_and_insert_laps(
-                    &conn,
-                    &run_id,
-                    &image_file_id,
-                    &result_id,
-                    &result.parsed,
-                    Some(&name),
-                )?;
-                let stats = forza_db::repositories::runs::ResultStats {
-                    model: Some(&params.model),
-                    model_instance_id: result.accepted_attempt.model_instance_id.as_deref(),
-                    input_tokens: result.accepted_attempt.input_tokens,
-                    output_tokens: result.accepted_attempt.output_tokens,
-                    reasoning_tokens: result.accepted_attempt.reasoning_tokens,
-                    total_tokens: result.accepted_attempt.total_tokens,
-                    tokens_per_second: result.accepted_attempt.tokens_per_second,
-                    time_to_first_token_s: result.accepted_attempt.time_to_first_token_s,
-                    model_load_time_s: result.accepted_attempt.model_load_time_s,
-                    duration_ms: result.accepted_attempt.duration_ms,
-                };
-                let row_id = accepted_row.unwrap_or_else(|| format!("att-{result_id}-1"));
-                forza_db::repositories::runs::finalize_result_ok(
-                    &conn,
-                    &result_id,
-                    &row_id,
-                    attempt_count,
-                    &stats,
-                )
                 .map_err(|e| e.to_string())?;
-                conn.execute(
-                    "UPDATE extraction_results SET request_image_format=?2,
-                            request_image_mime_type=?3, request_image_width=?4,
-                            request_image_height=?5, request_image_bytes=?6
-                     WHERE id=?1",
-                    rusqlite::params![
-                        result_id,
-                        encoded.format,
-                        encoded.mime_type,
-                        i64::from(encoded.width_px),
-                        i64::from(encoded.height_px),
-                        encoded.byte_count as i64,
-                    ],
-                )
+            let snapshot_id = format!("runtime-{run_id}-preflight");
+            let insert = RuntimeSnapshotInsert {
+                endpoint: &snapshot.endpoint,
+                configured_model: &snapshot.configured_model,
+                matched_model: snapshot.matched_model.as_deref(),
+                loaded_model: snapshot.loaded_model.as_deref(),
+                instance_id: snapshot.instance_id.as_deref(),
+                display_name: snapshot.display_name.as_deref(),
+                publisher: snapshot.publisher.as_deref(),
+                architecture: snapshot.architecture.as_deref(),
+                format: snapshot.format.as_deref(),
+                params_string: snapshot.params_string.as_deref(),
+                quantization: snapshot.quantization.as_deref(),
+                selected_variant: snapshot.selected_variant.as_deref(),
+                size_bytes: snapshot.size_bytes,
+                max_context_length: snapshot.max_context_length,
+                capabilities_json: snapshot.capabilities_json.as_deref(),
+                desired_load_config_json: &snapshot.desired_load_config_json,
+                effective_load_config_json: snapshot.effective_load_config_json.as_deref(),
+                health_ok: snapshot.health_ok,
+                health_message: &snapshot.health_message,
+                model_matches_config: snapshot.model_matches_config,
+            };
+            insert_runtime_snapshot(&conn, &run_id, &snapshot_id, &insert)
                 .map_err(|e| e.to_string())?;
-                succeeded += 1;
-                on_event(RunEvent::ImageDone {
-                    name: name.clone(),
-                    ok: true,
-                    laps,
-                });
-            }
-            Err(err) => {
-                failed += 1;
-                conn.execute(
-                    "UPDATE extraction_results SET status='error', error_type='extraction', error_message=?2, attempt_count=?3, updated_at=datetime('now') WHERE id=?1",
-                    rusqlite::params![result_id, err.to_string(), attempt_count],
-                )
-                .map_err(|e| e.to_string())?;
-                on_event(RunEvent::ImageDone {
-                    name: name.clone(),
-                    ok: false,
-                    laps: 0,
-                });
-            }
         }
+        let mut done = 0usize;
+        let mut processed = 0usize;
+        let mut succeeded = 0usize;
+        let mut failed = 0usize;
+        for image in &plan.new_images {
+            // Safe checkpoint: pause blocks here; cancel stops between images.
+            if !control.checkpoint() {
+                on_event(RunEvent::Log(
+                    "cancellation requested — stopping between images".into(),
+                ));
+                break;
+            }
+            input_order += 1;
+            processed += 1;
+            let name = image
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            on_event(RunEvent::ImageStarted { name: name.clone() });
 
-        done += 1;
-        on_event(RunEvent::Progress {
-            done,
-            total: total_new,
-        });
-    }
+            // Inventory row for this processed image.
+            let (image_file_id, _) = upsert_image_for_run(&conn, &image.path, &image.file_hash)
+                .map_err(|e| e.to_string())?;
+
+            // Pending result row before the call (status running).
+            let result_id = insert_processed_input(
+                &conn,
+                &run_id,
+                &image_file_id,
+                &image.path.to_string_lossy(),
+                process_reason,
+                input_order,
+            )
+            .map_err(|e| e.to_string())?;
+            let file_metadata = std::fs::metadata(&image.path).ok();
+            let extension = image
+                .path
+                .extension()
+                .map(|value| value.to_string_lossy().to_lowercase());
+            let size_bytes = file_metadata.as_ref().map(|metadata| metadata.len() as i64);
+            let mtime_ns = file_metadata
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_nanos().min(i64::MAX as u128) as i64);
+            conn.execute(
+                "UPDATE run_inputs SET file_hash=?2, file_name=?3, extension=?4,
+                        normalized_path=?5, size_bytes=?6, mtime_ns=?7
+                 WHERE run_id=?1 AND input_order=?8",
+                rusqlite::params![
+                    run_id,
+                    image.file_hash,
+                    name,
+                    extension,
+                    image.path.to_string_lossy().to_string(),
+                    size_bytes,
+                    mtime_ns,
+                    input_order,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+
+            // Encode.
+            let encoded = match encode_image_payload(
+                &image.path,
+                params.max_width,
+                params.encode_quality,
+                &params.image_format,
+                params.grayscale,
+            ) {
+                Ok(payload) => payload,
+                Err(e) => {
+                    failed += 1;
+                    on_event(RunEvent::ImageDone {
+                        name: name.clone(),
+                        ok: false,
+                        laps: 0,
+                    });
+                    on_event(RunEvent::Progress {
+                        done,
+                        total: total_new,
+                    });
+                    conn.execute(
+                        "UPDATE extraction_results SET status='error', error_type='encode', error_message=?2, updated_at=datetime('now') WHERE id=?1",
+                        rusqlite::params![result_id, e.to_string()],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    continue;
+                }
+            };
+
+            // Ensure the model is loaded (first image or after config change).
+            backend
+                .ensure_loaded(&desired)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            // Extract with attempt persistence.
+            let mut attempt_count = 0i64;
+            let mut accepted_row: Option<String> = None;
+            let extract_result = {
+                let conn_ref = &conn;
+                let run_id_ref = run_id.clone();
+                let image_id = image_file_id.clone();
+                let result_id_ref = result_id.clone();
+                let model_name = params.model.clone();
+                backend
+                    .extract(
+                        &encoded.data_b64,
+                        &encoded.mime_type,
+                        &name,
+                        Some(&image.file_hash),
+                        &mut |record: &ModelAttemptRecord| {
+                            attempt_count += 1;
+                            let mut insert = crate::services::extraction_replay::to_attempt_insert(
+                                record,
+                                &model_name,
+                            );
+                            insert.request_image_format = Some(&encoded.format);
+                            insert.request_image_mime_type = Some(&encoded.mime_type);
+                            insert.request_image_width = Some(i64::from(encoded.width_px));
+                            insert.request_image_height = Some(i64::from(encoded.height_px));
+                            insert.request_image_bytes = Some(encoded.byte_count as i64);
+                            if let Ok(row_id) = insert_attempt_full_checked(
+                                conn_ref,
+                                &run_id_ref,
+                                &image_id,
+                                &result_id_ref,
+                                &insert,
+                            ) && record.accepted
+                            {
+                                accepted_row = Some(row_id);
+                            }
+                        },
+                    )
+                    .await
+            };
+
+            match extract_result {
+                Ok(result) => {
+                    let laps = crate::services::extraction_replay::derive_and_insert_laps(
+                        &conn,
+                        &run_id,
+                        &image_file_id,
+                        &result_id,
+                        &result.parsed,
+                        Some(&name),
+                    )?;
+                    let stats = forza_db::repositories::runs::ResultStats {
+                        model: Some(&params.model),
+                        model_instance_id: result.accepted_attempt.model_instance_id.as_deref(),
+                        input_tokens: result.accepted_attempt.input_tokens,
+                        output_tokens: result.accepted_attempt.output_tokens,
+                        reasoning_tokens: result.accepted_attempt.reasoning_tokens,
+                        total_tokens: result.accepted_attempt.total_tokens,
+                        tokens_per_second: result.accepted_attempt.tokens_per_second,
+                        time_to_first_token_s: result.accepted_attempt.time_to_first_token_s,
+                        model_load_time_s: result.accepted_attempt.model_load_time_s,
+                        duration_ms: result.accepted_attempt.duration_ms,
+                    };
+                    let row_id = accepted_row.unwrap_or_else(|| format!("att-{result_id}-1"));
+                    forza_db::repositories::runs::finalize_result_ok(
+                        &conn,
+                        &result_id,
+                        &row_id,
+                        attempt_count,
+                        &stats,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    conn.execute(
+                        "UPDATE extraction_results SET request_image_format=?2,
+                                request_image_mime_type=?3, request_image_width=?4,
+                                request_image_height=?5, request_image_bytes=?6
+                         WHERE id=?1",
+                        rusqlite::params![
+                            result_id,
+                            encoded.format,
+                            encoded.mime_type,
+                            i64::from(encoded.width_px),
+                            i64::from(encoded.height_px),
+                            encoded.byte_count as i64,
+                        ],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    succeeded += 1;
+                    on_event(RunEvent::ImageDone {
+                        name: name.clone(),
+                        ok: true,
+                        laps,
+                    });
+                }
+                Err(err) => {
+                    failed += 1;
+                    conn.execute(
+                        "UPDATE extraction_results SET status='error', error_type='extraction', error_message=?2, attempt_count=?3, updated_at=datetime('now') WHERE id=?1",
+                        rusqlite::params![result_id, err.to_string(), attempt_count],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    on_event(RunEvent::ImageDone {
+                        name: name.clone(),
+                        ok: false,
+                        laps: 0,
+                    });
+                }
+            }
+
+            done += 1;
+            on_event(RunEvent::Progress {
+                done,
+                total: total_new,
+            });
+        }
+        (processed, succeeded, failed)
+    };
 
     // ── Run counters + derived refresh ────────────────────────────────────
     let cancelled = control.is_cancelled();
@@ -815,4 +979,279 @@ fn insert_attempt_full_checked(
         insert,
     )
     .map_err(|e| e.to_string())
+}
+
+/// Single-worker loop: owns its own SQLite connection and LMStudioBackend,
+/// processes a batch of images sequentially, emits events on `event_tx`.
+#[allow(clippy::too_many_arguments)]
+async fn worker_loop(
+    _w_idx: usize,
+    conn_path: PathBuf,
+    run_id: &str,
+    batch: Vec<WorkerImage>,
+    params: &RunParams,
+    control: Arc<RunControl>,
+    event_tx: std::sync::mpsc::Sender<RunEvent>,
+    process_reason: &str,
+) {
+    let conn = match forza_db::open_connection(&conn_path) {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = event_tx.send(RunEvent::Log(format!("worker DB open: {e}")));
+            return;
+        }
+    };
+
+    let mut backend = match LMStudioBackend::new(params.backend_config(), Default::default()) {
+        Ok(b) => b,
+        Err(e) => {
+            let _ = event_tx.send(RunEvent::Log(format!("worker backend: {e}")));
+            return;
+        }
+    };
+
+    let desired = DesiredLoadConfig {
+        context_length: params.context_length,
+        eval_batch_size: None,
+        physical_batch_size: None,
+        flash_attention: true,
+        offload_kv_cache_to_gpu: true,
+    };
+
+    let total = batch.len();
+    let mut done = 0usize;
+
+    for image in batch {
+        if !control.checkpoint() {
+            let _ = event_tx.send(RunEvent::Log(
+                "cancellation requested — stopping between images".into(),
+            ));
+            break;
+        }
+
+        let name = image
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let _ = event_tx.send(RunEvent::ImageStarted { name: name.clone() });
+
+        let (image_file_id, _) = match upsert_image_for_run(&conn, &image.path, &image.file_hash) {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = event_tx.send(RunEvent::ImageDone {
+                    name: name.clone(),
+                    ok: false,
+                    laps: 0,
+                });
+                let _ = event_tx.send(RunEvent::Log(format!("upsert: {e}")));
+                done += 1;
+                let _ = event_tx.send(RunEvent::Progress { done, total });
+                continue;
+            }
+        };
+
+        let result_id = match insert_processed_input(
+            &conn,
+            run_id,
+            &image_file_id,
+            &image.path.to_string_lossy(),
+            process_reason,
+            done as i64 + 1,
+        ) {
+            Ok(id) => id,
+            Err(e) => {
+                let _ = event_tx.send(RunEvent::ImageDone {
+                    name: name.clone(),
+                    ok: false,
+                    laps: 0,
+                });
+                let _ = event_tx.send(RunEvent::Log(format!("insert result: {e}")));
+                done += 1;
+                let _ = event_tx.send(RunEvent::Progress { done, total });
+                continue;
+            }
+        };
+
+        let file_metadata = std::fs::metadata(&image.path).ok();
+        let extension = image
+            .path
+            .extension()
+            .map(|value| value.to_string_lossy().to_lowercase());
+        let size_bytes = file_metadata.as_ref().map(|metadata| metadata.len() as i64);
+        let mtime_ns = file_metadata
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_nanos().min(i64::MAX as u128) as i64);
+        let _ = conn.execute(
+            "UPDATE run_inputs SET file_hash=?2, file_name=?3, extension=?4,
+                    normalized_path=?5, size_bytes=?6, mtime_ns=?7
+              WHERE run_id=?1 AND input_order=?8",
+            rusqlite::params![
+                run_id,
+                image.file_hash,
+                name,
+                extension,
+                image.path.to_string_lossy().to_string(),
+                size_bytes,
+                mtime_ns,
+                done as i64 + 1,
+            ],
+        );
+
+        let encoded = match encode_image_payload(
+            &image.path,
+            params.max_width,
+            params.encode_quality,
+            &params.image_format,
+            params.grayscale,
+        ) {
+            Ok(payload) => payload,
+            Err(e) => {
+                let _ = event_tx.send(RunEvent::ImageDone {
+                    name: name.clone(),
+                    ok: false,
+                    laps: 0,
+                });
+                let _ = event_tx.send(RunEvent::Progress { done, total });
+                let _ = conn.execute(
+                    "UPDATE extraction_results SET status='error', error_type='encode', error_message=?2, updated_at=datetime('now') WHERE id=?1",
+                    rusqlite::params![result_id, e.to_string()],
+                );
+                done += 1;
+                continue;
+            }
+        };
+
+        match backend.ensure_loaded(&desired).await {
+            Ok(()) => {}
+            Err(e) => {
+                let _ = event_tx.send(RunEvent::ImageDone {
+                    name: name.clone(),
+                    ok: false,
+                    laps: 0,
+                });
+                let _ = event_tx.send(RunEvent::Log(format!("ensure_loaded: {e}")));
+                done += 1;
+                let _ = event_tx.send(RunEvent::Progress { done, total });
+                let _ = conn.execute(
+                    "UPDATE extraction_results SET status='error', error_type='model_load', error_message=?2, updated_at=datetime('now') WHERE id=?1",
+                    rusqlite::params![result_id, e.to_string()],
+                );
+                continue;
+            }
+        };
+
+        let mut attempt_count = 0i64;
+        let mut accepted_row: Option<String> = None;
+        let model_name = params.model.clone();
+        let extract_result = backend
+            .extract(
+                &encoded.data_b64,
+                &encoded.mime_type,
+                &name,
+                Some(&image.file_hash),
+                &mut |record: &ModelAttemptRecord| {
+                    attempt_count += 1;
+                    let mut insert =
+                        crate::services::extraction_replay::to_attempt_insert(record, &model_name);
+                    insert.request_image_format = Some(&encoded.format);
+                    insert.request_image_mime_type = Some(&encoded.mime_type);
+                    insert.request_image_width = Some(i64::from(encoded.width_px));
+                    insert.request_image_height = Some(i64::from(encoded.height_px));
+                    insert.request_image_bytes = Some(encoded.byte_count as i64);
+                    if let Ok(row_id) = insert_attempt_full_checked(
+                        &conn,
+                        run_id,
+                        &image_file_id,
+                        &result_id,
+                        &insert,
+                    ) && record.accepted
+                    {
+                        accepted_row = Some(row_id);
+                    }
+                },
+            )
+            .await;
+
+        match extract_result {
+            Ok(result) => {
+                let laps = match crate::services::extraction_replay::derive_and_insert_laps(
+                    &conn,
+                    run_id,
+                    &image_file_id,
+                    &result_id,
+                    &result.parsed,
+                    Some(&name),
+                ) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        let _ = event_tx.send(RunEvent::ImageDone {
+                            name: name.clone(),
+                            ok: false,
+                            laps: 0,
+                        });
+                        let _ = event_tx.send(RunEvent::Log(format!("laps: {e}")));
+                        done += 1;
+                        let _ = event_tx.send(RunEvent::Progress { done, total });
+                        continue;
+                    }
+                };
+                let stats = forza_db::repositories::runs::ResultStats {
+                    model: Some(&params.model),
+                    model_instance_id: result.accepted_attempt.model_instance_id.as_deref(),
+                    input_tokens: result.accepted_attempt.input_tokens,
+                    output_tokens: result.accepted_attempt.output_tokens,
+                    reasoning_tokens: result.accepted_attempt.reasoning_tokens,
+                    total_tokens: result.accepted_attempt.total_tokens,
+                    tokens_per_second: result.accepted_attempt.tokens_per_second,
+                    time_to_first_token_s: result.accepted_attempt.time_to_first_token_s,
+                    model_load_time_s: result.accepted_attempt.model_load_time_s,
+                    duration_ms: result.accepted_attempt.duration_ms,
+                };
+                let row_id = accepted_row.unwrap_or_else(|| format!("att-{result_id}-1"));
+                let _ = forza_db::repositories::runs::finalize_result_ok(
+                    &conn,
+                    &result_id,
+                    &row_id,
+                    attempt_count,
+                    &stats,
+                );
+                let _ = conn.execute(
+                    "UPDATE extraction_results SET request_image_format=?2,
+                            request_image_mime_type=?3, request_image_width=?4,
+                            request_image_height=?5, request_image_bytes=?6
+                     WHERE id=?1",
+                    rusqlite::params![
+                        result_id,
+                        encoded.format,
+                        encoded.mime_type,
+                        i64::from(encoded.width_px),
+                        i64::from(encoded.height_px),
+                        encoded.byte_count as i64,
+                    ],
+                );
+                let _ = event_tx.send(RunEvent::ImageDone {
+                    name: name.clone(),
+                    ok: true,
+                    laps,
+                });
+            }
+            Err(err) => {
+                let _ = conn.execute(
+                    "UPDATE extraction_results SET status='error', error_type='extraction', error_message=?2, attempt_count=?3, updated_at=datetime('now') WHERE id=?1",
+                    rusqlite::params![result_id, err.to_string(), attempt_count],
+                );
+                let _ = event_tx.send(RunEvent::ImageDone {
+                    name: name.clone(),
+                    ok: false,
+                    laps: 0,
+                });
+            }
+        }
+
+        done += 1;
+        let _ = event_tx.send(RunEvent::Progress { done, total });
+    }
 }

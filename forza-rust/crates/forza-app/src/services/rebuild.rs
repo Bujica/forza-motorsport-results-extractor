@@ -7,6 +7,7 @@ use forza_db::repositories::{mark_best_laps, query_review_candidates, upsert_rev
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RebuildOutcome {
+    pub corrections_applied: usize,
     pub best_lap_winners: usize,
     pub review_inserted: usize,
     pub review_kept: usize,
@@ -14,10 +15,13 @@ pub struct RebuildOutcome {
 }
 
 /// Full rebuild pass. Order matters:
-/// 1. recompute the frontier over current lap rows;
-/// 2. refresh review candidates against the new derived state
+/// 1. apply all persisted corrections to lap_records;
+/// 2. recompute the frontier over current lap rows;
+/// 3. refresh review candidates against the new derived state
 ///    (operator-resolved cases are preserved by business key).
 pub fn rebuild(conn: &Connection, gamertag: &str) -> Result<RebuildOutcome, String> {
+    let corrections_applied =
+        forza_db::repositories::corrections::apply_all(conn).map_err(|e| e.to_string())?;
     let winners = mark_best_laps(conn, Some(gamertag)).map_err(|e| e.to_string())?;
     let candidates = query_review_candidates(conn).map_err(|e| e.to_string())?;
     let (inserted, kept, auto_resolved) =
@@ -31,6 +35,7 @@ pub fn rebuild(conn: &Connection, gamertag: &str) -> Result<RebuildOutcome, Stri
     .map_err(|e| e.to_string())?;
 
     Ok(RebuildOutcome {
+        corrections_applied,
         best_lap_winners: winners.len(),
         review_inserted: inserted,
         review_kept: kept,

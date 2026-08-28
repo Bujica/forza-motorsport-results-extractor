@@ -198,6 +198,7 @@ fn processar_revisar_corrigir_rebuild_sem_modelo() {
     assert!(dirty_cases.iter().all(|s| s != "open"), "{dirty_cases:?}");
 
     assert_eq!(outcome.best_lap_winners, 1);
+    assert!(outcome.corrections_applied <= 1);
 
     // Doctor continua saudável após todo o fluxo.
     let report =

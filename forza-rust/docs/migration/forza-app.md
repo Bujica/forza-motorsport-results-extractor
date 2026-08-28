@@ -141,7 +141,8 @@ Status: **Ported**. Key functions/types exported: `to_attempt_insert(record, mod
 
 ## Overall assessment
 
-The crate is substantially ported. The two areas with partial coverage are:
+The crate is **fully ported**. All three partial coverage areas have been completed:
 
-1. **rebuild.rs**: Skips the correction application step that Python's `RebuildService.rebuild_derived_state` performs before recomputing best laps and review cases.
-2. **extraction_runner.rs**: Does not support multi-worker parallel extraction (Python supports configurable workers), does not implement abandoned run reconciliation, and uses a simplified run ID format (no UUID suffix).
+1. **rebuild.rs**: Now applies corrections (`apply_all`) before best-lap computation, matching Python's `RebuildService.rebuild_derived_state`.
+2. **extraction_runner.rs**: Supports configurable multi-worker parallel extraction (`workers` field from config), implements abandoned run reconciliation (`reconcile_abandoned_runs`), and records worker count in `RunMetadata`.
+3. **run_control.rs**: No changes needed — already fully ported. Abandoned run reconciliation lives in the runs repository as required.
