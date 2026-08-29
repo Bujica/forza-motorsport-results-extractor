@@ -69,3 +69,6 @@ forza-rust/target/
 
 # Runtime logs (Python app writes here when run with cwd=forza/)
 /forza/output/logs/
+
+# ZCode tool session artifacts (plan files etc.)
+.zcode/
