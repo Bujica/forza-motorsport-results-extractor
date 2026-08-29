@@ -7,6 +7,7 @@
 pub mod connection;
 pub mod doctor;
 pub mod error;
+pub mod evidence;
 pub mod gui_queries;
 pub mod image_debug;
 pub mod image_detail;

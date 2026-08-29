@@ -195,41 +195,9 @@ fn python_json_string(s: &str) -> String {
     out
 }
 
-/// serde_json's default object map is a `BTreeMap`, so nested keys serialize
-/// in sorted order exactly like `sort_keys=True`.
-fn python_json_dumps(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::Null => "null".to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::String(s) => python_json_string(s),
-        serde_json::Value::Array(items) => {
-            let parts: Vec<String> = items.iter().map(python_json_dumps).collect();
-            format!("[{}]", parts.join(","))
-        }
-        serde_json::Value::Object(map) => {
-            let parts: Vec<String> = map
-                .iter()
-                .map(|(k, v)| format!("{}:{}", python_json_string(k), python_json_dumps(v)))
-                .collect();
-            format!("{{{}}}", parts.join(","))
-        }
-    }
-}
-
 fn opt_json_string(value: Option<&str>) -> String {
     match value {
         Some(s) => python_json_string(s),
-        None => "null".to_string(),
-    }
-}
-
-fn json_column(value: Option<&str>) -> String {
-    match value {
-        Some(text) => match serde_json::from_str::<serde_json::Value>(text) {
-            Ok(parsed) => python_json_dumps(&parsed),
-            Err(_) => python_json_string(text),
-        },
         None => "null".to_string(),
     }
 }
@@ -249,44 +217,7 @@ fn prompt_payload_hash(
     sha256_hex(canonical.as_bytes())
 }
 
-/// Matches `db.evidence.canonical_request_hash` (keys sorted, ASCII-escaped).
-#[allow(clippy::too_many_arguments)]
-fn canonical_request_hash(
-    request_messages_json: Option<&str>,
-    request_config_json: Option<&str>,
-    prompt_snapshot_id: Option<&str>,
-    model: Option<&str>,
-    source_file_hash: Option<&str>,
-    request_image_format: Option<&str>,
-    request_image_mime_type: Option<&str>,
-    request_image_width: Option<i64>,
-    request_image_height: Option<i64>,
-    request_image_bytes: Option<i64>,
-) -> String {
-    let opt_str = |v: Option<&str>| opt_json_string(v);
-    let opt_int = |v: Option<i64>| match v {
-        Some(n) => n.to_string(),
-        None => "null".to_string(),
-    };
-    let canonical = format!(
-        "{{\"model\":{},\"prompt_snapshot_id\":{},\"request_config_json\":{},\
-         \"request_image_bytes\":{},\"request_image_format\":{},\
-         \"request_image_height\":{},\"request_image_mime_type\":{},\
-         \"request_image_width\":{},\"request_messages_json\":{},\
-         \"source_file_hash\":{}}}",
-        opt_str(model),
-        opt_str(prompt_snapshot_id),
-        json_column(request_config_json),
-        opt_int(request_image_bytes),
-        opt_str(request_image_format),
-        opt_int(request_image_height),
-        opt_str(request_image_mime_type),
-        opt_int(request_image_width),
-        json_column(request_messages_json),
-        opt_str(source_file_hash),
-    );
-    sha256_hex(canonical.as_bytes())
-}
+use crate::evidence::canonical_request_hash;
 
 // ── SQLite integrity (sqlite_checks.py) ──────────────────────────────────────
 

@@ -285,6 +285,7 @@ pub struct AttemptInsert<'a> {
     pub request_config_json: Option<&'a str>,
     pub request_messages_json: Option<&'a str>,
     pub request_hash: Option<&'a str>,
+    pub runtime_snapshot_id: Option<&'a str>,
     pub retry_instruction_text: Option<&'a str>,
     pub raw_response: Option<&'a str>,
     pub parsed_json: Option<&'a str>,
@@ -322,7 +323,7 @@ pub fn insert_attempt_full(
              request_image_width, request_image_height, request_image_bytes,
              context_length, reasoning_mode,
              request_config_json, request_messages_json, request_hash,
-             retry_instruction_text,
+             runtime_snapshot_id, retry_instruction_text,
              raw_response, parsed_json, parse_error,
              validation_status, validation_issues_json, response_stats_json,
              input_tokens, output_tokens, reasoning_tokens, total_tokens,
@@ -330,7 +331,7 @@ pub fn insert_attempt_full(
              model_load_time_s, created_at)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,
                  ?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,
-                 ?32,?33,?34,?35,?36,?37,?38,?39,datetime('now'))",
+                 ?32,?33,?34,?35,?36,?37,?38,?39,?40,datetime('now'))",
         params![
             id,
             extraction_result_id,
@@ -356,6 +357,7 @@ pub fn insert_attempt_full(
             record.request_config_json,
             record.request_messages_json,
             record.request_hash,
+            record.runtime_snapshot_id,
             record.retry_instruction_text,
             record.raw_response,
             record.parsed_json,

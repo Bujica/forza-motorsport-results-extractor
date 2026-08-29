@@ -40,6 +40,7 @@ pub fn to_attempt_insert<'a>(record: &'a ModelAttemptRecord, model: &'a str) -> 
         request_config_json: record.request_config_json.as_deref(),
         request_messages_json: record.request_messages_json.as_deref(),
         request_hash: record.request_hash.as_deref(),
+        runtime_snapshot_id: None,
         retry_instruction_text: record.retry_instruction_text.as_deref(),
         raw_response: record.raw_response.as_deref(),
         parsed_json: record.parsed_json.as_deref(),

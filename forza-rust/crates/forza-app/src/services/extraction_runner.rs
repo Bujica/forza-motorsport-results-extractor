@@ -610,6 +610,8 @@ where
             let control_clone = Arc::clone(&control);
             let event_tx_clone = event_tx.clone();
             let process_reason_clone = process_reason.to_string();
+            let prompt_id_clone = prompt_snapshot_id.clone();
+            let snapshot_id_clone = snapshot_id.clone();
 
             handles.push(
                 std::thread::Builder::new()
@@ -629,6 +631,8 @@ where
                                 control_clone,
                                 event_tx_clone,
                                 &process_reason_clone,
+                                &prompt_id_clone,
+                                &snapshot_id_clone,
                             )
                             .await
                         });
@@ -1009,6 +1013,8 @@ async fn worker_loop(
     control: Arc<RunControl>,
     event_tx: std::sync::mpsc::Sender<RunEvent>,
     process_reason: &str,
+    prompt_snapshot_id: &str,
+    runtime_snapshot_id: &str,
 ) {
     let conn = match forza_db::open_connection(&conn_path) {
         Ok(c) => c,
@@ -1089,6 +1095,12 @@ async fn worker_loop(
                 continue;
             }
         };
+        // Every result retains the immutable prompt snapshot of its run
+        // (doctor check `result_prompt_mismatch`).
+        let _ = conn.execute(
+            "UPDATE extraction_results SET prompt_snapshot_id=?2 WHERE id=?1",
+            rusqlite::params![result_id, prompt_snapshot_id],
+        );
 
         let file_metadata = std::fs::metadata(&image.path).ok();
         let extension = image
@@ -1177,6 +1189,23 @@ async fn worker_loop(
                     insert.request_image_width = Some(i64::from(encoded.width_px));
                     insert.request_image_height = Some(i64::from(encoded.height_px));
                     insert.request_image_bytes = Some(encoded.byte_count as i64);
+                    insert.runtime_snapshot_id = Some(runtime_snapshot_id);
+                    // Recompute the canonical evidence hash from exactly the
+                    // fields persisted on the attempt row (doctor check
+                    // `request_hash_invalid`).
+                    let request_hash = forza_db::evidence::canonical_request_hash(
+                        insert.request_messages_json,
+                        insert.request_config_json,
+                        Some(prompt_snapshot_id),
+                        insert.model,
+                        Some(&image.file_hash),
+                        insert.request_image_format,
+                        insert.request_image_mime_type,
+                        insert.request_image_width,
+                        insert.request_image_height,
+                        insert.request_image_bytes,
+                    );
+                    insert.request_hash = Some(&request_hash);
                     if let Ok(row_id) = insert_attempt_full_checked(
                         &conn,
                         run_id,

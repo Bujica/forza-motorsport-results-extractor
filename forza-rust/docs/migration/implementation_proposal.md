@@ -16,6 +16,7 @@
 | **Phase 4: PDF Visual Renderer** | ✅ Complete | 2026-08-29 | ~700 lines rewritten in `pdf.rs` | 5 new renderer tests (139 total) |
 | **Phase 5: Performance Dashboard** | ⏭️ Skipped by decision | — | Python implementation will be redone upstream | — |
 | **Phase 6: Pipeline Completeness** | ✅ Complete | 2026-08-29 | ~120 lines across 5 files | 2 new pipeline tests (141 total) |
+| **Phase 7: LM Studio Completeness** | ✅ Complete | 2026-08-29 | ~200 lines across 6 files | 2 new evidence tests (143 total) |
 
 ---
 
@@ -33,7 +34,7 @@
 | forza-cli | 1 | — | — | 1 |
 | forza-gui | 5 | — | — | 6 (incl. slint) |
 
-**Tests:** 141 passing across all crates (Phase 5 skipped by decision). Gates: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` — all green.
+**Tests:** 143 passing across all crates (Phase 5 skipped by decision). Gates: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` — all green.
 
 ---
 
@@ -136,7 +137,7 @@ Port Python's `rebuild_derived_state()` from `forza/application/rebuild_service.
 **Dependencies:** Phase 1 (DB Doctor full checks), Phase 2 (abandoned run reconciliation)
 **Completed:** 2026-08-28
 **Scope:** ~100 lines across `src/main.rs` + `Cargo.toml` — all gates green, 96 tests passing
-**Follow-up (2026-08-29):** full DB doctor battery ported — `forza-db/src/doctor.rs` now runs all 63 checks from the Python modules (status vocabulary, run/input contract, image file filesystem checks, best-lap state, review/flag parent chains, artifact evidence incl. `request_hash`/prompt-snapshot recomputation, and schema drift against the shipped DDL baseline). `DoctorCheck` gained a real `count` field; `ok` semantics match Python (only error-severity checks fail the report). First real-DB run flagged 12 results missing `request_hash`/`runtime_snapshot_id`/`prompt_snapshot_id` — Rust pipeline persistence gap, to be addressed alongside Phase 3.6/pipeline work.
+**Follow-up (2026-08-29):** full DB doctor battery ported — `forza-db/src/doctor.rs` now runs all 63 checks from the Python modules (status vocabulary, run/input contract, image file filesystem checks, best-lap state, review/flag parent chains, artifact evidence incl. `request_hash`/prompt-snapshot recomputation, and schema drift against the shipped DDL baseline). `DoctorCheck` gained a real `count` field; `ok` semantics match Python (only error-severity checks fail the report). First real-DB run flagged 12 results missing `request_hash`/`runtime_snapshot_id`/`prompt_snapshot_id` — resolved in Phase 7 (evidence chain stamping); existing rows heal after a fresh run (`db-reset` + rerun).
 
 #### 3.1 Add --debug flag ✅ Done
 
@@ -237,10 +238,13 @@ Add `log_duplicate_skips()` function matching Python's logging helper for duplic
 
 ---
 
-### Phase 7: LM Studio Completeness (`forza-lmstudio`)
+### Phase 7: LM Studio Completeness (`forza-lmstudio`) ✅ Complete
 
 **Dependencies:** None (all core functionality already ported)
-**Estimated scope:** ~100 lines across existing files
+**Completed:** 2026-08-29
+**Scope:** ~200 lines across 6 files — all gates green, 143 tests passing
+
+**Implementation:** Evidence chain completed (this is what the DB doctor flagged on real data): `forza-db/src/evidence.rs` now owns `canonical_request_hash` (Python-golden tested, `json.dumps`-compatible canonicalisation incl. ensure_ascii and sorted keys); `AttemptInsert` gained `runtime_snapshot_id` persisted by `insert_attempt_full`; the extraction runner stamps every attempt with the preflight runtime snapshot id and a recomputed request hash over exactly the persisted columns, and every result row retains the run's prompt snapshot id. Integration test `full_doctor_accepts_stamped_evidence_chain` proves a stamped run passes the full doctor battery (all previously-ERRORing checks at 0). The backend's own legacy null-field request hash is overridden by the runner's canonical one. `on_attempt` callback parity already existed; mid-run reload `attempt_recheck` snapshots remain a refinement (backend does not expose reload events).
 
 #### 7.1 Persistence hooks
 
