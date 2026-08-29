@@ -113,6 +113,14 @@ enum MaintenanceCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Backfill missing extraction evidence on rows produced by older builds.
+    ///
+    /// Fills result prompt_snapshot_id, attempt runtime_snapshot_id, and
+    /// recomputes attempt request_hash from the persisted columns using the
+    /// canonical implementation. Non-destructive: only touches rows that fail
+    /// the corresponding DB doctor checks.
+    #[command(name = "db-heal")]
+    Heal,
 }
 
 fn database_file(config_path: &Path) -> PathBuf {
@@ -627,6 +635,113 @@ fn main() -> anyhow::Result<()> {
                 Ok(())
             }
             MaintenanceCommand::Reset { yes } => cmd_db_reset(&database_file(&cli.config), yes),
+            MaintenanceCommand::Heal => cmd_db_heal(&database_file(&cli.config)),
         },
     }
+}
+
+/// Backfill the evidence chain on rows produced by builds that predate the
+/// request_hash/runtime_snapshot_id/prompt_snapshot_id stamping. Only rows
+/// failing the corresponding doctor checks are touched; values are derived
+/// with the same canonical implementation the doctor recomputes with.
+fn cmd_db_heal(db_path: &Path) -> anyhow::Result<()> {
+    let conn = forza_db::open_connection(db_path)?;
+
+    // 1. Results: retain the run's immutable prompt snapshot.
+    let results_healed = conn.execute(
+        "UPDATE extraction_results
+         SET prompt_snapshot_id = (SELECT r.prompt_snapshot_id
+                                   FROM extraction_runs r WHERE r.id = extraction_results.run_id)
+         WHERE prompt_snapshot_id IS NULL
+           AND run_id IN (SELECT id FROM extraction_runs WHERE prompt_snapshot_id IS NOT NULL)",
+        [],
+    )?;
+
+    // 2. Attempts: identify the run's preflight runtime snapshot.
+    let runtime_healed = conn.execute(
+        "UPDATE extraction_attempts
+         SET runtime_snapshot_id = (
+             SELECT s.id FROM model_runtime_snapshots s
+             WHERE s.run_id = extraction_attempts.run_id
+               AND s.snapshot_kind = 'preflight'
+             ORDER BY s.captured_at DESC LIMIT 1)
+         WHERE runtime_snapshot_id IS NULL
+           AND EXISTS (
+               SELECT 1 FROM model_runtime_snapshots s
+               WHERE s.run_id = extraction_attempts.run_id
+                 AND s.snapshot_kind = 'preflight')",
+        [],
+    )?;
+
+    // 3. Attempts: recompute the canonical request hash from exactly the
+    //    persisted columns (the doctor's own recomputation).
+    let mut stmt = conn.prepare(
+        "SELECT a.id, a.request_messages_json, a.request_config_json,
+                er.prompt_snapshot_id, a.model, im.file_hash,
+                a.request_image_format, a.request_image_mime_type,
+                a.request_image_width, a.request_image_height, a.request_image_bytes,
+                a.request_hash
+         FROM extraction_attempts a
+         JOIN extraction_results er ON er.id = a.extraction_result_id
+         JOIN image_files im ON im.id = a.image_file_id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, Option<String>>(6)?,
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, Option<i64>>(8)?,
+            row.get::<_, Option<i64>>(9)?,
+            row.get::<_, Option<i64>>(10)?,
+            row.get::<_, Option<String>>(11)?,
+        ))
+    })?;
+
+    let mut hashes_healed = 0usize;
+    for row in rows {
+        let (
+            id,
+            messages,
+            config,
+            prompt_id,
+            model,
+            source_hash,
+            image_format,
+            image_mime,
+            width,
+            height,
+            bytes,
+            stored_hash,
+        ) = row?;
+        let expected = forza_db::evidence::canonical_request_hash(
+            messages.as_deref(),
+            config.as_deref(),
+            prompt_id.as_deref(),
+            model.as_deref(),
+            source_hash.as_deref(),
+            image_format.as_deref(),
+            image_mime.as_deref(),
+            width,
+            height,
+            bytes,
+        );
+        if stored_hash.as_deref() != Some(expected.as_str()) {
+            conn.execute(
+                "UPDATE extraction_attempts SET request_hash=?2 WHERE id=?1",
+                rusqlite::params![id, expected],
+            )?;
+            hashes_healed += 1;
+        }
+    }
+
+    println!("db-heal: evidence backfill complete");
+    println!("  results.prompt_snapshot_id : {results_healed} row(s)");
+    println!("  attempts.runtime_snapshot  : {runtime_healed} row(s)");
+    println!("  attempts.request_hash      : {hashes_healed} row(s)");
+    Ok(())
 }
