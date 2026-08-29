@@ -268,6 +268,188 @@ fn full_doctor_accepts_stamped_evidence_chain() {
 }
 
 #[test]
+fn doctor_accepts_python_identity_keys_with_null_lap_index_and_driver() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("identity.sqlite3");
+    upgrade(&path).unwrap();
+    let conn = forza_db::open_connection(&path).unwrap();
+
+    // NULL lap_index renders as an empty segment; driver falls back to the
+    // raw name when driver_normalized is empty (Python review_identity).
+    conn.execute_batch(
+        "INSERT INTO image_files (id, file_hash, first_seen_at, created_at, updated_at)
+         VALUES ('img-a', 'hash-a', datetime('now'), datetime('now'), datetime('now'));
+         INSERT INTO review_cases (id, case_number, reason, business_key, image_file_id, status,
+                                   outcome, created_at)
+         VALUES ('rc-1', 1, 'dirty_lap', 'dirty_lap:img-a:', 'img-a', 'open',
+                 'pending', datetime('now'));
+         INSERT INTO review_cases (id, case_number, reason, business_key, image_file_id, lap_index,
+                                   driver, driver_normalized, status, outcome,
+                                   source_file, best_lap, created_at)
+         VALUES ('rc-2', 2, 'car', 'car:::juca', NULL, NULL,
+                 'Juca', NULL, 'open', 'pending',
+                 '', '', datetime('now'));",
+    )
+    .unwrap();
+
+    let report = doctor::run_full_doctor(&conn, "current".to_string()).unwrap();
+    let check = report
+        .checks
+        .iter()
+        .find(|c| c.key == "review_business_key_not_canonical")
+        .unwrap();
+    assert_eq!(check.count, 0, "{check:?}");
+}
+
+#[test]
+fn apply_all_applies_weather_correction_without_normalized_column() {
+    use forza_db::repositories::corrections::apply_all;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("correction.sqlite3");
+    upgrade(&path).unwrap();
+    let conn = forza_db::open_connection(&path).unwrap();
+
+    conn.execute_batch(
+        "INSERT INTO extraction_runs (id, status, mode, model, created_at)
+         VALUES ('run-c', 'completed', 'normal', 'm', datetime('now'));
+         INSERT INTO image_files (id, file_hash, first_seen_at, created_at, updated_at)
+         VALUES ('img-c', 'hash-c', datetime('now'), datetime('now'), datetime('now'));
+         INSERT INTO run_inputs (id, run_id, input_order, input_path, decision, created_at)
+         VALUES (1, 'run-c', 0, 'c.png', 'process', datetime('now'));
+         INSERT INTO extraction_results (id, run_id, run_input_id, image_file_id, status,
+                                         created_at)
+         VALUES ('res-c', 'run-c', 1, 'img-c', 'ok', datetime('now'));
+         INSERT INTO lap_records (id, run_id, image_file_id, extraction_result_id,
+                                  lap_index, weather, track, created_at)
+         VALUES ('lap-1', 'run-c', 'img-c', 'res-c', 0, 'unknown', 'Fuji', datetime('now')),
+                ('lap-2', 'run-c', 'img-c', 'res-c', 1, 'unknown', 'Fuji', datetime('now'));
+         INSERT INTO review_corrections (id, stable_key, image_file_id, field,
+                                         corrected_value, created_at, updated_at)
+         VALUES ('corr-1', 'k1', 'img-c', 'weather', 'rain', datetime('now'), datetime('now'));",
+    )
+    .unwrap();
+
+    // Applies to every lap of the image (image-scoped) and must not reference
+    // the non-existent weather_normalized column.
+    let applied = apply_all(&conn).unwrap();
+    assert_eq!(applied, 2);
+    let weather: String = conn
+        .query_row(
+            "SELECT weather FROM lap_records WHERE id='lap-2'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(weather, "rain");
+}
+
+#[test]
+fn rain_candidates_flag_whole_bucket_when_rain_beats_dry() {
+    use forza_db::repositories::laps::{ReviewCase, append_rain_time_review_candidates};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("rain.sqlite3");
+    upgrade(&path).unwrap();
+    let conn = forza_db::open_connection(&path).unwrap();
+
+    conn.execute_batch(
+        "INSERT INTO extraction_runs (id, status, mode, model, created_at)
+         VALUES ('run-r', 'completed', 'normal', 'm', datetime('now'));
+         INSERT INTO image_files (id, file_hash, first_seen_at, created_at, updated_at)
+         VALUES ('i1', 'h1', datetime('now'), datetime('now'), datetime('now')),
+                ('i2', 'h2', datetime('now'), datetime('now'), datetime('now')),
+                ('i3', 'h3', datetime('now'), datetime('now'), datetime('now'));
+         INSERT INTO run_inputs (id, run_id, image_file_id, input_order, input_path,
+                                 decision, created_at)
+         VALUES (1, 'run-r', 'i1', 0, 'a.png', 'process', datetime('now')),
+                (2, 'run-r', 'i2', 1, 'b.png', 'process', datetime('now')),
+                (3, 'run-r', 'i3', 2, 'c.png', 'process', datetime('now'));
+         INSERT INTO extraction_results (id, run_id, run_input_id, image_file_id, status,
+                                         created_at)
+         VALUES ('res-r', 'run-r', 1, 'i1', 'ok', datetime('now')),
+                ('res-r2', 'run-r', 2, 'i2', 'ok', datetime('now')),
+                ('res-r3', 'run-r', 3, 'i3', 'ok', datetime('now'));
+         INSERT INTO lap_records (id, run_id, image_file_id, extraction_result_id,
+                                  lap_index, track, race_class, weather, best_lap_ms,
+                                  is_best_lap, driver, created_at)
+         VALUES ('r1', 'run-r', 'i1', 'res-r', 0, 'Fuji', 'A', 'rain', 90_000, 1, 'a', datetime('now')),
+                ('r2', 'run-r', 'i2', 'res-r2', 0, 'Fuji', 'A', 'rain', 95_000, 1, 'b', datetime('now')),
+                ('d1', 'run-r', 'i3', 'res-r3', 0, 'Fuji', 'A', 'dry', 92_000, 1, 'c', datetime('now'));",
+    )
+    .unwrap();
+
+    let mut candidates: Vec<ReviewCase> = Vec::new();
+    append_rain_time_review_candidates(&conn, &mut candidates).unwrap();
+
+    // Bucket rain minimum (90s) beats the dry minimum (92s): both rain rows
+    // are flagged, like Python's bucket-level comparison.
+    assert_eq!(candidates.len(), 2, "{candidates:?}");
+}
+
+#[test]
+fn reconcile_abandoned_run_heals_missing_results_and_counters() {
+    use forza_db::repositories::reconcile_abandoned_runs;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("abandoned.sqlite3");
+    upgrade(&path).unwrap();
+    let conn = forza_db::open_connection(&path).unwrap();
+
+    conn.execute_batch(
+        "INSERT INTO extraction_runs (id, status, mode, model, total_inputs, to_process,
+                                      created_at)
+         VALUES ('run-a', 'running', 'normal', 'model-x', 2, 2, datetime('now'));
+         INSERT INTO image_files (id, file_hash, first_seen_at, created_at, updated_at)
+         VALUES ('img-a', 'hash-a', datetime('now'), datetime('now'), datetime('now')),
+                ('img-b', 'hash-b', datetime('now'), datetime('now'), datetime('now'));
+         INSERT INTO run_inputs (id, run_id, image_file_id, input_order, input_path,
+                                 decision, created_at)
+         VALUES (1, 'run-a', 'img-a', 0, 'a.png', 'process', datetime('now')),
+                (2, 'run-a', 'img-b', 1, 'b.png', 'process', datetime('now'));
+         INSERT INTO extraction_results (id, run_id, run_input_id, image_file_id, status,
+                                         created_at)
+         VALUES ('res-a', 'run-a', 1, 'img-a', 'running', datetime('now'));",
+    )
+    .unwrap();
+
+    let recovered = reconcile_abandoned_runs(&conn).unwrap();
+    assert_eq!(recovered, 1);
+
+    let (status, code): (String, String) = conn
+        .query_row(
+            "SELECT status, operational_error_code FROM extraction_runs WHERE id='run-a'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(status, "failed");
+    assert_eq!(code, "abandoned_run_recovered");
+
+    // The process input without a result gained a cancelled result.
+    let results: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM extraction_results WHERE run_id='run-a' AND status='cancelled'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        results, 2,
+        "running result cancelled + missing result healed"
+    );
+
+    // Counters recomputed consistently (doctor check passes).
+    let report = doctor::run_full_doctor(&conn, "current".to_string()).unwrap();
+    let counters = report
+        .checks
+        .iter()
+        .find(|c| c.key == "run_counters_mismatch")
+        .unwrap();
+    assert_eq!(counters.count, 0, "{counters:?}");
+}
+
+#[test]
 fn full_doctor_short_circuits_on_noncurrent_schema() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("old-schema.sqlite3");

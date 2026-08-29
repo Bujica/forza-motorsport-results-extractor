@@ -34,7 +34,20 @@
 | forza-cli | 1 | — | — | 1 |
 | forza-gui | 5 | — | — | 6 (incl. slint) |
 
-**Tests:** 143 passing across all crates (Phase 5 skipped by decision). Gates: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` — all green.
+**Tests:** 147 passing across all crates (Phase 5 skipped by decision). Gates: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` — all green.
+
+### Audit Remediation (2026-08-29) ✅ Complete
+
+Parity audit of Phases 1–3 against the Python source found and fixed:
+1. **corrections.rs crash** — weather/race_class updates referenced non-existent `weather_normalized`/`race_class_normalized` columns; now mirrors `_apply_to_lap` (image-scoped fields apply to every lap of the image, lap-scoped require lap_index, un-dirtying strips the dirty symbol, `_bool_value` truthy-set semantics, casefold via to_lowercase).
+2. **doctor review identity NULLs** — canonical key recomputation now renders NULL lap_index as an empty segment and re-normalizes `driver_normalized or driver`, matching `review_identity.py` (no more false positives on `review_business_key_not_canonical`).
+3. **reconcile_abandoned_runs** — heals process inputs without results (creates cancelled results with `error_type='cancelled'`, message `abandoned_run_recovered`), recomputes all run counters from relational rows, finalizes the run as `failed` (Python semantics).
+4. **runner path conflict** — `upsert_image_for_run` retires the previous available owner of a `current_path` before inserting a new hash (prevents `available_image_path_conflicts` doctor errors).
+5. **upsert_image_file parity** — existing-row match now requires hash equality; UPDATE/INSERT apply file_modified_at/race_datetime/race_date/race_datetime_source/image_metadata_json; missing_at is set/cleared with file_status.
+6. **add_result** — Unicode normalization (to_lowercase vs SQLite LOWER), `strip_dirty_symbol` instead of `trim('*')`, collision-free ids (`lap-{result}-{index}`), domain `fahrenheit_to_celsius` for temp_c.
+7. **rain-time candidates** — bucket-minima comparison (best rain vs best dry per track/class) flags every rain row of the bucket, like Python.
+
+4 new regression tests cover fixes 2, 3 and 7 plus the weather-correction crash.
 
 ---
 

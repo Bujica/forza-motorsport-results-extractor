@@ -970,32 +970,43 @@ fn review_model_error_identity_checks(conn: &Connection) -> Result<Vec<DoctorChe
     ])
 }
 
+/// Mirrors `review_identity._canonical_key`: a NULL lap_index renders as an
+/// empty segment and the driver name is re-normalized from
+/// `driver_normalized or driver` with strip + casefold.
 fn canonical_business_key_for_review(
     reason: &str,
     image_file_id: &str,
-    lap_index: i64,
+    lap_index: Option<i64>,
     driver_normalized: &str,
     source_file: &str,
     best_lap: &str,
 ) -> String {
     let lap_scoped = ["dirty_lap", "car", "driver_name"];
     let image_scoped = ["track", "weather", "race_class"];
+    let lap_segment = lap_index.map(|i| i.to_string()).unwrap_or_default();
 
     if lap_scoped.contains(&reason) && !image_file_id.is_empty() {
-        format!("{reason}:{image_file_id}:{lap_index}")
+        format!("{reason}:{image_file_id}:{lap_segment}")
     } else if image_scoped.contains(&reason) && !image_file_id.is_empty() {
         format!("{reason}:{image_file_id}")
     } else if !image_file_id.is_empty() || !driver_normalized.is_empty() {
-        format!("{reason}:{image_file_id}:{lap_index}:{driver_normalized}")
+        format!("{reason}:{image_file_id}:{lap_segment}:{driver_normalized}")
     } else {
         format!("{reason}:fallback:{source_file}:{driver_normalized}:{best_lap}")
     }
 }
 
+/// Python `_normalize`: strip + casefold (approximated with `to_lowercase`,
+/// which the pipeline also uses when persisting normalized names).
+fn normalize_identity_text(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
 fn noncanonical_review_business_keys(conn: &Connection) -> Result<i64, DbError> {
     let mut stmt = conn.prepare(
-        "SELECT reason, business_key, COALESCE(image_file_id, ''), COALESCE(lap_index, 0),
-                COALESCE(driver_normalized, ''), COALESCE(source_file, ''), COALESCE(best_lap, '')
+        "SELECT reason, business_key, COALESCE(image_file_id, ''), lap_index,
+                COALESCE(driver_normalized, ''), COALESCE(driver, ''),
+                COALESCE(source_file, ''), COALESCE(best_lap, '')
          FROM review_cases",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -1003,21 +1014,38 @@ fn noncanonical_review_business_keys(conn: &Connection) -> Result<i64, DbError> 
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
-            row.get::<_, i64>(3)?,
+            row.get::<_, Option<i64>>(3)?,
             row.get::<_, String>(4)?,
             row.get::<_, String>(5)?,
             row.get::<_, String>(6)?,
+            row.get::<_, String>(7)?,
         ))
     })?;
 
     let mut count = 0i64;
     for row in rows {
-        let (reason, business_key, image_file_id, lap_index, driver, source_file, best_lap) = row?;
+        let (
+            reason,
+            business_key,
+            image_file_id,
+            lap_index,
+            driver_normalized,
+            driver,
+            source_file,
+            best_lap,
+        ) = row?;
+        // Python: _normalize(row.driver_normalized or row.driver) — an empty
+        // normalized value falls back to the raw driver name.
+        let normalized_source = if driver_normalized.is_empty() {
+            &driver
+        } else {
+            &driver_normalized
+        };
         let expected = canonical_business_key_for_review(
             &reason,
             &image_file_id,
             lap_index,
-            &driver,
+            &normalize_identity_text(normalized_source),
             &source_file,
             &best_lap,
         );

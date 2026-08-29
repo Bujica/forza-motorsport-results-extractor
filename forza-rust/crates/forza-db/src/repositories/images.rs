@@ -118,6 +118,11 @@ pub struct UpsertParams<'a> {
     pub metadata_height_px: Option<u32>,
     pub metadata_bit_depth: Option<u8>,
     pub metadata_color_mode: Option<&'a str>,
+    pub metadata_file_modified_at: Option<&'a str>,
+    pub metadata_race_datetime: Option<&'a str>,
+    pub metadata_race_date: Option<&'a str>,
+    pub metadata_race_datetime_source: Option<&'a str>,
+    pub metadata_image_metadata_json: Option<&'a str>,
 }
 
 pub struct ImageFileEntity {
@@ -140,7 +145,8 @@ pub struct ImageFileEntity {
 
 fn resolve_path_conflict(conn: &Connection, path: &str, hash: &str) -> Result<(), DbError> {
     conn.execute(
-        "UPDATE image_files SET file_status='missing', missing_at=datetime('now')
+        "UPDATE image_files
+         SET file_status='missing', missing_at=datetime('now'), updated_at=datetime('now')
          WHERE current_path=?1 AND file_hash!=?2 AND file_status='available'",
         params![path, hash],
     )?;
@@ -183,19 +189,24 @@ pub fn upsert_image_file(
         resolve_path_conflict(conn, &resolved_path, params.file_hash)?;
     }
 
+    // Python `_existing_physical_file`: an existing row only represents the
+    // same physical file when its stored hash matches; otherwise a new row is
+    // created (the old owner was retired by the path-conflict step above).
     let existing_id: Option<String> = match params.image_id {
         Some(id) => conn
-            .query_row("SELECT id FROM image_files WHERE id=?1", params![id], |r| {
-                r.get::<_, String>(0)
-            })
+            .query_row(
+                "SELECT id FROM image_files WHERE id=?1 AND file_hash=?2",
+                params![id, params.file_hash],
+                |r| r.get::<_, String>(0),
+            )
             .ok(),
         None => None,
     };
 
-    let existing_path: Option<String> = if existing_id.is_none() {
+    let existing_path: Option<String> = if existing_id.is_none() && !resolved_path.is_empty() {
         conn.query_row(
-            "SELECT id FROM image_files WHERE current_path=?1 LIMIT 1",
-            params![resolved_path.as_str()],
+            "SELECT id FROM image_files WHERE current_path=?1 AND file_hash=?2 LIMIT 1",
+            params![resolved_path.as_str(), params.file_hash],
             |r| r.get::<_, String>(0),
         )
         .ok()
@@ -221,12 +232,8 @@ pub fn upsert_image_file(
     let existing = existing_id.or(existing_path);
 
     if let Some(existing) = existing {
-        let file_status = if !resolved_path.is_empty() && std::fs::metadata(&resolved_path).is_ok()
-        {
-            "available".to_string()
-        } else {
-            "missing".to_string()
-        };
+        let path_exists = !resolved_path.is_empty() && std::fs::metadata(&resolved_path).is_ok();
+        let file_status = if path_exists { "available" } else { "missing" };
 
         let mut stmt = conn.prepare(
             "UPDATE image_files SET
@@ -241,9 +248,16 @@ pub fn upsert_image_file(
                 bit_depth=COALESCE(?10, bit_depth),
                 color_mode=COALESCE(?11, color_mode),
                 duplicate_of_image_file_id=COALESCE(?12, duplicate_of_image_file_id),
-                file_status=?14,
+                file_modified_at=COALESCE(?13, file_modified_at),
+                race_datetime=COALESCE(?14, race_datetime),
+                race_date=COALESCE(?15, race_date),
+                race_datetime_source=COALESCE(?16, race_datetime_source),
+                image_metadata_json=COALESCE(?17, image_metadata_json),
+                file_status=?19,
+                missing_at=CASE WHEN ?19 = 'available' THEN NULL
+                                ELSE COALESCE(missing_at, datetime('now')) END,
                 updated_at=datetime('now')
-             WHERE id=?13",
+             WHERE id=?18",
         )?;
 
         stmt.execute(params![
@@ -258,8 +272,13 @@ pub fn upsert_image_file(
             params.metadata_bit_depth.map(|v| v as i32),
             params.metadata_color_mode,
             params.duplicate_of_image_file_id,
-            &file_status,
+            params.metadata_file_modified_at,
+            params.metadata_race_datetime,
+            params.metadata_race_date,
+            params.metadata_race_datetime_source,
+            params.metadata_image_metadata_json,
             &existing,
+            file_status,
         ])?;
 
         let mut stmt_get = conn.prepare(
@@ -297,11 +316,14 @@ pub fn upsert_image_file(
                 (id, file_hash, current_name, current_path, semantic_name,
                  size_bytes, width_px, height_px, bit_depth, color_mode,
                  image_format, mime_type, file_status, best_lap_status,
-                 duplicate_of_image_file_id, first_seen_at, last_seen_at,
-                     created_at, updated_at)
+                 duplicate_of_image_file_id,
+                 file_modified_at, race_datetime, race_date, race_datetime_source,
+                 image_metadata_json,
+                 first_seen_at, last_seen_at, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                     'available', 'pending', ?13, datetime('now'), datetime('now'),
-                     datetime('now'), datetime('now'))",
+                     'available', COALESCE(?13, 'pending'), ?14,
+                     ?15, ?16, ?17, ?18, ?19,
+                     datetime('now'), datetime('now'), datetime('now'), datetime('now'))",
             params![
                 id,
                 params.file_hash,
@@ -315,7 +337,13 @@ pub fn upsert_image_file(
                 params.metadata_color_mode,
                 params.metadata_format,
                 params.metadata_mime_type,
+                params.best_lap_status,
                 params.duplicate_of_image_file_id,
+                params.metadata_file_modified_at,
+                params.metadata_race_datetime,
+                params.metadata_race_date,
+                params.metadata_race_datetime_source,
+                params.metadata_image_metadata_json,
             ],
         )?;
 

@@ -219,6 +219,16 @@ fn upsert_image_for_run(
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
+    // A different file arriving at an existing path retires the previous
+    // available owner first (Python upsert path-conflict handling), so two
+    // available rows never share one current_path.
+    conn.execute(
+        "UPDATE image_files
+         SET file_status='missing', missing_at=datetime('now'), updated_at=datetime('now')
+         WHERE current_path=?1 AND file_hash!=?2 AND file_status='available'",
+        rusqlite::params![path.to_string_lossy(), file_hash],
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO image_files
             (id, file_hash, current_name, current_path, size_bytes,

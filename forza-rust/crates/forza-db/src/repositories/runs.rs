@@ -555,29 +555,56 @@ pub fn reconcile_abandoned_runs(conn: &Connection) -> Result<usize, DbError> {
 }
 
 fn reconcile_one_abandoned_run(conn: &Connection, run_id: &str) -> Result<(), DbError> {
-    // Update all pending/running extraction_results to cancelled.
+    const ERROR: &str = "abandoned_run_recovered";
+
+    // Cancel results left pending/running by the crashed process.
     conn.execute(
         "UPDATE extraction_results
-         SET status='cancelled', updated_at=datetime('now')
+         SET status='cancelled', error_type='cancelled', error_message=?2,
+             updated_at=datetime('now')
          WHERE run_id=?1 AND status IN ('pending', 'running')",
-        params![run_id],
+        params![run_id, ERROR],
     )?;
 
-    // Update all running extraction_results to cancelled.
+    // Heal process inputs that never produced a result (Python creates a
+    // cancelled result so `run_inputs_process_without_one_result` stays clean).
     conn.execute(
-        "UPDATE extraction_results
-         SET status='cancelled', updated_at=datetime('now')
-         WHERE run_id=?1 AND status='running'",
+        "INSERT INTO extraction_results
+            (id, run_id, run_input_id, image_file_id, status, error_type,
+             error_message, model, prompt_snapshot_id, created_at, updated_at)
+         SELECT 'res-recovered-' || ri.id, ri.run_id, ri.id, ri.image_file_id,
+                'cancelled', 'cancelled', ?2, r.model, r.prompt_snapshot_id,
+                datetime('now'), datetime('now')
+         FROM run_inputs ri
+         JOIN extraction_runs r ON r.id = ri.run_id
+         LEFT JOIN extraction_results er ON er.run_input_id = ri.id
+         WHERE ri.run_id = ?1 AND ri.decision = 'process' AND er.id IS NULL",
+        params![run_id, ERROR],
+    )?;
+
+    // Recompute the stored counters from relational rows (Python run_metrics).
+    conn.execute(
+        "UPDATE extraction_runs SET
+            total_inputs = (SELECT COUNT(*) FROM run_inputs WHERE run_id=?1),
+            to_process = (SELECT COUNT(*) FROM run_inputs WHERE run_id=?1 AND decision='process'),
+            skipped = (SELECT COUNT(*) FROM run_inputs WHERE run_id=?1
+                       AND decision NOT IN ('process', 'duplicate')),
+            duplicate_count = (SELECT COUNT(*) FROM run_inputs WHERE run_id=?1 AND decision='duplicate'),
+            processed = (SELECT COUNT(*) FROM extraction_results WHERE run_id=?1),
+            succeeded = (SELECT COUNT(*) FROM extraction_results WHERE run_id=?1 AND status='ok'),
+            failed = (SELECT COUNT(*) FROM extraction_results WHERE run_id=?1 AND status='error'),
+            review_case_count = (SELECT COUNT(*) FROM review_cases WHERE run_id=?1 AND status='open')
+         WHERE id=?1",
         params![run_id],
     )?;
 
-    // Set operational error code on the run entity.
+    // Finalize the run as failed with the recovered error identity.
     conn.execute(
         "UPDATE extraction_runs
-         SET status='cancelled', operational_error_code='abandoned',
-             finished_at=datetime('now'), updated_at=datetime('now')
+         SET status='failed', operational_error_code=?2, operational_error_message=?2,
+             finished_at=datetime('now')
          WHERE id=?1 AND status='running'",
-        params![run_id],
+        params![run_id, ERROR],
     )?;
 
     Ok(())

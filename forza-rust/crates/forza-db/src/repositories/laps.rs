@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use crate::error::DbError;
+use forza_domain::lap::strip_dirty_symbol;
 use rusqlite::{Connection, params};
 
 /// Clean-flat export row for output artifacts (CSV/PDF).
@@ -269,8 +270,15 @@ pub fn add_result(
             continue;
         }
 
-        let id = format!("lap-{}-{}", image_file_id, entry.lap_index);
-        let best_lap_clean = entry.best_lap.trim_start_matches('*').to_string();
+        // Id includes the result so reprocessing an image under a new result
+        // never collides on the primary key (Python uses uuid4 for the same
+        // reason; the (result, lap_index) guard keeps reruns idempotent).
+        let id = format!("lap-{}-{}", extraction_result_id, entry.lap_index);
+        let best_lap_clean = strip_dirty_symbol(&entry.best_lap);
+        let driver_normalized = entry.driver.trim().to_lowercase();
+        let car_normalized = entry.car.trim().to_lowercase();
+        let track_normalized = entry.track.trim().to_lowercase();
+        let temp_c = forza_domain::lap::fahrenheit_to_celsius(entry.temp_f, 40.0, 140.0);
 
         conn.execute(
             "INSERT INTO lap_records
@@ -278,9 +286,9 @@ pub fn add_result(
                  driver, driver_normalized, car, car_normalized,
                  race_class, track, track_normalized, weather, temp_f, temp_c,
                  best_lap, best_lap_ms, dirty, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, LOWER(?6), ?7, LOWER(?7),
-                     ?8, ?9, LOWER(?9), ?10, ?11, ROUND((?11 - 32.0) * 5.0 / 9.0, 1),
-                     ?12, ?13, ?14, datetime('now'))",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                     ?10, ?11, ?12, ?13, ?14, ?15,
+                     ?16, ?17, ?18, datetime('now'))",
             params![
                 id,
                 run_id,
@@ -288,11 +296,15 @@ pub fn add_result(
                 &extraction_result_id,
                 entry.lap_index,
                 &entry.driver,
+                driver_normalized,
                 &entry.car,
+                car_normalized,
                 &entry.race_class,
                 &entry.track,
+                track_normalized,
                 &entry.weather,
                 entry.temp_f,
+                temp_c,
                 best_lap_clean,
                 entry.best_lap_ms,
                 if entry.dirty { 1 } else { 0 },
@@ -357,11 +369,16 @@ pub fn append_rain_time_review_candidates(
     let laps: Vec<(String, String, String, i64, String, i64, String)> =
         rows.collect::<Result<_, _>>()?;
 
-    let mut best_by_key: HashMap<(String, String), i64> = HashMap::new();
+    // Python compares the bucket minima (best rain vs best dry on the same
+    // track/class) and then flags EVERY rain best-lap row of that bucket.
+    let mut best_by_key: HashMap<(String, String, String), i64> = HashMap::new();
     for (track, race_class, weather, best_lap_ms, _, _, _) in &laps {
-        let key = (track.clone(), race_class.clone());
-        if weather.eq_ignore_ascii_case("dry") {
-            best_by_key.entry(key).or_insert(*best_lap_ms);
+        let key = (track.clone(), race_class.clone(), weather.clone());
+        match best_by_key.get(&key) {
+            Some(current) if *current <= *best_lap_ms => {}
+            _ => {
+                best_by_key.insert(key, *best_lap_ms);
+            }
         }
     }
 
@@ -369,9 +386,12 @@ pub fn append_rain_time_review_candidates(
         if !weather.eq_ignore_ascii_case("rain") {
             continue;
         }
-        let key = (track.clone(), race_class.clone());
-        if let Some(&dry_best) = best_by_key.get(&key)
-            && *best_lap_ms < dry_best
+        let rain_key = (track.clone(), race_class.clone(), "rain".to_string());
+        let dry_key = (track.clone(), race_class.clone(), "dry".to_string());
+        let best_rain = best_by_key.get(&rain_key);
+        let best_dry = best_by_key.get(&dry_key);
+        if let (Some(&best_rain), Some(&best_dry)) = (best_rain, best_dry)
+            && best_rain < best_dry
         {
             candidates.push(ReviewCase {
                 reason: "weather".to_string(),
