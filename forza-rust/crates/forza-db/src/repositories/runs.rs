@@ -459,32 +459,26 @@ pub fn mark_run_running(conn: &Connection, run_id: &str) -> Result<(), DbError> 
 
 /// Finalize a run with outcome counters.
 #[allow(clippy::too_many_arguments)]
-pub fn complete_run(
-    conn: &Connection,
-    run_id: &str,
-    status: &str,
-    total_inputs: i64,
-    processed: i64,
-    succeeded: i64,
-    failed: i64,
-    skipped: i64,
-    duplicate_count: i64,
-) -> Result<(), DbError> {
+/// Finalize a run and recompute every stored counter from the relational
+/// rows (Python  semantics): run_inputs decisions for the input
+/// counters, extraction_results statuses for the result counters, and open
+/// review cases for .
+pub fn complete_run(conn: &Connection, run_id: &str, status: &str) -> Result<(), DbError> {
     conn.execute(
-        "UPDATE extraction_runs SET status=?2, finished_at=datetime('now'),
-            total_inputs=?3, to_process=?3, processed=?4, succeeded=?5,
-            failed=?6, skipped=?7, duplicate_count=?8
+        "UPDATE extraction_runs SET
+            status=?2,
+            finished_at=datetime('now'),
+            total_inputs = (SELECT COUNT(*) FROM run_inputs WHERE run_id=?1),
+            to_process = (SELECT COUNT(*) FROM run_inputs WHERE run_id=?1 AND decision='process'),
+            skipped = (SELECT COUNT(*) FROM run_inputs WHERE run_id=?1
+                       AND decision NOT IN ('process', 'duplicate')),
+            duplicate_count = (SELECT COUNT(*) FROM run_inputs WHERE run_id=?1 AND decision='duplicate'),
+            processed = (SELECT COUNT(*) FROM extraction_results WHERE run_id=?1),
+            succeeded = (SELECT COUNT(*) FROM extraction_results WHERE run_id=?1 AND status='ok'),
+            failed = (SELECT COUNT(*) FROM extraction_results WHERE run_id=?1 AND status='error'),
+            review_case_count = (SELECT COUNT(*) FROM review_cases WHERE run_id=?1 AND status='open')
          WHERE id=?1",
-        params![
-            run_id,
-            status,
-            total_inputs,
-            processed,
-            succeeded,
-            failed,
-            skipped,
-            duplicate_count
-        ],
+        params![run_id, status],
     )?;
     Ok(())
 }

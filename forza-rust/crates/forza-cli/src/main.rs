@@ -658,6 +658,29 @@ fn cmd_db_heal(db_path: &Path) -> anyhow::Result<()> {
     //    rows).
     let reconciled = forza_db::repositories::reconcile_abandoned_runs(&conn).unwrap_or(0);
 
+    // 0b. Recompute stored counters for every finished run (older builds
+    //     wrote total_inputs into to_process; Python run_metrics derives all
+    //     counters from relational rows).
+    let counters_healed = conn.execute(
+        "UPDATE extraction_runs SET
+            total_inputs = (SELECT COUNT(*) FROM run_inputs WHERE run_id=extraction_runs.id),
+            to_process = (SELECT COUNT(*) FROM run_inputs WHERE run_id=extraction_runs.id
+                          AND decision='process'),
+            skipped = (SELECT COUNT(*) FROM run_inputs WHERE run_id=extraction_runs.id
+                       AND decision NOT IN ('process', 'duplicate')),
+            duplicate_count = (SELECT COUNT(*) FROM run_inputs WHERE run_id=extraction_runs.id
+                               AND decision='duplicate'),
+            processed = (SELECT COUNT(*) FROM extraction_results WHERE run_id=extraction_runs.id),
+            succeeded = (SELECT COUNT(*) FROM extraction_results WHERE run_id=extraction_runs.id
+                         AND status='ok'),
+            failed = (SELECT COUNT(*) FROM extraction_results WHERE run_id=extraction_runs.id
+                      AND status='error'),
+            review_case_count = (SELECT COUNT(*) FROM review_cases WHERE run_id=extraction_runs.id
+                                 AND status='open')
+         WHERE status != 'running'",
+        [],
+    )?;
+
     // 1. Results: retain the run's immutable prompt snapshot.
     let results_healed = conn.execute(
         "UPDATE extraction_results
@@ -752,6 +775,7 @@ fn cmd_db_heal(db_path: &Path) -> anyhow::Result<()> {
 
     println!("db-heal: evidence backfill complete");
     println!("  abandoned runs reconciled  : {reconciled} run(s)");
+    println!("  run counters recomputed    : {counters_healed} run(s)");
     println!("  results.prompt_snapshot_id : {results_healed} row(s)");
     println!("  attempts.runtime_snapshot  : {runtime_healed} row(s)");
     println!("  attempts.request_hash      : {hashes_healed} row(s)");

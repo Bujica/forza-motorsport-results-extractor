@@ -576,7 +576,7 @@ where
         // Spawn preflight snapshot on the main connection (single call).
         let snapshot = {
             let backend = LMStudioBackend::new(params.backend_config(), Default::default())
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| fail_run_preflight(&conn, &run_id, &e.to_string()))?;
             let desired = DesiredLoadConfig {
                 context_length: params.context_length,
                 eval_batch_size: None,
@@ -587,7 +587,13 @@ where
             backend
                 .preflight_snapshot(&desired)
                 .await
-                .map_err(|e| e.to_string())?
+                .map_err(|_| {
+                    fail_run_preflight(
+                        &conn,
+                        &run_id,
+                        "LM Studio is not reachable — start LM Studio (with the server on) and try again",
+                    )
+                })?
         };
         let snapshot_id = format!("runtime-{run_id}-preflight");
         let insert = RuntimeSnapshotInsert {
@@ -716,7 +722,13 @@ where
             let snapshot = backend
                 .preflight_snapshot(&desired)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| {
+                    fail_run_preflight(
+                        &conn,
+                        &run_id,
+                        "LM Studio is not reachable — start LM Studio (with the server on) and try again",
+                    )
+                })?;
             let insert = RuntimeSnapshotInsert {
                 endpoint: &snapshot.endpoint,
                 configured_model: &snapshot.configured_model,
@@ -956,18 +968,7 @@ where
     // ── Run counters + derived refresh ────────────────────────────────────
     let cancelled = control.is_cancelled();
     let final_status = if cancelled { "cancelled" } else { "completed" };
-    complete_run(
-        &conn,
-        &run_id,
-        final_status,
-        plan.total as i64,
-        processed as i64,
-        succeeded as i64,
-        failed as i64,
-        (plan.existing_images.len() + plan.skipped_images.len()) as i64,
-        plan.duplicate_count() as i64,
-    )
-    .map_err(|e| e.to_string())?;
+    complete_run(&conn, &run_id, final_status).map_err(|e| e.to_string())?;
 
     // Best laps reflect the new evidence immediately.
     mark_best_laps(&conn, Some(&params.gamertag)).map_err(|e| e.to_string())?;
@@ -1026,6 +1027,20 @@ fn stamp_result_prompt(conn: &Connection, result_id: &str, prompt_snapshot_id: &
         "UPDATE extraction_results SET prompt_snapshot_id=?2 WHERE id=?1",
         rusqlite::params![result_id, prompt_snapshot_id],
     );
+}
+
+/// Finalize a run whose LM Studio preflight failed: mark it failed with the
+/// canonical operational error so it never lingers as running (Python
+/// `fail_preflight_run`). Returns the propagated error message.
+fn fail_run_preflight(conn: &Connection, run_id: &str, detail: &str) -> String {
+    let message = format!("lmstudio_preflight_failed: {detail}");
+    let _ = complete_run(conn, run_id, "failed");
+    let _ = conn.execute(
+        "UPDATE extraction_runs SET operational_error_code='lmstudio_preflight_failed',
+                operational_error_message=?2 WHERE id=?1",
+        rusqlite::params![run_id, message],
+    );
+    message
 }
 
 fn path_key(path: &std::path::Path) -> String {
