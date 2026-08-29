@@ -54,7 +54,7 @@ fn doctor_detects_foreign_key_violations_when_keys_off_writes_happen() {
         report
             .checks
             .iter()
-            .any(|c| c.key == "foreign_key_check" && !c.ok),
+            .any(|c| c.key == "foreign_key_violations" && !c.ok),
         "{report:?}"
     );
 }

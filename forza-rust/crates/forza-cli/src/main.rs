@@ -124,8 +124,10 @@ fn database_file(config_path: &Path) -> PathBuf {
 
 /// Count rows in a table; returns 0 if the table does not exist.
 fn table_count(conn: &Connection, name: &str) -> i64 {
-    conn.query_row(&format!("SELECT COUNT(*) FROM \"{name}\""), [], |r| r.get(0))
-        .unwrap_or(0)
+    conn.query_row(&format!("SELECT COUNT(*) FROM \"{name}\""), [], |r| {
+        r.get(0)
+    })
+    .unwrap_or(0)
 }
 
 fn cmd_config_check(config_path: &Path) -> anyhow::Result<()> {
@@ -185,7 +187,7 @@ fn cmd_db_status(db_path: &Path) -> anyhow::Result<()> {
     let external_record_imports = table_count(&conn, "external_record_imports");
     let external_lap_records = table_count(&conn, "external_lap_records");
 
-    println!("");
+    println!();
     println!("Relational store");
     println!("  image_files         : {image_files}");
     println!("  extraction_runs     : {extraction_runs}");
@@ -211,10 +213,7 @@ fn cmd_db_doctor(db_path: &Path, json: bool) -> anyhow::Result<()> {
         doctor::doctor_on_path(db_path)?
     } else {
         // Schema present — run the full battery.
-        doctor::run_full_doctor(
-            &forza_db::open_connection(db_path)?,
-            schema_label,
-        )?
+        doctor::run_full_doctor(&forza_db::open_connection(db_path)?, schema_label)?
     };
     if json {
         let checks: Vec<_> = report
@@ -228,7 +227,7 @@ fn cmd_db_doctor(db_path: &Path, json: bool) -> anyhow::Result<()> {
                         doctor::DoctorSeverity::Warning => "warning",
                         doctor::DoctorSeverity::Info => "info",
                     },
-                    "count": if check.ok { 0 } else { 1 },
+                    "count": check.count,
                     "detail": check.detail,
                     "ok": check.ok,
                 })
@@ -257,8 +256,12 @@ fn cmd_db_doctor(db_path: &Path, json: bool) -> anyhow::Result<()> {
                     doctor::DoctorSeverity::Info => "INFO",
                 }
             };
-            let count = if check.ok { 0 } else { 1 };
-            println!("[{status}] {key}: {count} - {detail}", key = check.key, detail = check.detail);
+            let count = check.count;
+            println!(
+                "[{status}] {key}: {count} - {detail}",
+                key = check.key,
+                detail = check.detail
+            );
         }
     }
     if !report.ok {
@@ -293,7 +296,10 @@ fn ensure_exclusive_access(db_path: &Path) -> anyhow::Result<()> {
             if msg.contains("not a database") || msg.contains("file is not a database") {
                 // Not a valid SQLite file — resetting is the legitimate fix.
                 Ok(())
-            } else if msg.contains("database is locked") || msg.contains("locked") || msg.contains("BUSY") {
+            } else if msg.contains("database is locked")
+                || msg.contains("locked")
+                || msg.contains("BUSY")
+            {
                 Err(anyhow::anyhow!(
                     "Refusing to reset database: {} appears to be in use by another connection (database locked). Close any running Forza processes (GUI, CLI runs, or scripts) and try again.",
                     db_path.display()

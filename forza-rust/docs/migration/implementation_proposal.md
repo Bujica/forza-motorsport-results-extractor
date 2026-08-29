@@ -12,7 +12,7 @@
 |-------|--------|---------------|-----------------|-------------|
 | **Phase 1: Database Completeness** | ✅ Complete | 2026-08-27 | ~679 lines across 4 files | — (existing tests pass) |
 | **Phase 2: Application Layer Completeness** | ✅ Complete | 2026-08-28 | ~350 lines across 4 files | — (existing 86 tests pass) |
-| **Phase 3: CLI Completeness** | ✅ Complete | 2026-08-28 | ~100 lines across 2 files | — (existing 96 tests pass) |
+| **Phase 3: CLI Completeness** | ✅ Complete | 2026-08-28 | ~100 lines across 2 files + full doctor battery (~1,100 lines, 2026-08-29) | 5 new doctor tests (101 total) |
 
 ---
 
@@ -30,7 +30,7 @@
 | forza-cli | 1 | — | — | 1 |
 | forza-gui | 5 | — | — | 6 (incl. slint) |
 
-**Tests:** 96 passing across all crates. Gates: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` — all green.
+**Tests:** 101 passing across all crates. Gates: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` — all green.
 
 ---
 
@@ -133,6 +133,7 @@ Port Python's `rebuild_derived_state()` from `forza/application/rebuild_service.
 **Dependencies:** Phase 1 (DB Doctor full checks), Phase 2 (abandoned run reconciliation)
 **Completed:** 2026-08-28
 **Scope:** ~100 lines across `src/main.rs` + `Cargo.toml` — all gates green, 96 tests passing
+**Follow-up (2026-08-29):** full DB doctor battery ported — `forza-db/src/doctor.rs` now runs all 63 checks from the Python modules (status vocabulary, run/input contract, image file filesystem checks, best-lap state, review/flag parent chains, artifact evidence incl. `request_hash`/prompt-snapshot recomputation, and schema drift against the shipped DDL baseline). `DoctorCheck` gained a real `count` field; `ok` semantics match Python (only error-severity checks fail the report). First real-DB run flagged 12 results missing `request_hash`/`runtime_snapshot_id`/`prompt_snapshot_id` — Rust pipeline persistence gap, to be addressed alongside Phase 3.6/pipeline work.
 
 #### 3.1 Add --debug flag ✅ Done
 

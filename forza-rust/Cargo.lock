@@ -1697,6 +1697,8 @@ dependencies = [
  "r2d2",
  "r2d2_sqlite",
  "rusqlite",
+ "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.20",
 ]

@@ -21,11 +21,12 @@ const RUNTIME_MAX_ATTEMPTS: usize = 5;
 /// management across all backend instances.  Matches Python's
 /// `_model_lock` / `_MODEL_LOCKS` pattern so that concurrent workers
 /// cannot unload each other's loaded instances.
-static MODEL_LOCKS: std::sync::LazyLock<
-    tokio::sync::Mutex<
-        std::collections::HashMap<(String, String), std::sync::Arc<tokio::sync::Mutex<()>>>,
-    >,
-> = std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::HashMap::new()));
+type ModelLockMap = tokio::sync::Mutex<
+    std::collections::HashMap<(String, String), std::sync::Arc<tokio::sync::Mutex<()>>>,
+>;
+
+static MODEL_LOCKS: std::sync::LazyLock<ModelLockMap> =
+    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::HashMap::new()));
 
 async fn model_lock(api_base: &str, model: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
     let mut locks = MODEL_LOCKS.lock().await;
