@@ -8,6 +8,17 @@
 
 pub mod services;
 
+/// Build identity of the whole workspace binary set: package version, git
+/// hash, and build time. CLI , the GUI title, and every run row
+/// carry this so a database always reveals which binary produced it.
+pub const APP_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    "+g",
+    env!("APP_GIT_HASH"),
+    " built ",
+    env!("APP_BUILD_TIME")
+);
+
 pub use services::{
     BestLapEntry, DoctorSummary, ImageDebugFilter, ImageDetailData, ImageInventoryEntry,
     ImageInventoryFilter, ImageInventoryOptions, ImageInventoryService, RebuildOutcome,

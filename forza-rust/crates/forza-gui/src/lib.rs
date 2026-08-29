@@ -122,6 +122,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     }
 
     let main = MainWindow::new()?;
+    main.set_app_version(forza_app::APP_VERSION.into());
     let inventory_model = Rc::new(VecModel::<ImageItem>::from(Vec::new()));
     main.set_images(ModelRc::from(inventory_model.clone()));
     LIST_MODEL.with(|slot| *slot.borrow_mut() = Some(inventory_model.clone()));
@@ -827,8 +828,8 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 w.set_run_percent(0.0);
             }
             append_run_log(format!(
-                "[start] model={} force={} retry_errors={}",
-                params.model, params.force, params.retry_errors
+                "[start] {} model={} force={} retry_errors={}",
+                forza_app::APP_VERSION, params.model, params.force, params.retry_errors
             ));
 
             let ui = ui.clone();

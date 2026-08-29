@@ -109,7 +109,8 @@ export struct DebugResultComboItem {
 }
 
 export component MainWindow inherits Window {
-    title: "Forza Motorsport Results Extractor";
+    in-out property <string> app-version;
+    title: "Forza Motorsport Results Extractor — " + root.app-version;
     min-width: 1000px;
     min-height: 620px;
     preferred-width: 1240px;

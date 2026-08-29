@@ -7,9 +7,13 @@ use forza_db::doctor;
 use forza_db::migration::{SchemaStatus, schema_status, upgrade};
 use rusqlite::Connection;
 
+/// Build identity shared with the GUI and stamped into every run row.
+pub const APP_VERSION: &str = forza_app::APP_VERSION;
+
 #[derive(Parser)]
 #[command(
     name = "forza",
+    version = APP_VERSION,
     about = "Forza Motorsport Results Extractor — extract best laps from screenshots and export clean reports"
 )]
 struct Cli {
@@ -251,6 +255,7 @@ fn cmd_db_doctor(db_path: &Path, json: bool) -> anyhow::Result<()> {
             }))?
         );
     } else {
+        println!("forza {APP_VERSION}");
         println!("Database: {}", db_path.display());
         println!("Schema:   {}", report.schema_status);
         println!("OK:       {}", report.ok);

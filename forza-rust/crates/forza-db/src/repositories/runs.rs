@@ -36,6 +36,8 @@ pub struct RunMetadata<'a> {
     pub max_retries: i64,
     pub timeout_connect: i64,
     pub timeout_read: i64,
+    /// Free-form provenance JSON (the Rust pipeline stamps the app version).
+    pub config_extra_json: Option<&'a str>,
 }
 
 pub struct RuntimeSnapshotInsert<'a> {
@@ -174,7 +176,7 @@ pub fn update_run_metadata(
             workers=?7, image_format=?8, max_width=?9, encode_quality=?10,
             grayscale=?11, context_length=?12, reasoning_mode=?13,
             max_completion_tokens=?14, temperature=?15, max_retries=?16,
-            timeout_connect=?17, timeout_read=?18
+            timeout_connect=?17, timeout_read=?18, config_extra_json=?19
          WHERE id=?1",
         params![
             run_id,
@@ -195,6 +197,7 @@ pub fn update_run_metadata(
             metadata.max_retries,
             metadata.timeout_connect,
             metadata.timeout_read,
+            metadata.config_extra_json,
         ],
     )?;
     Ok(())

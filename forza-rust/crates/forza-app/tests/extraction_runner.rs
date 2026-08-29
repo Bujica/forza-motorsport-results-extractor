@@ -39,6 +39,7 @@ fn params(db: &std::path::Path, input: &std::path::Path) -> RunParams {
         encode_quality: 85,
         image_format: "png".into(),
         grayscale: true,
+        app_version: "test".to_string(),
     }
 }
 

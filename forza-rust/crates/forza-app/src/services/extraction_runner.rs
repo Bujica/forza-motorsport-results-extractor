@@ -104,6 +104,8 @@ pub struct RunParams {
     pub encode_quality: u8,
     pub image_format: String,
     pub grayscale: bool,
+    /// Build identity of the calling binary, persisted on the run row.
+    pub app_version: String,
 }
 
 impl RunParams {
@@ -113,6 +115,7 @@ impl RunParams {
             input_dir: cfg.input_dir.clone(),
             gamertag: cfg.gamertag.clone(),
             force,
+            app_version: crate::APP_VERSION.to_string(),
             retry_errors: false,
             selected_image_file_ids: None,
             max_images: None,
@@ -484,6 +487,7 @@ where
             max_retries: i64::from(params.max_retries),
             timeout_connect: params.timeout_connect as i64,
             timeout_read: params.timeout_read as i64,
+            config_extra_json: Some(&params.app_version),
         },
     )
     .map_err(|e| e.to_string())?;
@@ -705,12 +709,14 @@ where
             offload_kv_cache_to_gpu: true,
         };
 
+        // Deterministic preflight snapshot id — the row itself is only
+        // created when the run actually reaches the model.
+        let snapshot_id = format!("runtime-{run_id}-preflight");
         if total_new > 0 {
             let snapshot = backend
                 .preflight_snapshot(&desired)
                 .await
                 .map_err(|e| e.to_string())?;
-            let snapshot_id = format!("runtime-{run_id}-preflight");
             let insert = RuntimeSnapshotInsert {
                 endpoint: &snapshot.endpoint,
                 configured_model: &snapshot.configured_model,
@@ -771,6 +777,7 @@ where
                 input_order,
             )
             .map_err(|e| e.to_string())?;
+            stamp_result_prompt(&conn, &result_id, &prompt_snapshot_id);
             let file_metadata = std::fs::metadata(&image.path).ok();
             let extension = image
                 .path
@@ -850,23 +857,18 @@ where
                         Some(&image.file_hash),
                         &mut |record: &ModelAttemptRecord| {
                             attempt_count += 1;
-                            let mut insert = crate::services::extraction_replay::to_attempt_insert(
-                                record,
-                                &model_name,
-                            );
-                            insert.request_image_format = Some(&encoded.format);
-                            insert.request_image_mime_type = Some(&encoded.mime_type);
-                            insert.request_image_width = Some(i64::from(encoded.width_px));
-                            insert.request_image_height = Some(i64::from(encoded.height_px));
-                            insert.request_image_bytes = Some(encoded.byte_count as i64);
-                            if let Ok(row_id) = insert_attempt_full_checked(
+                            if let Some(row_id) = persist_attempt_with_evidence(
                                 conn_ref,
                                 &run_id_ref,
                                 &image_id,
                                 &result_id_ref,
-                                &insert,
-                            ) && record.accepted
-                            {
+                                record,
+                                &encoded,
+                                &prompt_snapshot_id,
+                                &snapshot_id,
+                                &image.file_hash,
+                                &model_name,
+                            ) {
                                 accepted_row = Some(row_id);
                             }
                         },
@@ -971,6 +973,59 @@ where
     mark_best_laps(&conn, Some(&params.gamertag)).map_err(|e| e.to_string())?;
 
     Ok((processed, succeeded, failed, 0, 0))
+}
+
+/// Persist one backend attempt with the full evidence chain: encoded-image
+/// fields, the run's preflight runtime snapshot, and the canonical request
+/// hash recomputed from exactly the persisted columns. Both the sequential
+/// loop and the parallel workers go through here so the two paths cannot
+/// diverge (audit lesson: the sequential path silently missed the stamping).
+/// Returns the accepted attempt row id when the attempt was accepted.
+#[allow(clippy::too_many_arguments)]
+fn persist_attempt_with_evidence(
+    conn: &Connection,
+    run_id: &str,
+    image_file_id: &str,
+    result_id: &str,
+    record: &ModelAttemptRecord,
+    encoded: &forza_pipeline::EncodedImage,
+    prompt_snapshot_id: &str,
+    runtime_snapshot_id: &str,
+    source_file_hash: &str,
+    model: &str,
+) -> Option<String> {
+    let mut insert = crate::services::extraction_replay::to_attempt_insert(record, model);
+    insert.request_image_format = Some(&encoded.format);
+    insert.request_image_mime_type = Some(&encoded.mime_type);
+    insert.request_image_width = Some(i64::from(encoded.width_px));
+    insert.request_image_height = Some(i64::from(encoded.height_px));
+    insert.request_image_bytes = Some(encoded.byte_count as i64);
+    insert.runtime_snapshot_id = Some(runtime_snapshot_id);
+    let request_hash = forza_db::evidence::canonical_request_hash(
+        insert.request_messages_json,
+        insert.request_config_json,
+        Some(prompt_snapshot_id),
+        insert.model,
+        Some(source_file_hash),
+        insert.request_image_format,
+        insert.request_image_mime_type,
+        insert.request_image_width,
+        insert.request_image_height,
+        insert.request_image_bytes,
+    );
+    insert.request_hash = Some(&request_hash);
+    insert_attempt_full_checked(conn, run_id, image_file_id, result_id, &insert)
+        .ok()
+        .filter(|_| record.accepted)
+}
+
+/// Every result retains the immutable prompt snapshot of its run (doctor
+/// check `result_prompt_mismatch`).
+fn stamp_result_prompt(conn: &Connection, result_id: &str, prompt_snapshot_id: &str) {
+    let _ = conn.execute(
+        "UPDATE extraction_results SET prompt_snapshot_id=?2 WHERE id=?1",
+        rusqlite::params![result_id, prompt_snapshot_id],
+    );
 }
 
 fn path_key(path: &std::path::Path) -> String {
@@ -1105,12 +1160,7 @@ async fn worker_loop(
                 continue;
             }
         };
-        // Every result retains the immutable prompt snapshot of its run
-        // (doctor check `result_prompt_mismatch`).
-        let _ = conn.execute(
-            "UPDATE extraction_results SET prompt_snapshot_id=?2 WHERE id=?1",
-            rusqlite::params![result_id, prompt_snapshot_id],
-        );
+        stamp_result_prompt(&conn, &result_id, prompt_snapshot_id);
 
         let file_metadata = std::fs::metadata(&image.path).ok();
         let extension = image
@@ -1192,38 +1242,18 @@ async fn worker_loop(
                 Some(&image.file_hash),
                 &mut |record: &ModelAttemptRecord| {
                     attempt_count += 1;
-                    let mut insert =
-                        crate::services::extraction_replay::to_attempt_insert(record, &model_name);
-                    insert.request_image_format = Some(&encoded.format);
-                    insert.request_image_mime_type = Some(&encoded.mime_type);
-                    insert.request_image_width = Some(i64::from(encoded.width_px));
-                    insert.request_image_height = Some(i64::from(encoded.height_px));
-                    insert.request_image_bytes = Some(encoded.byte_count as i64);
-                    insert.runtime_snapshot_id = Some(runtime_snapshot_id);
-                    // Recompute the canonical evidence hash from exactly the
-                    // fields persisted on the attempt row (doctor check
-                    // `request_hash_invalid`).
-                    let request_hash = forza_db::evidence::canonical_request_hash(
-                        insert.request_messages_json,
-                        insert.request_config_json,
-                        Some(prompt_snapshot_id),
-                        insert.model,
-                        Some(&image.file_hash),
-                        insert.request_image_format,
-                        insert.request_image_mime_type,
-                        insert.request_image_width,
-                        insert.request_image_height,
-                        insert.request_image_bytes,
-                    );
-                    insert.request_hash = Some(&request_hash);
-                    if let Ok(row_id) = insert_attempt_full_checked(
+                    if let Some(row_id) = persist_attempt_with_evidence(
                         &conn,
                         run_id,
                         &image_file_id,
                         &result_id,
-                        &insert,
-                    ) && record.accepted
-                    {
+                        record,
+                        &encoded,
+                        prompt_snapshot_id,
+                        runtime_snapshot_id,
+                        &image.file_hash,
+                        &model_name,
+                    ) {
                         accepted_row = Some(row_id);
                     }
                 },
