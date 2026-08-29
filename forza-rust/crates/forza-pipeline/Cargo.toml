@@ -12,6 +12,9 @@ sha2 = "0.10"
 walkdir = "2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 thiserror = "2"
+chrono = "0.4"
+serde_json = "1"
+tracing = "0.1"
 
 [dev-dependencies]
 tempfile = "3"

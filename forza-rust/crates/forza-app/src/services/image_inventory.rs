@@ -122,6 +122,9 @@ impl ImageInventoryService {
                     "UPDATE image_files
                      SET current_name=?2, file_hash=?3, file_status='available',
                          size_bytes=?4, width_px=?5, height_px=?6,
+                         bit_depth=?7, color_mode=?8, image_metadata_json=?9,
+                         file_modified_at=?10, race_datetime=?11, race_date=?12,
+                         race_datetime_source=?13,
                          last_seen_at=datetime('now'), updated_at=datetime('now')
                      WHERE id=?1",
                     params![
@@ -131,6 +134,13 @@ impl ImageInventoryService {
                         metadata.file_size_bytes as i64,
                         metadata.width_px as i64,
                         metadata.height_px as i64,
+                        metadata.bit_depth.map(|b| b as i64),
+                        metadata.color_mode,
+                        metadata.image_metadata_json,
+                        metadata.file_modified_at,
+                        metadata.race_datetime,
+                        metadata.race_date,
+                        metadata.race_datetime_source,
                     ],
                 )?;
                 continue;
@@ -162,10 +172,13 @@ impl ImageInventoryService {
             conn.execute(
                 "INSERT INTO image_files
                  (id, file_hash, current_name, current_path, size_bytes,
-                  width_px, height_px, image_format, mime_type, file_status,
-                  best_lap_status, duplicate_of_image_file_id,
+                  width_px, height_px, image_format, mime_type,
+                  bit_depth, color_mode, image_metadata_json,
+                  file_modified_at, race_datetime, race_date, race_datetime_source,
+                  file_status, best_lap_status, duplicate_of_image_file_id,
                   first_seen_at, last_seen_at, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'available','pending',?10,
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,
+                         'available','pending',?17,
                          datetime('now'),datetime('now'),datetime('now'),datetime('now'))",
                 params![
                     id,
@@ -177,6 +190,13 @@ impl ImageInventoryService {
                     metadata.height_px as i64,
                     extension,
                     metadata.mime_type,
+                    metadata.bit_depth.map(|b| b as i64),
+                    metadata.color_mode,
+                    metadata.image_metadata_json,
+                    metadata.file_modified_at,
+                    metadata.race_datetime,
+                    metadata.race_date,
+                    metadata.race_datetime_source,
                     canonical_id,
                 ],
             )?;

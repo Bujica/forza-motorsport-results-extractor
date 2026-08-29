@@ -14,6 +14,8 @@
 | **Phase 2: Application Layer Completeness** | ✅ Complete | 2026-08-28 | ~350 lines across 4 files | — (existing 86 tests pass) |
 | **Phase 3: CLI Completeness** | ✅ Complete | 2026-08-28 | ~100 lines across 2 files + full doctor battery (~1,100 lines, 2026-08-29) | 5 new doctor tests (101 total) |
 | **Phase 4: PDF Visual Renderer** | ✅ Complete | 2026-08-29 | ~700 lines rewritten in `pdf.rs` | 5 new renderer tests (139 total) |
+| **Phase 5: Performance Dashboard** | ⏭️ Skipped by decision | — | Python implementation will be redone upstream | — |
+| **Phase 6: Pipeline Completeness** | ✅ Complete | 2026-08-29 | ~120 lines across 5 files | 2 new pipeline tests (141 total) |
 
 ---
 
@@ -31,7 +33,7 @@
 | forza-cli | 1 | — | — | 1 |
 | forza-gui | 5 | — | — | 6 (incl. slint) |
 
-**Tests:** 139 passing across all crates. Gates: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` — all green.
+**Tests:** 141 passing across all crates (Phase 5 skipped by decision). Gates: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` — all green.
 
 ---
 
@@ -217,10 +219,13 @@ Port Python's performance_worker.py and performance_controller.py into the Slint
 
 ---
 
-### Phase 6: Pipeline Completeness (`forza-pipeline`)
+### Phase 6: Pipeline Completeness (`forza-pipeline`) ✅ Complete
 
 **Dependencies:** None
-**Estimated scope:** ~50 lines across existing files
+**Completed:** 2026-08-29
+**Scope:** ~120 lines across 5 files — all gates green, 141 tests passing
+
+**Implementation:** `ImageMetadataInfo` gained `file_modified_at`/`race_datetime` (UTC RFC3339, mtime is the official race-date source like Python), `race_date`, `race_datetime_source`, and `image_metadata_json` (buffer-layout facts via serde_json — PIL-style info is unavailable under the `image` crate). Both DB write paths (extraction runner image registration + inventory sync UPDATE/INSERT) persist the new columns. `log_duplicate_skips()` ported to `planning.rs` with `tracing` and called after run planning, mirroring Python's inventory register step.
 
 #### 6.1 Timestamp fields in metadata.rs
 

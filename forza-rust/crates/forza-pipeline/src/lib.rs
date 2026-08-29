@@ -18,7 +18,8 @@ pub use hashing::file_hash;
 pub use metadata::{ImageMetadataInfo, inspect_metadata};
 pub use naming::semantic_filename;
 pub use planning::{
-    DiscoveredImage, DuplicateImage, ExistingImage, ImageDiscoveryPlan, SkippedImage, plan_images,
+    DiscoveredImage, DuplicateImage, ExistingImage, ImageDiscoveryPlan, SkippedImage,
+    log_duplicate_skips, plan_images,
 };
 
 /// Extensions accepted as processable screenshots.

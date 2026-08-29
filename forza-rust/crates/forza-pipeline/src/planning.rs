@@ -137,3 +137,25 @@ pub fn plan_images(
 fn path_string(path: &Path) -> String {
     path.to_string_lossy().to_string()
 }
+
+/// Log duplicate skip events (mirrors `pipeline.image.log_duplicate_skips`)
+/// and return the skipped paths in plan order.
+pub fn log_duplicate_skips(plan: &ImageDiscoveryPlan) -> Vec<PathBuf> {
+    let mut skipped = Vec::with_capacity(plan.duplicates.len());
+    for duplicate in &plan.duplicates {
+        if duplicate.reason == "batch" && !duplicate.canonical_name.is_empty() {
+            tracing::info!(
+                "[image] Batch duplicate, skipping in place: {} (matches {})",
+                path_string(&duplicate.path),
+                duplicate.canonical_name
+            );
+        } else {
+            tracing::info!(
+                "[image] Cached duplicate, skipping in place: {}",
+                path_string(&duplicate.path)
+            );
+        }
+        skipped.push(duplicate.path.clone());
+    }
+    skipped
+}

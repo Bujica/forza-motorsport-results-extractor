@@ -223,9 +223,12 @@ fn upsert_image_for_run(
         "INSERT INTO image_files
             (id, file_hash, current_name, current_path, size_bytes,
              width_px, height_px, image_format, mime_type,
+             bit_depth, color_mode, image_metadata_json,
+             file_modified_at, race_datetime, race_date, race_datetime_source,
              file_status, best_lap_status, first_seen_at, last_seen_at,
              created_at, updated_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'available','pending',
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,
+                 'available','pending',
                  datetime('now'),datetime('now'),datetime('now'),datetime('now'))",
         rusqlite::params![
             id,
@@ -241,6 +244,15 @@ fn upsert_image_for_run(
             meta.as_ref()
                 .and_then(|m| m.mime_type.clone())
                 .unwrap_or_else(|| "image/png".into()),
+            meta.as_ref().and_then(|m| m.bit_depth.map(|b| b as i64)),
+            meta.as_ref().map(|m| m.color_mode.clone()),
+            meta.as_ref().map(|m| m.image_metadata_json.clone()),
+            meta.as_ref().and_then(|m| m.file_modified_at.clone()),
+            meta.as_ref().and_then(|m| m.race_datetime.clone()),
+            meta.as_ref().and_then(|m| m.race_date.clone()),
+            meta.as_ref()
+                .map(|m| m.race_datetime_source.clone())
+                .unwrap_or_else(|| "file_modified_at".into()),
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -374,7 +386,11 @@ where
         }
         let known_paths: KnownPathHashes = known_path_hashes(&conn).map_err(|e| e.to_string())?;
         let known_set = known_hashes(&conn).map_err(|e| e.to_string())?;
-        plan_images(&images, &known_set, &known_paths, params.force).map_err(|e| e.to_string())?
+        let plan = plan_images(&images, &known_set, &known_paths, params.force)
+            .map_err(|e| e.to_string())?;
+        // Python's inventory register step logs every duplicate skip in place.
+        let _skipped_duplicates = forza_pipeline::log_duplicate_skips(&plan);
+        plan
     };
 
     if let Some(max_images) = params.max_images {

@@ -209,6 +209,58 @@ fn metadata_inspection_reports_dimensions_and_mime() {
 }
 
 #[test]
+fn metadata_captures_race_datetime_source_and_layout_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("race.png");
+    write_png(&path, 100, 80, [1, 2, 3]);
+
+    let meta = forza_pipeline::inspect_metadata(&path).unwrap();
+
+    // file_modified_at is the official race-date source (Python parity).
+    let modified = meta.file_modified_at.as_deref().expect("mtime captured");
+    assert_eq!(meta.race_datetime.as_deref(), Some(modified));
+    assert_eq!(meta.race_datetime_source, "file_modified_at");
+    assert_eq!(meta.race_date.as_deref(), Some(&modified[..10]));
+    assert_eq!(modified.len(), 20, "UTC RFC3339 with seconds: {modified}");
+    assert!(modified.ends_with('Z'));
+
+    // Buffer-layout facts recorded as a JSON object.
+    let parsed: serde_json::Value = serde_json::from_str(&meta.image_metadata_json).unwrap();
+    assert_eq!(parsed["source"], "image_crate_buffer_layout");
+    assert_eq!(parsed["width_px"], 100);
+    assert_eq!(parsed["height_px"], 80);
+    assert_eq!(meta.color_mode, parsed["color_mode"].as_str().unwrap());
+}
+
+#[test]
+fn log_duplicate_skips_returns_paths_in_plan_order() {
+    use std::collections::HashSet;
+
+    let dir = tempfile::tempdir().unwrap();
+    let a = dir.path().join("a.png");
+    let b = dir.path().join("b.png");
+    let c = dir.path().join("c.png");
+    write_png(&a, 64, 64, [5, 5, 5]);
+    write_png(&b, 64, 64, [5, 5, 5]);
+    write_png(&c, 64, 64, [6, 6, 6]);
+
+    let plan = forza_pipeline::plan_images(
+        &[a.clone(), b.clone(), c.clone()],
+        &HashSet::new(),
+        &Default::default(),
+        false,
+    )
+    .unwrap();
+
+    // b duplicates a in-batch; both survive the batch in discovery order.
+    let skipped = forza_pipeline::log_duplicate_skips(&plan);
+    assert_eq!(skipped, vec![b]);
+    assert_eq!(plan.duplicates.len(), 1);
+    assert_eq!(plan.duplicates[0].reason, "batch");
+    assert_eq!(plan.duplicates[0].canonical_name, "a.png");
+}
+
+#[test]
 fn semantic_naming_matches_python_examples() {
     assert_eq!(
         semantic_filename("Fuji Speedway", "A", ".png"),
