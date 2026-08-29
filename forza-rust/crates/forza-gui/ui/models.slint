@@ -14,12 +14,15 @@ export struct ImageItem {
 
 export struct ReviewItem {
     number: int,
+    outcome: string,
     reason: string,
     trigger: string,
+    decision: string,
     driver: string,
-    track: string,
-    model-value: string,
+    lap: string,
+    lap-dirty: bool,
     status: string,
+    image-file-id: string,
 }
 
 export struct BestLapItem {

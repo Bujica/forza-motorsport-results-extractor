@@ -255,7 +255,10 @@ pub(crate) fn apply_settings(
             set_status(&w, "gamertag changed; best laps recomputed");
             send_request(Request::ListBestLaps);
             send_request(Request::ListReviews {
-                bucket: "open".into(),
+                filter: forza_app::ReviewQueueFilter {
+                    bucket: "open".into(),
+                    ..Default::default()
+                },
             });
             send_request(Request::RefreshInventory {
                 filter: ImageInventoryFilter::default(),

@@ -38,9 +38,14 @@ export component MainWindow inherits Window {
     callback sort-changed(int);
     callback process-selected();
     callback rename-selected();
-    callback reviews-requested(string);
-    callback case-decided(int, string, string);
-    callback case-ignored(int);
+    callback reviews-requested();
+    callback review-filter-changed(string, string, string, string);
+    callback review-selected(int);
+    callback review-apply(int, string, string);
+    callback review-ignore(int);
+    callback review-reopen(int);
+    callback review-open-detail(int);
+    callback review-preview-requested(string);
     callback bestlaps-requested();
     callback doctor-requested();
     callback rebuild-requested();
@@ -65,6 +70,25 @@ export component MainWindow inherits Window {
 
     in property <[ImageItem]> images;
     in property <[ReviewItem]> reviews;
+    in property <[string]> review-reasons;
+    in property <[string]> review-outcomes;
+    in property <[string]> review-runs;
+    in property <[string]> review-tracks;
+    in property <[string]> review-classes;
+    in-out property <int> review-reason-index;
+    in-out property <int> review-outcome-index;
+    in-out property <int> review-run-index;
+    in-out property <int> review-selected-index;
+    in-out property <int> review-track-index;
+    in-out property <int> review-class-index;
+    in-out property <string> review-car-text;
+    in-out property <string> review-driver-text;
+    in property <string> review-detail-title;
+    in property <string> review-detail-lines;
+    in property <string> review-reason-note;
+    in property <string> review-suggestions;
+    in property <image> review-preview;
+    in property <bool> review-has-preview;
     in property <[BestLapItem]> best-laps;
     in property <string> status-text;
     in property <string> best-laps-summary;
@@ -274,9 +298,29 @@ export component MainWindow inherits Window {
             // ══ Review page ══
             if root.page == "review": ReviewPage {
                 reviews: root.reviews;
-                reviews-requested(bucket) => { root.reviews-requested(bucket); }
-                case-decided(n, f, v) => { root.case-decided(n, f, v); }
-                case-ignored(n) => { root.case-ignored(n); }
+                review-reasons: root.review-reasons;
+                review-outcomes: root.review-outcomes;
+                review-runs: root.review-runs;
+                review-tracks: root.review-tracks;
+                review-classes: root.review-classes;
+                review-selected-index <=> root.review-selected-index;
+                review-track-index <=> root.review-track-index;
+                review-class-index <=> root.review-class-index;
+                review-car-text <=> root.review-car-text;
+                review-driver-text <=> root.review-driver-text;
+                review-detail-title: root.review-detail-title;
+                review-detail-lines: root.review-detail-lines;
+                review-reason-note: root.review-reason-note;
+                review-suggestions: root.review-suggestions;
+                review-preview: root.review-preview;
+                review-has-preview: root.review-has-preview;
+                review-filter-changed(status, reason, outcome, run) => { root.review-filter-changed(status, reason, outcome, run); }
+                review-selected(i) => { root.review-selected(i); }
+                review-apply(n, f, v) => { root.review-apply(n, f, v); }
+                review-ignore(n) => { root.review-ignore(n); }
+                review-reopen(n) => { root.review-reopen(n); }
+                review-open-detail(n) => { root.review-open-detail(n); }
+                review-step(d) => { }
             }
 
             // ══ Best Laps page ══

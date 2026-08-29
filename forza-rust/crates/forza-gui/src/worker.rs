@@ -17,9 +17,10 @@ use std::sync::Mutex;
 use std::sync::mpsc;
 
 use forza_app::{
-    ImageDebugFilter, ImageInventoryFilter, ImageInventoryService, ReviewCaseEntry, decide_case,
-    ignore_case, list_clean_flat_entries, list_debug_cases, list_review_cases, load_debug_detail,
-    load_debug_detail_by_result, load_image_detail, rebuild, settings_snapshot,
+    ImageDebugFilter, ImageInventoryFilter, ImageInventoryService, ReviewCaseEntry,
+    ReviewQueueFilter, decide_case, ignore_case, list_clean_flat_entries, list_debug_cases,
+    list_review_cases, load_debug_detail, load_debug_detail_by_result, load_image_detail, rebuild,
+    reopen_case, settings_snapshot,
 };
 
 /// Live configuration owned by the worker thread.
@@ -60,7 +61,14 @@ pub enum Request {
         filter: ImageInventoryFilter,
     },
     ListReviews {
-        bucket: String,
+        filter: ReviewQueueFilter,
+    },
+    ReopenCase {
+        case_number: i64,
+    },
+    /// Resolve the on-disk path of the linked image (UI loads the preview).
+    LoadPreview {
+        image_file_id: String,
     },
     DecideCase {
         case_number: i64,
@@ -123,6 +131,47 @@ pub enum Request {
     LoadLogs,
 }
 
+/// Dynamic combo options for the review filter bar.
+#[derive(Debug, Clone, Default)]
+pub struct ReviewOptions {
+    pub reasons: Vec<String>,
+    pub outcomes: Vec<String>,
+    pub runs: Vec<String>,
+}
+
+fn review_options(conn: &rusqlite::Connection) -> Result<ReviewOptions, String> {
+    let distinct = |column: &str| -> Result<Vec<String>, String> {
+        let sql = format!(
+            "SELECT DISTINCT COALESCE({column}, '') FROM review_cases
+             WHERE COALESCE({column}, '') <> '' ORDER BY LOWER({column})"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(rows)
+    };
+    let runs = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT run_id FROM review_cases
+                 WHERE run_id IS NOT NULL ORDER BY run_id DESC",
+            )
+            .map_err(|e| e.to_string())?;
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
+    Ok(ReviewOptions {
+        reasons: distinct("reason")?,
+        outcomes: distinct("outcome")?,
+        runs,
+    })
+}
+
 /// Outcome of a settings load/preview/save — always carries a fresh
 /// snapshot plus the effective config so the UI can refresh dependent
 /// state (run info line, gamertag header).
@@ -148,7 +197,8 @@ pub enum Response {
     },
     Reviews {
         result: Result<Vec<ReviewCaseEntry>, String>,
-        bucket: String,
+        options: ReviewOptions,
+        filter: ReviewQueueFilter,
     },
     CaseDecided(Result<(), String>),
     BestLaps(Result<Vec<forza_app::BestLapEntry>, String>),
@@ -163,6 +213,9 @@ pub enum Response {
     RescanDone(Result<(usize, usize), String>),
     /// (deleted, refused, refusal summary)
     DeleteDone(Result<(usize, usize, String), String>),
+    /// (image file path, None when the case has no image)
+    Preview(Result<Option<String>, String>),
+    CaseReopen(Result<(), String>),
     ImageDebugCases(Result<Vec<forza_db::image_debug::ImageDebugCase>, String>),
     ImageDebugDetail(Result<Option<forza_db::image_debug::ImageDebugDetail>, String>),
     Logs(Result<(String, String), String>),
@@ -189,14 +242,45 @@ pub fn handle_request(
                     .unwrap_or_else(|| "all".to_string()),
             }
         }
-        Request::ListReviews { bucket } => Response::Reviews {
-            result: (|| {
+        Request::ListReviews { filter } => {
+            let outcome = (|| -> Result<(Vec<ReviewCaseEntry>, ReviewOptions), String> {
                 let conn =
                     forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
-                list_review_cases(&conn, bucket, None)
-            })(),
-            bucket: bucket.clone(),
-        },
+                let cases = list_review_cases(&conn, filter)?;
+                let options = review_options(&conn)?;
+                Ok((cases, options))
+            })();
+            match outcome {
+                Ok((cases, options)) => Response::Reviews {
+                    result: Ok(cases),
+                    options,
+                    filter: filter.clone(),
+                },
+                Err(message) => Response::Reviews {
+                    result: Err(message),
+                    options: ReviewOptions::default(),
+                    filter: filter.clone(),
+                },
+            }
+        }
+        Request::ReopenCase { case_number } => Response::CaseReopen((|| -> Result<(), String> {
+            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            reopen_case(&conn, *case_number)
+        })()),
+        Request::LoadPreview { image_file_id } => {
+            let result = (|| -> Result<Option<String>, String> {
+                let conn =
+                    forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+                conn.query_row(
+                    "SELECT current_path FROM image_files WHERE id = ?1",
+                    [image_file_id],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())
+            })();
+            Response::Preview(result)
+        }
         Request::DecideCase {
             case_number,
             field,

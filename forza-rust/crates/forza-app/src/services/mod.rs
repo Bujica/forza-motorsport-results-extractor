@@ -18,7 +18,9 @@ pub use image_debug::{
 pub use image_detail::{ImageDetailData, load_image_detail};
 pub use image_inventory::ImageInventoryOptions;
 pub use rebuild::{RebuildOutcome, rebuild};
-pub use review_queue::{ReviewCaseEntry, decide_case, ignore_case, list_review_cases};
+pub use review_queue::{
+    ReviewCaseEntry, ReviewQueueFilter, decide_case, ignore_case, list_review_cases, reopen_case,
+};
 pub use run_control::RunControl;
 pub use settings::{SettingRow, SettingsSnapshot, settings_snapshot};
 

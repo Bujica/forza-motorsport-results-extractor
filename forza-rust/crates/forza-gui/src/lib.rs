@@ -22,6 +22,7 @@ use ui_state::{
     image_items, run_info_line, send_request, set_status, update_image_selection,
 };
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc;
@@ -29,7 +30,7 @@ use std::sync::mpsc;
 use slint::{ModelRc, VecModel};
 
 use crate::worker::{Request, Response, WorkerContext};
-use forza_app::{ImageInventoryEntry, ImageInventoryFilter};
+use forza_app::{ImageInventoryEntry, ImageInventoryFilter, ReviewQueueFilter};
 
 slint::include_modules!();
 
@@ -130,6 +131,97 @@ fn update_selection_summary(ui: &MainWindow) {
         )
         .into(),
     );
+}
+
+thread_local! {
+    /// Currently listed review cases (source of truth for details/actions).
+    static REVIEW_CASES_CACHE: RefCell<Vec<forza_app::ReviewCaseEntry>> =
+        const { RefCell::new(Vec::new()) };
+    /// Active review filter (set by the filter bar, reused on reload).
+    static REVIEW_FILTER: RefCell<ReviewQueueFilter> = RefCell::new(ReviewQueueFilter {
+        bucket: String::from("open"),
+        ..Default::default()
+    });
+    /// Selected review case position (isize: -1 = none).
+    static REVIEW_INDEX: RefCell<isize> = const { RefCell::new(-1) };
+    /// Reference tracks offered on the track-correction combo.
+    static REVIEW_TRACKS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+fn set_review_track_model(main: &MainWindow, values: Vec<slint::SharedString>) {
+    main.set_review_tracks(ModelRc::from(Rc::new(VecModel::from(values))));
+}
+
+fn set_review_class_model(main: &MainWindow, values: Vec<slint::SharedString>) {
+    main.set_review_classes(ModelRc::from(Rc::new(VecModel::from(values))));
+}
+
+/// Build the details-panel text for the selected review case (Python
+/// details grid labels) and refresh the reason/suggestion hints.
+fn apply_review_detail(ui: &MainWindow) {
+    let case = REVIEW_INDEX.with(|slot| *slot.borrow());
+    let entry = REVIEW_CASES_CACHE.with(|slot| {
+        let cache = slot.borrow();
+        if case >= 0 && (case as usize) < cache.len() {
+            Some(cache[case as usize].clone())
+        } else {
+            None
+        }
+    });
+
+    match entry {
+        Some(c) => {
+            ui.set_review_detail_title(format!("Case #{}", c.case_number).into());
+            let temp = c
+                .temp_f
+                .map(|t| format!("{t:.1} °F"))
+                .unwrap_or_else(|| "-".to_string());
+            ui.set_review_detail_lines(
+                format!(
+                    "Case: {}\nOutcome: {}\nReason: {}\nTrigger: {}\nModel value: {}\nCorrected value: {}\nDecision: {}\nError: {}\nFile: {}\nCurrent track: {}\nCurrent class: {}\nCurrent weather: {}\nTemp: {}\nCurrent driver: {}\nCurrent lap: {}",
+                    c.case_number,
+                    c.outcome.clone().unwrap_or_default(),
+                    c.reason,
+                    c.trigger.clone().unwrap_or_default(),
+                    c.model_value.clone().unwrap_or_default(),
+                    c.corrected_value.clone().unwrap_or_default(),
+                    c.decision_field.clone().unwrap_or_default(),
+                    c.error_type.clone().unwrap_or_default(),
+                    c.source_file.clone().unwrap_or_default(),
+                    c.track.clone().unwrap_or_default(),
+                    c.race_class.clone().unwrap_or_default(),
+                    c.weather.clone().unwrap_or_default(),
+                    temp,
+                    c.driver.clone().unwrap_or_default(),
+                    c.best_lap.clone().unwrap_or_default(),
+                )
+                .into(),
+            );
+            ui.set_review_reason_note(c.reason.clone().into());
+            ui.set_review_suggestions(String::new().into());
+            if let Some(image_file_id) = c.image_file_id.clone() {
+                send_request(Request::LoadPreview { image_file_id });
+            } else {
+                ui.set_review_has_preview(false);
+            }
+        }
+        None => {
+            ui.set_review_detail_title("Review queue is clear.".into());
+            ui.set_review_detail_lines(String::new().into());
+            ui.set_review_reason_note(String::new().into());
+            ui.set_review_suggestions(String::new().into());
+            ui.set_review_has_preview(false);
+        }
+    }
+}
+
+/// Open the image detail page at a given inventory row index.
+fn open_image_detail_at(ui: &slint::Weak<MainWindow>, index: i32) {
+    if let Some(w) = ui.upgrade() {
+        w.set_page("image-detail".into());
+        w.set_detail_loaded(false);
+        w.invoke_open_image_detail(index);
+    }
 }
 
 /// Launch the GUI. Blocks until the window closes.
@@ -251,34 +343,113 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         }
                     }
                 },
-                Response::Reviews { result, bucket } => {
-                    REVIEW_MODEL.with(|slot| {
-                        if let Some(model) = slot.borrow().as_ref()
-                            && let Ok(entries) = &result
-                        {
-                            let items: Vec<ReviewItem> = entries
-                                .iter()
-                                .map(|c| ReviewItem {
-                                    number: c.case_number as i32,
-                                    reason: c.reason.clone().into(),
-                                    trigger: c.trigger.clone().unwrap_or_default().into(),
-                                    driver: c.driver.clone().unwrap_or_default().into(),
-                                    track: c.track.clone().unwrap_or_default().into(),
-                                    model_value: c.model_value.clone().unwrap_or_default().into(),
-                                    status: c.status.clone().into(),
-                                })
-                                .collect();
-                            model.set_vec(items);
-                        }
-                    });
-                    if let Some(w) = ui.upgrade() {
-                        match result {
-                            Ok(list) => w.set_status_text(
-                                format!("{} review case(s) [{}]", list.len(), bucket).into(),
-                            ),
-                            Err(message) => w.set_status_text(format!("error: {message}").into()),
+                Response::Reviews {
+                    result,
+                    options,
+                    filter,
+                } => match &result {
+                    Ok(entries) => {
+                        REVIEW_CASES_CACHE.with(|slot| *slot.borrow_mut() = entries.clone());
+                        REVIEW_MODEL.with(|slot| {
+                            if let Some(model) = slot.borrow().as_ref() {
+                                let items: Vec<ReviewItem> = entries
+                                    .iter()
+                                    .map(|c| ReviewItem {
+                                        number: c.case_number as i32,
+                                        outcome: c.outcome.clone().unwrap_or_default().into(),
+                                        reason: c.reason.clone().into(),
+                                        trigger: c.trigger.clone().unwrap_or_default().into(),
+                                        decision: match (
+                                            c.decision_field.as_deref(),
+                                            c.model_value.as_deref(),
+                                            c.corrected_value.as_deref(),
+                                        ) {
+                                            (Some(field), Some(model_value), Some(corrected)) => {
+                                                format!("{field}: {model_value} -> {corrected}")
+                                            }
+                                            (Some(field), Some(model_value), None) => {
+                                                format!("{field}: {model_value}")
+                                            }
+                                            _ => String::new(),
+                                        }
+                                        .into(),
+                                        driver: c.driver.clone().unwrap_or_default().into(),
+                                        lap: if c.best_lap.clone().unwrap_or_default().is_empty() {
+                                            String::new()
+                                        } else if c.status == "open" {
+                                            format!(
+                                                "{} dirty",
+                                                c.best_lap.clone().unwrap_or_default()
+                                            )
+                                        } else {
+                                            c.best_lap.clone().unwrap_or_default()
+                                        }
+                                        .into(),
+                                        lap_dirty: c.status == "open"
+                                            && !c.best_lap.clone().unwrap_or_default().is_empty(),
+                                        status: c.status.clone().into(),
+                                        image_file_id: c
+                                            .image_file_id
+                                            .clone()
+                                            .unwrap_or_default()
+                                            .into(),
+                                    })
+                                    .collect();
+                                model.set_vec(items);
+                            }
+                        });
+                        let options_model = |values: &[String]| -> ModelRc<slint::SharedString> {
+                            ModelRc::from(Rc::new(VecModel::from(
+                                std::iter::once("all".to_string())
+                                    .chain(values.iter().cloned())
+                                    .map(Into::into)
+                                    .collect::<Vec<_>>(),
+                            )))
+                        };
+                        if let Some(w) = ui.upgrade() {
+                            w.set_review_reasons(options_model(&options.reasons));
+                            w.set_review_outcomes(options_model(&options.outcomes));
+                            w.set_review_runs(options_model(&options.runs));
+                            w.set_review_selected_index(if entries.is_empty() { -1 } else { 0 });
+                            apply_review_detail(&w);
+                            w.set_status_text(
+                                format!("{} review case(s) [{}]", entries.len(), filter.bucket)
+                                    .into(),
+                            );
                         }
                     }
+                    Err(message) => {
+                        REVIEW_CASES_CACHE.with(|slot| slot.borrow_mut().clear());
+                        if let Some(w) = ui.upgrade() {
+                            w.set_status_text(format!("error: {message}").into());
+                        }
+                    }
+                },
+                Response::Preview(result) => match result {
+                    Ok(Some(path)) => {
+                        if let Some(w) = ui.upgrade() {
+                            let loaded = slint::Image::load_from_path(Path::new(&path)).ok();
+                            w.set_review_has_preview(loaded.is_some());
+                            w.set_review_preview(loaded.unwrap_or_default());
+                        }
+                    }
+                    Ok(None) => {
+                        if let Some(w) = ui.upgrade() {
+                            w.set_review_has_preview(false);
+                        }
+                    }
+                    Err(message) => {
+                        if let Some(w) = ui.upgrade() {
+                            set_status(&w, &format!("preview error: {message}"));
+                        }
+                    }
+                },
+                Response::CaseReopen(result) => {
+                    if let (Err(message), Some(w)) = (&result, ui.upgrade()) {
+                        set_status(&w, &format!("error: {message}"));
+                    }
+                    let filter = REVIEW_FILTER.with(|slot| slot.borrow().clone());
+                    send_request(Request::ListReviews { filter });
                 }
                 Response::CaseDecided(result) => {
                     let ok = result.is_ok();
@@ -291,7 +462,10 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                     if ok {
                         // Refresh reviews + best laps after any decision.
                         send_request(Request::ListReviews {
-                            bucket: "open".into(),
+                            filter: ReviewQueueFilter {
+                                bucket: "open".into(),
+                                ..Default::default()
+                            },
                         });
                         send_request(Request::ListBestLaps);
                     }
@@ -382,7 +556,10 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         }
                     }
                     send_request(Request::ListReviews {
-                        bucket: "all".into(),
+                        filter: ReviewQueueFilter {
+                            bucket: String::from("all"),
+                            ..Default::default()
+                        },
                     });
                     send_request(Request::ListBestLaps);
                 }
@@ -782,19 +959,49 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     }
     {
         let ui = main.as_weak();
-        main.on_reviews_requested(move |bucket| {
-            enqueue(
-                Request::ListReviews {
-                    bucket: bucket.to_string(),
-                },
-                &ui,
-                "loading reviews…",
-            );
+        main.on_reviews_requested(move || {
+            let filter = REVIEW_FILTER.with(|slot| slot.borrow().clone());
+            enqueue(Request::ListReviews { filter }, &ui, "loading reviews…");
         });
     }
     {
         let ui = main.as_weak();
-        main.on_case_decided(move |case_number, field, value| {
+        main.on_review_filter_changed(move |status, reason, outcome, run| {
+            REVIEW_FILTER.with(|slot| {
+                *slot.borrow_mut() = ReviewQueueFilter {
+                    bucket: status.to_string(),
+                    reason: Some(reason.to_string()),
+                    outcome: Some(outcome.to_string()),
+                    run_id: Some(run.to_string()),
+                    image_file_id: None,
+                };
+            });
+            let filter = REVIEW_FILTER.with(|slot| slot.borrow().clone());
+            enqueue(Request::ListReviews { filter }, &ui, "loading reviews…");
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_review_selected(move |index| {
+            REVIEW_INDEX.with(|slot| *slot.borrow_mut() = index as isize);
+            if let Some(w) = ui.upgrade() {
+                apply_review_detail(&w);
+            }
+            let preview_id = REVIEW_CASES_CACHE.with(|slot| {
+                slot.borrow()
+                    .get(index as usize)
+                    .and_then(|c| c.image_file_id.clone())
+            });
+            if let Some(image_id) = preview_id {
+                send_request(Request::LoadPreview {
+                    image_file_id: image_id,
+                });
+            }
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_review_apply(move |case_number, field, value| {
             enqueue(
                 Request::DecideCase {
                     case_number: case_number as i64,
@@ -808,7 +1015,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     }
     {
         let ui = main.as_weak();
-        main.on_case_ignored(move |case_number| {
+        main.on_review_ignore(move |case_number| {
             enqueue(
                 Request::IgnoreCase {
                     case_number: case_number as i64,
@@ -816,6 +1023,41 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 &ui,
                 "ignoring case…",
             );
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_review_reopen(move |case_number| {
+            enqueue(
+                Request::ReopenCase {
+                    case_number: case_number as i64,
+                },
+                &ui,
+                "reopening case…",
+            );
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_review_open_detail(move |case_number| {
+            let index = REVIEW_CASES_CACHE.with(|slot| {
+                slot.borrow()
+                    .iter()
+                    .position(|c| c.case_number == case_number as i64)
+                    .map(|p| p as i32)
+                    .unwrap_or(-1)
+            });
+            if index >= 0 {
+                let ui2 = ui.clone();
+                open_image_detail_at(&ui2, index);
+            }
+        });
+    }
+    {
+        main.on_review_preview_requested(move |image_file_id| {
+            send_request(Request::LoadPreview {
+                image_file_id: image_file_id.to_string(),
+            });
         });
     }
     {
@@ -1120,7 +1362,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                             filter: ImageInventoryFilter::default(),
                         });
                         send_request(Request::ListBestLaps);
-                        send_request(Request::ListReviews { bucket: "open".into() });
+                        send_request(Request::ListReviews { filter: ReviewQueueFilter { bucket: String::from("open"), ..Default::default() } });
                     }
                     forza_app::RunEvent::Failed(message) => {
                         append_run_log(format!("[failed] {message}"));
@@ -1169,13 +1411,32 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
         });
     }
 
+    // Review page reference data (track correction combo + class list).
+    {
+        let refs = forza_domain::reference_data::embedded_reference_data();
+        let mut tracks: Vec<slint::SharedString> =
+            refs.tracks.iter().cloned().map(Into::into).collect();
+        tracks.sort_by_key(|t| t.to_lowercase());
+        set_review_track_model(&main, tracks);
+        let classes: Vec<slint::SharedString> = [
+            "E", "D", "C", "B", "A", "TCR", "S", "R", "P", "X", "Mixed", "Unknown",
+        ]
+        .iter()
+        .map(|c| c.to_string().into())
+        .collect();
+        set_review_class_model(&main, classes);
+    }
+
     // Initial load.
     main.set_status_text("loading…".into());
     send_request(Request::RefreshInventory {
         filter: ImageInventoryFilter::default(),
     });
     send_request(Request::ListReviews {
-        bucket: "open".into(),
+        filter: ReviewQueueFilter {
+            bucket: "open".into(),
+            ..Default::default()
+        },
     });
     send_request(Request::ListBestLaps);
 

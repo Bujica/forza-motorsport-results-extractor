@@ -211,7 +211,10 @@ fn reviews_and_bestlaps_round_trip_through_worker_thread() {
     let (req_tx, req_rx) = mpsc::channel::<Request>();
     for request in [
         Request::ListReviews {
-            bucket: "open".into(),
+            filter: forza_app::ReviewQueueFilter {
+                bucket: "open".into(),
+                ..Default::default()
+            },
         },
         Request::ListBestLaps,
         Request::RunDoctor,

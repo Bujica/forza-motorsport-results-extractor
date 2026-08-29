@@ -32,7 +32,14 @@ pub fn load_image_detail(
         return Ok(None);
     };
     let laps = laps_for_image(conn, image_file_id).map_err(|e| e.to_string())?;
-    let reviews = super::review_queue::list_review_cases(conn, "all", Some(image_file_id))?;
+    let reviews = super::review_queue::list_review_cases(
+        conn,
+        &super::review_queue::ReviewQueueFilter {
+            bucket: "all".to_string(),
+            image_file_id: Some(image_file_id.to_string()),
+            ..Default::default()
+        },
+    )?;
     let results = results_for_image(conn, image_file_id).map_err(|e| e.to_string())?;
     let attempts = attempts_for_image(conn, image_file_id).map_err(|e| e.to_string())?;
     Ok(Some(ImageDetailData {
