@@ -11,9 +11,9 @@ use std::sync::mpsc;
 use slint::{Model, VecModel};
 
 use crate::{
-    worker::Request, BestLapItem, DebugCaseItem, DebugResultComboItem, DetailAttemptItem,
-    DetailLapItem, DetailResultItem, DetailReviewItem, ImageItem, MainWindow, ReviewItem,
-    SettingItem,
+    BestLapItem, DebugCaseItem, DebugResultComboItem, DetailAttemptItem, DetailLapItem,
+    DetailResultItem, DetailReviewItem, ImageItem, MainWindow, ReviewItem, SettingItem,
+    worker::Request,
 };
 use forza_app::ImageInventoryEntry;
 
@@ -49,7 +49,11 @@ thread_local! {
 /// Rate/ETA readout for the run progress bar, measured from the run's
 /// Started event (includes model preflight, so the first estimates are
 /// pessimistic and converge as images complete).
-pub(crate) fn compute_rate_eta(done: i32, total: i32, start: Option<std::time::Instant>) -> (String, String) {
+pub(crate) fn compute_rate_eta(
+    done: i32,
+    total: i32,
+    start: Option<std::time::Instant>,
+) -> (String, String) {
     let Some(start) = start else {
         return (String::new(), String::new());
     };
@@ -109,9 +113,12 @@ pub(crate) fn image_items(entries: &[ImageInventoryEntry]) -> Vec<ImageItem> {
             .map(|e| ImageItem {
                 id: e.id.clone().into(),
                 name: e.name.clone().into(),
+                race_date: e.race_date.clone().unwrap_or_default().into(),
+                semantic: e.semantic_name.clone().unwrap_or_default().into(),
                 processing: e.processing_status.clone().into(),
                 best_lap: e.best_lap_status.clone().into(),
                 file_status: e.file_status.clone().into(),
+                duplicate: e.duplicate_label.clone().into(),
                 selected: selected.iter().any(|id| id == &e.id),
             })
             .collect()
@@ -128,7 +135,6 @@ pub(crate) fn update_image_selection(ui: &MainWindow) {
         }
     });
 }
-
 
 thread_local! {
     pub(crate) static WORKER_TX: std::cell::OnceCell<mpsc::Sender<Request>> =
@@ -156,4 +162,3 @@ pub(crate) fn enqueue(request: Request, ui: &slint::Weak<MainWindow>, loading: &
         set_status(&w, loading);
     }
 }
-

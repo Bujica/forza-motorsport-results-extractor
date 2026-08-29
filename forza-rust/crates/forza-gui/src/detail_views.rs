@@ -1,22 +1,21 @@
 //! Apply functions: push worker/application data into the detail, settings
 //! and image-debug views.
 
-
-use slint::{Image, Model, ModelRc, VecModel};
+use slint::{Image, ModelRc, VecModel};
 use std::path::Path;
 
 use crate::ui_state::{
-    run_info_line, send_request, set_status, DEBUG_CASES_CACHE, DEBUG_CASE_MODEL,
-    DEBUG_DETAIL_CACHE, DEBUG_RESULT_MODEL, DETAIL_ATTEMPT_MODEL, DETAIL_CACHE, DETAIL_INDEX,
-    DETAIL_LAP_MODEL, DETAIL_RESULT_MODEL, DETAIL_REVIEW_MODEL, GAMERTAG, PENDING_SETTINGS,
-    ROW_CACHE, RUN_CONFIG, SETTINGS_MODEL,
+    DEBUG_CASE_MODEL, DEBUG_CASES_CACHE, DEBUG_DETAIL_CACHE, DEBUG_RESULT_MODEL,
+    DETAIL_ATTEMPT_MODEL, DETAIL_CACHE, DETAIL_INDEX, DETAIL_LAP_MODEL, DETAIL_RESULT_MODEL,
+    DETAIL_REVIEW_MODEL, GAMERTAG, PENDING_SETTINGS, ROW_CACHE, RUN_CONFIG, SETTINGS_MODEL,
+    run_info_line, send_request, set_status,
 };
 use crate::worker::Request;
-use forza_app::ImageInventoryFilter;
 use crate::{
-    DetailAttemptItem, DetailLapItem, DetailResultItem, DetailReviewItem, DebugCaseItem,
-    DebugResultComboItem, MainWindow, SettingItem,
+    DebugCaseItem, DebugResultComboItem, DetailAttemptItem, DetailLapItem, DetailResultItem,
+    DetailReviewItem, MainWindow, SettingItem,
 };
+use forza_app::ImageInventoryFilter;
 
 pub(crate) fn step_detail(ui: &slint::Weak<MainWindow>, delta: i32) {
     let index = DETAIL_INDEX.with(|slot| *slot.borrow()) + delta;
@@ -212,7 +211,10 @@ pub(crate) fn apply_image_detail(ui: &slint::Weak<MainWindow>, data: forza_app::
 }
 
 /// Apply a settings load/preview/save outcome to the page and dependent UI.
-pub(crate) fn apply_settings(ui: &slint::Weak<MainWindow>, outcome: crate::worker::SettingsOutcome) {
+pub(crate) fn apply_settings(
+    ui: &slint::Weak<MainWindow>,
+    outcome: crate::worker::SettingsOutcome,
+) {
     SETTINGS_MODEL.with(|slot| {
         if let Some(model) = slot.borrow().as_ref() {
             let items: Vec<SettingItem> = outcome
@@ -520,4 +522,3 @@ pub(crate) fn apply_debug_detail(
         w.set_status_text("debug detail loaded".into());
     }
 }
-

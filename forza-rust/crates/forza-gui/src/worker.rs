@@ -10,6 +10,8 @@
 //! live-provider rule.
 
 use std::collections::BTreeMap;
+
+use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::mpsc;
@@ -82,6 +84,22 @@ pub enum Request {
     RenameImages {
         image_ids: Vec<String>,
     },
+    /// Copy the selected images to a destination folder using their
+    /// semantic names (falling back to the current name).
+    ExportImages {
+        image_ids: Vec<String>,
+        dest_dir: String,
+    },
+    /// Re-check on-disk existence for the selected images and refresh
+    /// their file_status.
+    RescanImages {
+        image_ids: Vec<String>,
+    },
+    /// Delete the selected images' files and database rows. Rows with
+    /// extraction evidence are refused (FK RESTRICT) and reported.
+    DeleteImages {
+        image_ids: Vec<String>,
+    },
     LoadSettings,
     /// Validate pending edits without saving (status bar shows the verdict).
     PreviewSettings {
@@ -139,6 +157,12 @@ pub enum Response {
     RunDryRunDone(String),
     ImageDetail(Result<Option<forza_app::ImageDetailData>, String>),
     RenameDone(Result<String, String>),
+    /// (exported count, skipped count)
+    ExportDone(Result<(usize, usize), String>),
+    /// (now available, now missing)
+    RescanDone(Result<(usize, usize), String>),
+    /// (deleted, refused, refusal summary)
+    DeleteDone(Result<(usize, usize, String), String>),
     ImageDebugCases(Result<Vec<forza_db::image_debug::ImageDebugCase>, String>),
     ImageDebugDetail(Result<Option<forza_db::image_debug::ImageDebugDetail>, String>),
     Logs(Result<(String, String), String>),
@@ -241,6 +265,12 @@ pub fn handle_request(
             load_image_detail(&conn, image_id)
         })()),
         Request::RenameImages { image_ids } => Response::RenameDone(rename_images(ctx, image_ids)),
+        Request::ExportImages {
+            image_ids,
+            dest_dir,
+        } => Response::ExportDone(export_images(ctx, image_ids, dest_dir)),
+        Request::RescanImages { image_ids } => Response::RescanDone(rescan_images(ctx, image_ids)),
+        Request::DeleteImages { image_ids } => Response::DeleteDone(delete_images(ctx, image_ids)),
         Request::LoadSettings => {
             let outcome = (|| -> Result<SettingsOutcome, String> {
                 let (cfg, _) =
@@ -426,6 +456,166 @@ fn rename_images(ctx: &WorkerContext, image_ids: &[String]) -> Result<String, St
             errors.join(" | ")
         ))
     }
+}
+
+/// Copy selected images to the destination folder using semantic names
+/// when present, falling back to the current file name.
+fn export_images(
+    ctx: &WorkerContext,
+    image_ids: &[String],
+    dest_dir: &str,
+) -> Result<(usize, usize), String> {
+    std::fs::create_dir_all(dest_dir).map_err(|e| format!("create destination: {e}"))?;
+    let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+    let mut exported = 0usize;
+    let mut skipped = 0usize;
+    for id in image_ids {
+        let row = conn
+            .query_row(
+                "SELECT COALESCE(NULLIF(semantic_name, ''), current_name), current_path
+                 FROM image_files WHERE id = ?1",
+                [id],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let Some((name, Some(path))) = row else {
+            skipped += 1;
+            continue;
+        };
+        let Ok(bytes) = std::fs::read(&path) else {
+            skipped += 1;
+            continue;
+        };
+        let safe = sanitize_export_name(&name);
+        if std::fs::write(std::path::Path::new(dest_dir).join(safe), bytes).is_ok() {
+            exported += 1;
+        } else {
+            skipped += 1;
+        }
+    }
+    Ok((exported, skipped))
+}
+
+/// File-name sanitization for exports (no path separators / reserved chars).
+fn sanitize_export_name(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+    let trimmed = cleaned.trim().trim_end_matches('.').to_string();
+    if trimmed.is_empty() {
+        "export.png".to_string()
+    } else {
+        trimmed
+    }
+}
+
+/// Re-check on-disk existence: now-missing files get file_status='missing'
+/// (+missing_at), files that reappeared go back to 'available'.
+fn rescan_images(ctx: &WorkerContext, image_ids: &[String]) -> Result<(usize, usize), String> {
+    let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+    let mut available = 0usize;
+    let mut missing = 0usize;
+    for id in image_ids {
+        let path: Option<String> = conn
+            .query_row(
+                "SELECT current_path FROM image_files WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let Some(path) = path else { continue };
+        let exists = std::path::Path::new(&path).is_file();
+        let changed = conn
+            .execute(
+                "UPDATE image_files SET
+                    file_status = ?2,
+                    missing_at = CASE WHEN ?2 = 'missing' THEN datetime('now') ELSE NULL END,
+                    last_seen_at = CASE WHEN ?2 = 'available' THEN datetime('now') ELSE last_seen_at END,
+                    updated_at = datetime('now')
+                 WHERE id = ?1 AND file_status <> ?2",
+                rusqlite::params![id, if exists { "available" } else { "missing" }],
+            )
+            .map_err(|e| e.to_string())?;
+        if changed > 0 {
+            if exists {
+                available += 1;
+            } else {
+                missing += 1;
+            }
+        }
+    }
+    Ok((available, missing))
+}
+
+/// Delete files + database rows. Images with extraction evidence are
+/// refused by FK RESTRICT — they are counted and summarized, not deleted.
+fn delete_images(
+    ctx: &WorkerContext,
+    image_ids: &[String],
+) -> Result<(usize, usize, String), String> {
+    let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+    let input_dir = ctx.input_dir();
+    let mut deleted = 0usize;
+    let mut refused = 0usize;
+    let mut refusal_sample = String::new();
+    for id in image_ids {
+        let row: Option<(Option<String>, String)> = conn
+            .query_row(
+                "SELECT current_path, current_name FROM image_files WHERE id = ?1",
+                [id],
+                |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let Some((Some(path), name)) = row else {
+            refused += 1;
+            continue;
+        };
+        // Safety: only delete files inside the configured input folder.
+        let allowed = std::path::Path::new(&path)
+            .canonicalize()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d == std::path::Path::new(&input_dir)))
+            .unwrap_or(false);
+        if !allowed {
+            refused += 1;
+            if refusal_sample.len() < 80 {
+                refusal_sample.push_str(&format!("{name} (outside input folder); "));
+            }
+            continue;
+        }
+        if let Err(e) = std::fs::remove_file(&path) {
+            refused += 1;
+            if refusal_sample.len() < 80 {
+                refusal_sample.push_str(&format!("{name} ({e}); "));
+            }
+            continue;
+        }
+        match conn.execute("DELETE FROM image_files WHERE id = ?1", [id]) {
+            Ok(n) if n > 0 => deleted += 1,
+            Err(e) => {
+                refused += 1;
+                let reason = if e.to_string().contains("FOREIGN KEY") {
+                    "has extraction evidence".to_string()
+                } else {
+                    e.to_string()
+                };
+                let reason = reason.as_str();
+                if refusal_sample.len() < 80 {
+                    refusal_sample.push_str(&format!("{name}: {reason}; "));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok((deleted, refused, refusal_sample))
 }
 
 fn safe_rename_filename(name: &str, fallback_suffix: &str) -> String {

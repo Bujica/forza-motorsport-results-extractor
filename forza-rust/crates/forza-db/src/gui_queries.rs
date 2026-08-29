@@ -19,6 +19,13 @@ pub struct ImageInventoryRow {
     pub best_lap_status: String,
     pub processing_status: String,
     pub file_size_bytes: Option<i64>,
+    pub race_date: Option<String>,
+    pub semantic_name: Option<String>,
+    pub file_hash: String,
+    pub current_path: Option<String>,
+    /// None = not part of a duplicate group; Some(false) = duplicate,
+    /// Some(true) = canonical owner of a duplicate group.
+    pub duplicate_role: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -73,6 +80,8 @@ const FROM_CLAUSE: &str = "
 ";
 
 fn row_to_inventory(row: &Row<'_>) -> rusqlite::Result<ImageInventoryRow> {
+    let duplicate_of: Option<String> = row.get(10)?;
+    let is_canonical: i64 = row.get(11)?;
     Ok(ImageInventoryRow {
         id: row.get(0)?,
         current_name: row.get(1)?,
@@ -80,6 +89,17 @@ fn row_to_inventory(row: &Row<'_>) -> rusqlite::Result<ImageInventoryRow> {
         best_lap_status: row.get(3)?,
         processing_status: row.get(4)?,
         file_size_bytes: row.get(5)?,
+        race_date: row.get(6)?,
+        semantic_name: row.get(7)?,
+        file_hash: row.get(8)?,
+        current_path: row.get(9)?,
+        duplicate_role: if duplicate_of.is_some() {
+            Some(false)
+        } else if is_canonical > 0 {
+            Some(true)
+        } else {
+            None
+        },
     })
 }
 
@@ -131,7 +151,11 @@ pub fn image_inventory(
 
     let sql = format!(
         "SELECT i.id, i.current_name, i.file_status, i.best_lap_status,
-                {PROCESSING_PROJECTION} AS processing_status, i.size_bytes
+                {PROCESSING_PROJECTION} AS processing_status, i.size_bytes,
+                i.race_date, i.semantic_name, i.file_hash, i.current_path,
+                i.duplicate_of_image_file_id,
+                (SELECT COUNT(*) FROM image_files d
+                 WHERE d.duplicate_of_image_file_id = i.id) AS is_canonical
          {FROM_CLAUSE}
          {where_clause}
          ORDER BY LOWER(i.current_name), i.id"

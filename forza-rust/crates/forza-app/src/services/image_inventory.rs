@@ -14,6 +14,12 @@ pub struct ImageInventoryEntry {
     pub best_lap_status: String,
     pub processing_status: String,
     pub size_bytes: Option<i64>,
+    pub race_date: Option<String>,
+    pub semantic_name: Option<String>,
+    pub file_hash: String,
+    pub current_path: Option<String>,
+    /// "Duplicate" / "Canonical" / "" display value.
+    pub duplicate_label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -49,12 +55,21 @@ impl ImageInventoryFilter {
 
 fn to_entry(row: db::ImageInventoryRow) -> ImageInventoryEntry {
     ImageInventoryEntry {
+        duplicate_label: match row.duplicate_role {
+            Some(false) => "Duplicate".to_string(),
+            Some(true) => "Canonical".to_string(),
+            None => String::new(),
+        },
         id: row.id,
         name: row.current_name,
         file_status: row.file_status,
         best_lap_status: row.best_lap_status,
         processing_status: row.processing_status,
         size_bytes: row.file_size_bytes,
+        race_date: row.race_date,
+        semantic_name: row.semantic_name,
+        file_hash: row.file_hash,
+        current_path: row.current_path,
     }
 }
 

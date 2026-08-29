@@ -190,7 +190,8 @@ export component ImageDetailPage inherits Rectangle {
                                 HorizontalLayout {
                                     padding-left: 10px;
                                     spacing: 6px;
-                                    Text { text: result.status; color: result.status == "ok" ? Theme.ok : Theme.danger; width: 90px; vertical-alignment: center; }
+                                    Text { text: result.status; color: result.status == "ok" ? Theme.ok : Theme.danger; width: 80px; vertical-alignment: center; }
+                                    Text { text: result.run; color: Theme.text-faint; width: 130px; vertical-alignment: center; overflow: elide; }
                                     Text { text: result.model; color: Theme.text; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
                                     Text { text: result.attempts + " attempt(s)"; color: Theme.text-muted; width: 90px; vertical-alignment: center; }
                                     Text { text: result.duration; color: Theme.text-muted; width: 100px; vertical-alignment: center; }
@@ -217,8 +218,9 @@ export component ImageDetailPage inherits Rectangle {
                                     padding-left: 10px;
                                     spacing: 6px;
                                     Text { text: attempt.number; color: Theme.text-faint; width: 30px; vertical-alignment: center; }
-                                    Text { text: attempt.reason; color: Theme.warn; width: 100px; vertical-alignment: center; overflow: elide; }
-                                    Text { text: attempt.status; color: attempt.accepted ? Theme.ok : Theme.danger; width: 80px; vertical-alignment: center; }
+                                    Text { text: attempt.reason; color: Theme.warn; width: 90px; vertical-alignment: center; overflow: elide; }
+                                    Text { text: attempt.status; color: attempt.accepted ? Theme.ok : Theme.danger; width: 74px; vertical-alignment: center; }
+                                    Text { text: attempt.model; color: Theme.text-muted; width: 90px; vertical-alignment: center; overflow: elide; }
                                     Text { text: attempt.rejected; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
                                     Text { text: attempt.duration; color: Theme.text-muted; width: 90px; vertical-alignment: center; }
                                     Text { text: attempt.tps; color: Theme.text-muted; width: 90px; vertical-alignment: center; }

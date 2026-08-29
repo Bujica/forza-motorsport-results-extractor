@@ -3,6 +3,7 @@
 // data models in ui/models.slint; palette/typography in ui/theme.slint.
 
 import { Theme } from "theme.slint";
+import { ImageItem, ReviewItem, BestLapItem, DetailLapItem, DetailReviewItem, DetailResultItem, DetailAttemptItem, SettingItem, DebugCaseItem, DebugResultComboItem } from "models.slint";
 import { ImagesPage } from "pages/images.slint";
 import { ProcessPage } from "pages/process.slint";
 import { ReviewPage } from "pages/review.slint";
@@ -14,111 +15,6 @@ import { PerformancePage } from "pages/performance.slint";
 import { ImageDetailPage } from "pages/image_detail.slint";
 import { SettingsPage } from "pages/settings.slint";
 
-export struct ImageItem {
-    id: string,
-    name: string,
-    processing: string,
-    best-lap: string,
-    file-status: string,
-    selected: bool,
-}
-
-export struct ReviewItem {
-    number: int,
-    reason: string,
-    trigger: string,
-    driver: string,
-    track: string,
-    model-value: string,
-    status: string,
-}
-
-export struct BestLapItem {
-    track: string,
-    class: string,
-    driver: string,
-    car: string,
-    time: string,
-    weather: string,
-    temp: string,
-    source: string,
-    dirty: bool,
-    mine: bool,
-}
-
-export struct DetailLapItem {
-    index: int,
-    track: string,
-    class: string,
-    driver: string,
-    car: string,
-    time: string,
-    flags: string,
-    dirty: bool,
-    best: bool,
-}
-
-export struct DetailReviewItem {
-    number: int,
-    reason: string,
-    trigger: string,
-    driver: string,
-    track: string,
-    model-value: string,
-    status: string,
-}
-
-export struct DetailResultItem {
-    run: string,
-    status: string,
-    model: string,
-    attempts: int,
-    duration: string,
-    tokens: string,
-    created: string,
-}
-
-export struct DetailAttemptItem {
-    number: int,
-    reason: string,
-    status: string,
-    accepted: bool,
-    rejected: string,
-    model: string,
-    duration: string,
-    tps: string,
-    created: string,
-}
-
-export struct SettingItem {
-    key: string,
-    name: string,
-    value: string,
-    status: string,
-    editor: string,
-    options: string,
-    group: string,
-}
-
-export struct DebugCaseItem {
-    image-file-id: string,
-    image-name: string,
-    file-status: string,
-    processing: string,
-    best-lap: string,
-    latest-status: string,
-    run-id: string,
-    model: string,
-    attempts: int,
-    laps: int,
-    reviews: int,
-}
-
-export struct DebugResultComboItem {
-    id: string,
-    label: string,
-}
-
 export component MainWindow inherits Window {
     in-out property <string> app-version;
     title: "Forza Motorsport Results Extractor — " + root.app-version;
@@ -129,9 +25,17 @@ export component MainWindow inherits Window {
     background: Theme.bg;
 
     callback refresh-requested(string, string, string, string, string, string);
+    callback scan-folder();
     callback selection-changed(int);
     callback selection-toggle(int);
+    callback selection-single(int);
+    callback selection-range(int);
+    callback select-all();
     callback clear-selection();
+    callback export-selected();
+    callback rescan-selected();
+    callback delete-selected();
+    callback sort-changed(int);
     callback process-selected();
     callback rename-selected();
     callback reviews-requested(string);
@@ -164,6 +68,10 @@ export component MainWindow inherits Window {
     in property <[BestLapItem]> best-laps;
     in property <string> status-text;
     in property <string> best-laps-summary;
+    in property <string> selection-summary;
+    in property <int> sort-column;
+    in property <bool> sort-ascending;
+    in-out property <bool> confirm-delete;
     in property <string> detail-title;
     in property <string> detail-lines;
     in property <string> doctor-report;
@@ -307,6 +215,10 @@ export component MainWindow inherits Window {
 
             // ══ Images page ══
             if root.page == "images": ImagesPage {
+                selection-summary: root.selection-summary;
+                sort-column: root.sort-column;
+                sort-ascending: root.sort-ascending;
+                confirm-delete <=> root.confirm-delete;
                 images: root.images;
                 image-tracks: root.image-tracks;
                 image-runs: root.image-runs;
@@ -324,11 +236,19 @@ export component MainWindow inherits Window {
                 detail-preview: root.detail-preview;
                 detail-has-preview: root.detail-has-preview;
                 refresh-requested(a, b, c, d, e, f) => { root.refresh-requested(a, b, c, d, e, f); }
+                scan-folder() => { root.scan-folder(); }
                 selection-changed(i) => { root.selection-changed(i); }
                 selection-toggle(i) => { root.selection-toggle(i); }
+                selection-single(i) => { root.selection-single(i); }
+                selection-range(i) => { root.selection-range(i); }
+                select-all() => { root.select-all(); }
                 clear-selection() => { root.clear-selection(); }
                 process-selected() => { root.process-selected(); }
                 rename-selected() => { root.rename-selected(); }
+                export-selected() => { root.export-selected(); }
+                rescan-selected() => { root.rescan-selected(); }
+                delete-selected() => { root.delete-selected(); }
+                sort-changed(c) => { root.sort-changed(c); }
                 open-image-detail(i) => { root.open-image-detail(i); }
             }
 
