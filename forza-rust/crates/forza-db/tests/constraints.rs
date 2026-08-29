@@ -81,6 +81,7 @@ fn live_run_metadata_replaces_seed_defaults() {
             max_retries: 3,
             timeout_connect: 4,
             timeout_read: 90,
+            config_extra_json: None,
         },
     )
     .unwrap();

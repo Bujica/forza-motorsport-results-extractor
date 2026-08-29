@@ -66,3 +66,6 @@ forza-rust/fixtures/python_outputs/best_laps.pdf
 forza-rust/fixtures/python_outputs/artifacts/
 forza-rust/target/
 /forza-rust/docs/migration
+
+# Runtime logs (Python app writes here when run with cwd=forza/)
+/forza/output/logs/
