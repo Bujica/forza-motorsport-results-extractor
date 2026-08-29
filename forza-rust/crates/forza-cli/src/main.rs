@@ -591,12 +591,23 @@ fn main() -> anyhow::Result<()> {
                 .collect();
             if pdf {
                 let dest = out.unwrap_or_else(|| cfg.pdf_file.clone());
-                let plan = forza_output::build_pdf_plan(&export_rows, &cfg.gamertag, &[]);
-                forza_output::render_pdf(&plan, &dest).map_err(|error| anyhow::anyhow!(error))?;
+                let plan = forza_output::build_pdf_plan_ext(
+                    &export_rows,
+                    &cfg.gamertag,
+                    &[],
+                    &[],
+                    forza_output::PdfRenderOptions {
+                        show_dirty_symbol: cfg.pdf.show_dirty_lap_symbol,
+                        dirty_symbol: cfg.pdf.dirty_lap_symbol.clone(),
+                    },
+                );
+                let used_files = forza_output::render_pdf(&plan, &dest)
+                    .map_err(|error| anyhow::anyhow!(error))?;
                 println!(
-                    "exported PDF with {} rows -> {}",
+                    "exported PDF with {} rows -> {} ({} source files)",
                     plan.stats.laps,
-                    dest.display()
+                    dest.display(),
+                    used_files.len()
                 );
             } else {
                 let dest = out.unwrap_or_else(|| PathBuf::from("output/exports/results.csv"));

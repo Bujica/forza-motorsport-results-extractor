@@ -13,6 +13,7 @@
 | **Phase 1: Database Completeness** | ✅ Complete | 2026-08-27 | ~679 lines across 4 files | — (existing tests pass) |
 | **Phase 2: Application Layer Completeness** | ✅ Complete | 2026-08-28 | ~350 lines across 4 files | — (existing 86 tests pass) |
 | **Phase 3: CLI Completeness** | ✅ Complete | 2026-08-28 | ~100 lines across 2 files + full doctor battery (~1,100 lines, 2026-08-29) | 5 new doctor tests (101 total) |
+| **Phase 4: PDF Visual Renderer** | ✅ Complete | 2026-08-29 | ~700 lines rewritten in `pdf.rs` | 5 new renderer tests (139 total) |
 
 ---
 
@@ -30,7 +31,7 @@
 | forza-cli | 1 | — | — | 1 |
 | forza-gui | 5 | — | — | 6 (incl. slint) |
 
-**Tests:** 101 passing across all crates. Gates: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` — all green.
+**Tests:** 139 passing across all crates. Gates: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` — all green.
 
 ---
 
@@ -161,10 +162,13 @@ Export artifact recording is deferred to a later phase. The current export write
 
 ---
 
-### Phase 4: PDF Visual Renderer (`forza-output`)
+### Phase 4: PDF Visual Renderer (`forza-output`) ✅ Complete
 
 **Dependencies:** None (content plan already ported)
-**Estimated scope:** ~300 lines of new Rust code in `src/pdf.rs` + test file
+**Completed:** 2026-08-29
+**Scope:** ~700 lines rewritten in `src/pdf.rs` + `tests/pdf_render.rs` — all gates green, 139 tests passing
+
+**Implementation notes:** Dependency-free PDF writer (no genpdf): A4 layout with embedded Helvetica/Helvetica-Bold AFM width tables for centering/wrapping, WinAnsiEncoding text (accents + dagger symbol), named `/toc` destination with link annotations on every page, two-phase pagination (TOC pages counted before sections so heading page numbers are exact), ReportLab-matched styles (cover, track-heading bars, class-coloured table headers, player/external/alternating row fills, red dirty-lap highlighting per `cfg.pdf`), timestamped `archive/` archiving, and `used_files` returned like Python's `generate_pdf`. `build_pdf_plan_ext` adds external records + render options; `build_pdf_plan` kept as compat wrapper for the golden test. Validated visually against real data (13-page report).
 
 #### 4.1 Replace lightweight renderer with full ReportLab-equivalent
 
