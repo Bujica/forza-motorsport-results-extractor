@@ -10,7 +10,7 @@ use rusqlite::Connection;
 #[derive(Parser)]
 #[command(
     name = "forza",
-    about = "Forza Motorsport Results Extractor (Rust line)"
+    about = "Forza Motorsport Results Extractor — extract best laps from screenshots and export clean reports"
 )]
 struct Cli {
     /// Path to the configuration file.
@@ -28,9 +28,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Launch the graphical interface.
+    /// Launch the graphical interface (PySide6 desktop app).
     Gui,
     /// Process screenshots through the live extraction pipeline.
+    ///
+    /// Without flags: process all new screenshots in the input folder.
+    /// With --dry-run: list new images that would be processed, no LLM calls.
+    /// With --force: reprocess all images currently in input_dir.
+    /// With --retry-errors: reprocess only images whose latest result is error.
+    /// With --limit N: process only the first N input images.
     Run {
         /// Plan the run without contacting LM Studio or persisting results.
         #[arg(long)]
@@ -45,8 +51,15 @@ enum Command {
         limit: Option<usize>,
     },
     /// Recompute best laps and review cases without model calls.
+    ///
+    /// Regenerate reports from the current SQLite state.
+    /// Applies persisted review corrections before recomputing best-lap winners.
     Rebuild,
-    /// Export the clean best-lap table to CSV (PDF renderer lands with F10).
+    /// Export the clean best-lap table to CSV or PDF report.
+    ///
+    /// Without flags: write CSV to output/exports/results.csv.
+    /// With --out PATH: write to the given destination path.
+    /// With --pdf: render a styled PDF report instead of CSV.
     Export {
         /// Destination CSV path.
         #[arg(long)]
@@ -57,29 +70,43 @@ enum Command {
     },
     /// Validate the configuration file and print a report.
     ConfigCheck,
-    /// Database maintenance operations.
-    Maintenance {
-        #[command(subcommand)]
-        command: MaintenanceCommand,
-    },
+    /// Database maintenance operations (read-only unless --yes).
+    ///
+    /// - db-status: inspect the relational database (read-only).
+    /// - db-doctor: run read-only relational integrity checks before reruns or releases.
+    /// - db-doctor --json: emit the same DB Doctor checks as structured JSON.
+    /// - db-upgrade: create the database or apply pending migrations.
+    /// - db-reset --yes: delete the configured SQLite database before rebuilding.
+    #[command(subcommand)]
+    Maintenance(MaintenanceCommand),
 }
 
 #[derive(Subcommand)]
 enum MaintenanceCommand {
-    /// Show the schema state and row counts for all relational tables.
+    /// Inspect the relational database (read-only).
+    ///
+    /// Shows schema state and row counts for all relational tables.
     #[command(name = "db-status")]
     Status,
-    /// Run the full DB doctor battery with multi-severity grading.
+    /// Run read-only relational integrity checks before reruns or releases.
+    ///
+    /// Outputs multi-severity report (ERROR/WARN/INFO).
+    /// With --json: emit the same checks as structured JSON.
     #[command(name = "db-doctor")]
     Doctor {
         /// Emit the report as JSON.
         #[arg(long)]
         json: bool,
     },
-    /// Create the schema on an empty database (refuses foreign versions).
+    /// Create the database or apply pending migrations.
+    ///
+    /// Refuses unmanaged databases (tables present but no migration tracking).
     #[command(name = "db-upgrade")]
     Upgrade,
-    /// Delete the database files after exclusive-lock check and WAL/SHM warnings.
+    /// Delete the configured SQLite database before rebuilding a clean schema.
+    ///
+    /// Checks exclusive lock to avoid deleting an in-use database.
+    /// Requires --yes to confirm.
     #[command(name = "db-reset")]
     Reset {
         /// Skip the confirmation prompt.
@@ -573,7 +600,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::ConfigCheck => cmd_config_check(&cli.config),
-        Command::Maintenance { command } => match command {
+        Command::Maintenance(command) => match command {
             MaintenanceCommand::Status => cmd_db_status(&database_file(&cli.config)),
             MaintenanceCommand::Doctor { json } => cmd_db_doctor(&database_file(&cli.config), json),
             MaintenanceCommand::Upgrade => {
