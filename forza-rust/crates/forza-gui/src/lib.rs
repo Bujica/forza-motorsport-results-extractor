@@ -26,6 +26,7 @@ thread_local! {
     static ROW_CACHE: RefCell<Vec<ImageInventoryEntry>> = const { RefCell::new(Vec::new()) };
     static SELECTED_IMAGE_IDS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     static RUN_SELECTED_IDS: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    static RUN_START: RefCell<Option<std::time::Instant>> = const { RefCell::new(None) };
     static REVIEW_MODEL: RefCell<Option<Rc<VecModel<ReviewItem>>>> = const { RefCell::new(None) };
     static BESTLAP_MODEL: RefCell<Option<Rc<VecModel<BestLapItem>>>> = const { RefCell::new(None) };
     static GAMERTAG: RefCell<String> = const { RefCell::new(String::new()) };
@@ -47,6 +48,34 @@ thread_local! {
     static DEBUG_DETAIL_CACHE: RefCell<Option<forza_db::image_debug::ImageDebugDetail>> = const { RefCell::new(None) };
     static DEBUG_CASES_CACHE: RefCell<Vec<forza_db::image_debug::ImageDebugCase>> = const { RefCell::new(Vec::new()) };
     static CONFIG_PATH: RefCell<PathBuf> = const { RefCell::new(PathBuf::new()) };
+}
+
+/// Rate/ETA readout for the run progress bar, measured from the run's
+/// Started event (includes model preflight, so the first estimates are
+/// pessimistic and converge as images complete).
+fn compute_rate_eta(done: i32, total: i32, start: Option<std::time::Instant>) -> (String, String) {
+    let Some(start) = start else {
+        return (String::new(), String::new());
+    };
+    let elapsed = start.elapsed().as_secs_f64();
+    if done <= 0 || elapsed < 0.5 {
+        return (String::from("—"), String::from("—"));
+    }
+    let per_image = elapsed / done as f64;
+    let rate = format!("{:.1} img/min", 60.0 / per_image);
+    let remaining = (total - done).max(0) as f64 * per_image;
+    let eta = if remaining >= 3600.0 {
+        format!(
+            "{:.0}h{:02.0}m",
+            remaining / 3600.0,
+            (remaining % 3600.0) / 60.0
+        )
+    } else if remaining >= 60.0 {
+        format!("{:.0}m {:02.0}s", remaining / 60.0, remaining % 60.0)
+    } else {
+        format!("{:.0}s", remaining)
+    };
+    (rate, eta)
 }
 
 fn append_run_log(line: String) {
@@ -838,8 +867,13 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 let _ = slint::invoke_from_event_loop(move || match event {
                     forza_app::RunEvent::Started { run_id, total } => {
                         append_run_log(format!("[run {run_id}] {total} file(s) considered"));
+                        RUN_START.with(|slot| {
+                            *slot.borrow_mut() = Some(std::time::Instant::now());
+                        });
                         if let Some(w) = ui.upgrade() {
                             w.set_run_total(total as i32);
+                            w.set_run_rate("".into());
+                            w.set_run_eta("".into());
                         }
                     }
                     forza_app::RunEvent::Plan { new, cached, batch, existing, skipped } => {
@@ -866,6 +900,11 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                                 0.0
                             };
                             w.set_run_percent(percent);
+                            let (rate, eta) = RUN_START.with(|slot| {
+                                compute_rate_eta(done as i32, total as i32, *slot.borrow())
+                            });
+                            w.set_run_rate(rate.into());
+                            w.set_run_eta(eta.into());
                         }
                     }
                     forza_app::RunEvent::Log(line) => append_run_log(line),
@@ -874,6 +913,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                             "[done] cancelled={cancelled} processed={processed} ok={succeeded} fail={failed} in {elapsed_s:.1}s"
                         ));
                         RUN_CONTROL.with(|slot| *slot.borrow_mut() = None);
+                        RUN_START.with(|slot| *slot.borrow_mut() = None);
                         if let Some(w) = ui.upgrade() {
                             w.set_run_running(false);
                             w.set_run_paused(false);
@@ -889,6 +929,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                     forza_app::RunEvent::Failed(message) => {
                         append_run_log(format!("[failed] {message}"));
                         RUN_CONTROL.with(|slot| *slot.borrow_mut() = None);
+                        RUN_START.with(|slot| *slot.borrow_mut() = None);
                         if let Some(w) = ui.upgrade() {
                             w.set_run_running(false);
                             w.set_run_paused(false);

@@ -663,17 +663,16 @@ where
         drop(event_tx);
 
         // Collect worker results and events.
+        let mut w_done = 0usize;
         let mut w_succeeded = 0usize;
         let mut w_failed = 0usize;
 
         while let Ok(event) = event_rx.recv() {
             match event {
-                RunEvent::Progress { done, total: _ } => {
-                    on_event(RunEvent::Progress {
-                        done,
-                        total: total_new,
-                    });
-                }
+                // Worker progress counters are per-batch; the aggregated
+                // monotonic counter is emitted on every ImageDone so the UI
+                // never sees a worker-local (e.g. 2/6 twice) number.
+                RunEvent::Progress { .. } => {}
                 RunEvent::ImageStarted { name: _ } => {
                     on_event(event);
                 }
@@ -683,6 +682,11 @@ where
                     laps: _,
                 } => {
                     on_event(event);
+                    w_done += 1;
+                    on_event(RunEvent::Progress {
+                        done: w_done,
+                        total: total_new,
+                    });
                     if ok {
                         w_succeeded += 1;
                     } else {
