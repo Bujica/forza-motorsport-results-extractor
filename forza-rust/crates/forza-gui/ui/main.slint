@@ -1,7 +1,18 @@
-// Full GUI shell (Fase 10): sidebar navigation over the operator pages,
-// consuming application services through the typed worker channel.
+// GUI shell: sidebar navigation composing the modular operator pages.
+// Page internals live in ui/pages/*.slint; shared visuals in ui/components;
+// data models in ui/models.slint; palette/typography in ui/theme.slint.
 
-import { ComboBox, Button, ListView, CheckBox, LineEdit } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { ImagesPage } from "pages/images.slint";
+import { ProcessPage } from "pages/process.slint";
+import { ReviewPage } from "pages/review.slint";
+import { BestLapsPage } from "pages/bestlaps.slint";
+import { DiagnosticsPage } from "pages/diagnostics.slint";
+import { ImageDebugPage } from "pages/image_debug.slint";
+import { LogsPage } from "pages/logs.slint";
+import { PerformancePage } from "pages/performance.slint";
+import { ImageDetailPage } from "pages/image_detail.slint";
+import { SettingsPage } from "pages/settings.slint";
 
 export struct ImageItem {
     id: string,
@@ -111,11 +122,11 @@ export struct DebugResultComboItem {
 export component MainWindow inherits Window {
     in-out property <string> app-version;
     title: "Forza Motorsport Results Extractor — " + root.app-version;
-    min-width: 1000px;
-    min-height: 620px;
-    preferred-width: 1240px;
-    preferred-height: 760px;
-    background: #f5f7fa;
+    min-width: 1180px;
+    min-height: 640px;
+    preferred-width: 1400px;
+    preferred-height: 800px;
+    background: Theme.bg;
 
     callback refresh-requested(string, string, string, string, string, string);
     callback selection-changed(int);
@@ -209,7 +220,6 @@ export component MainWindow inherits Window {
     in property <string> run-info;
 
     in-out property <string> page: "images";
-    in-out property <string> filter-value: "all";
     in-out property <string> image-file-filter: "all";
     in-out property <string> image-best-filter: "all";
     in-out property <string> image-inventory-filter: "all";
@@ -225,19 +235,22 @@ export component MainWindow inherits Window {
     in-out property <bool> retry-checked: false;
 
     function nav-color(target: string) -> color {
-        return root.page == target ? #3a4048 : transparent;
+        return root.page == target ? Theme.sidebar-active : transparent;
     }
 
     HorizontalLayout {
 
         // ── Sidebar ──
-        VerticalLayout {
+        Rectangle {
             width: 190px;
+            background: Theme.sidebar-bg;
+
+            VerticalLayout {
             padding: 8px;
             spacing: 4px;
 
-            Text { text: "FM Results"; color: #1f2937; font-weight: 800; font-size: 15px; }
-            Text { text: root.context-gamertag; color: #667085; font-size: 11px; }
+            Text { text: "FM Results"; color: Theme.sidebar-text; font-weight: 800; font-size: Theme.font-lg; }
+            Text { text: root.context-gamertag; color: Theme.sidebar-muted; font-size: Theme.font-sm; }
             Rectangle { height: 8px; }
 
             for entry in [
@@ -262,7 +275,7 @@ export component MainWindow inherits Window {
                     Text {
                         x: 10px;
                         text: entry.label;
-                        color: #344054;
+                        color: root.page == entry.key ? Theme.text-on-dark : Theme.sidebar-muted;
                         vertical-alignment: center;
                     }
                 }
@@ -271,13 +284,14 @@ export component MainWindow inherits Window {
             Rectangle { vertical-stretch: 1; }
             Text {
                 text: root.context-db;
-                color: #6c7683;
-                font-size: 9px;
+                color: Theme.sidebar-muted;
+                font-size: Theme.font-xs;
                 wrap: word-wrap;
+            }
             }
         }
 
-        Rectangle { width: 1px; background: #d0d5dd; }
+        Rectangle { width: 1px; background: Theme.border; }
 
         // ── Main column ──
         VerticalLayout {
@@ -286,959 +300,146 @@ export component MainWindow inherits Window {
 
             Text {
                 text: root.status-text;
-                color: #667085;
+                color: Theme.text-muted;
                 horizontal-alignment: right;
                 height: 22px;
             }
 
             // ══ Images page ══
-            if root.page == "images": VerticalLayout {
-                spacing: 6px;
-
-                HorizontalLayout {
-                    height: 32px;
-                    spacing: 8px;
-                    Text { text: "Images"; color: #d0d0d0; font-weight: 700; width: 90px; }
-                    ComboBox { width: 120px; model: ["all", "available", "missing"];
-                        current-index: 0; selected => { root.image-file-filter = self.current-value;
-                            root.refresh-requested(root.image-file-filter, root.image-best-filter,
-                                root.image-inventory-filter, root.image-track-filter,
-                                root.image-run-filter, root.image-process-filter); } }
-                    ComboBox { width: 140px; model: ["all", "pending", "contributing", "non_contributing"];
-                        current-index: 0; selected => { root.image-best-filter = self.current-value;
-                            root.refresh-requested(root.image-file-filter, root.image-best-filter,
-                                root.image-inventory-filter, root.image-track-filter,
-                                root.image-run-filter, root.image-process-filter); } }
-                    ComboBox { width: 125px; model: ["all", "duplicate"];
-                        current-index: 0; selected => { root.image-inventory-filter = self.current-value;
-                            root.refresh-requested(root.image-file-filter, root.image-best-filter,
-                                root.image-inventory-filter, root.image-track-filter,
-                                root.image-run-filter, root.image-process-filter); } }
-                    ComboBox { width: 180px; model: root.image-tracks;
-                        current-index: 0; selected => { root.image-track-filter = self.current-value;
-                            root.refresh-requested(root.image-file-filter, root.image-best-filter,
-                                root.image-inventory-filter, root.image-track-filter,
-                                root.image-run-filter, root.image-process-filter); } }
-                    ComboBox { width: 180px; model: root.image-runs;
-                        current-index: 0; selected => { root.image-run-filter = self.current-value;
-                            root.refresh-requested(root.image-file-filter, root.image-best-filter,
-                                root.image-inventory-filter, root.image-track-filter,
-                                root.image-run-filter, root.image-process-filter); } }
-                    ComboBox { width: 140px; model: ["all", "unprocessed", "processing", "processed_ok",
-                                "processed_error", "cancelled", "skipped"];
-                        current-index: 0; selected => { root.image-process-filter = self.current-value;
-                            root.filter-value = self.current-value;
-                            root.refresh-requested(root.image-file-filter, root.image-best-filter,
-                                root.image-inventory-filter, root.image-track-filter,
-                                root.image-run-filter, root.image-process-filter); } }
-                    Button { text: "Refresh"; clicked => { root.refresh-requested(root.image-file-filter,
-                        root.image-best-filter, root.image-inventory-filter, root.image-track-filter,
-                        root.image-run-filter, root.image-process-filter); } }
-                    Text { text: "Selected: " + root.selected-image-count; color: #9aa4b2; vertical-alignment: center; }
-                    Button { text: "Clear selection"; enabled: root.selected-image-count > 0; clicked => { root.clear-selection(); } }
-                }
-
-                HorizontalLayout {
-                    spacing: 8px;
-                    vertical-stretch: 1;
-
-                    Rectangle {
-background: #ffffff;
-                        border-radius: 6px;
-                        clip: true;
-                        vertical-stretch: 1;
-                        lv := ListView {
-                            x: 4px; y: 4px;
-                            width: parent.width - 8px;
-                            height: parent.height - 8px;
-                            for item[index] in root.images: TouchArea {
-                                height: 30px;
-                                width: lv.width;
-                                clicked => {
-                                    root.selected-index = index;
-                                    root.selection-toggle(index);
-                                    root.selection-changed(index);
-                                }
-                                Rectangle {
-                                    x: 1px; y: 1px;
-                                    width: parent.width - 2px;
-                                    height: parent.height - 2px;
-                                    border-radius: 4px;
-                                    background: item.selected ? #3a4048 : transparent;
-                                    HorizontalLayout {
-                                        padding-left: 8px;
-                                        Text { text: item.name; color: #e6e6e6; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
-                                        Text { text: item.processing; width: 128px; vertical-alignment: center;
-                                               color: item.processing == "processed_ok" ? #7bd88f :
-                                                      item.processing == "processed_error" ? #ef6b6b :
-                                                      item.processing == "processing" ? #ffd166 : #9aa4b2; }
-                                        Text { text: item.best-lap; color: #9aa4b2; width: 118px; vertical-alignment: center; }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    VerticalLayout {
-                        width: 330px;
-                        spacing: 6px;
-                        Text { text: root.detail-title; color: #d0d0d0; font-weight: 700; }
-                        Rectangle {
-                            height: 190px;
-background: #ffffff;
-                            border-radius: 6px;
-                            clip: true;
-                            if root.detail-has-preview: Image {
-                                width: parent.width;
-                                height: parent.height;
-                                source: root.detail-preview;
-                                image-fit: contain;
-                            }
-                            if !root.detail-has-preview: Text {
-                                width: parent.width;
-                                y: parent.height / 2 - 9px;
-                                text: "preview unavailable";
-                                color: #6c7683;
-                                horizontal-alignment: center;
-                            }
-                        }
-                        Rectangle {
-background: #ffffff;
-                            border-radius: 6px;
-                            vertical-stretch: 1;
-                            Text { x: 10px; y: 8px; width: parent.width - 20px;
-                                   text: root.detail-lines; color: #cfd6dd; wrap: word-wrap; font-size: 12px; }
-                        }
-                        Button {
-                            text: "Details…";
-                            enabled: root.selected-index >= 0;
-                            clicked => { root.open-image-detail(root.selected-index); }
-                        }
-                        HorizontalLayout {
-                            spacing: 6px;
-                            Button {
-                                text: "Process selected";
-                                enabled: root.selected-image-count > 0 && !root.run-running;
-                                clicked => { root.process-selected(); }
-                            }
-                            Button {
-                                text: "Rename";
-                                enabled: root.selected-image-count > 0 && !root.run-running;
-                                clicked => { root.rename-selected(); }
-                            }
-                        }
-                    }
-                }
+            if root.page == "images": ImagesPage {
+                images: root.images;
+                image-tracks: root.image-tracks;
+                image-runs: root.image-runs;
+                image-file-filter <=> root.image-file-filter;
+                image-best-filter <=> root.image-best-filter;
+                image-inventory-filter <=> root.image-inventory-filter;
+                image-track-filter <=> root.image-track-filter;
+                image-run-filter <=> root.image-run-filter;
+                image-process-filter <=> root.image-process-filter;
+                selected-index <=> root.selected-index;
+                selected-image-count <=> root.selected-image-count;
+                run-running: root.run-running;
+                detail-title: root.detail-title;
+                detail-lines: root.detail-lines;
+                detail-preview: root.detail-preview;
+                detail-has-preview: root.detail-has-preview;
+                refresh-requested(a, b, c, d, e, f) => { root.refresh-requested(a, b, c, d, e, f); }
+                selection-changed(i) => { root.selection-changed(i); }
+                selection-toggle(i) => { root.selection-toggle(i); }
+                clear-selection() => { root.clear-selection(); }
+                process-selected() => { root.process-selected(); }
+                rename-selected() => { root.rename-selected(); }
+                open-image-detail(i) => { root.open-image-detail(i); }
             }
 
             // ══ Process page ══
-            if root.page == "process": VerticalLayout {
-                spacing: 8px;
-
-                // Run Config card
-                Rectangle {
-background: #ffffff;
-                    border-radius: 6px;
-                    HorizontalLayout {
-                        padding: 10px;
-                        spacing: 10px;
-                        VerticalLayout {
-                            spacing: 6px;
-                            HorizontalLayout {
-                                spacing: 10px;
-                                CheckBox { text: "Dry-run"; checked <=> root.dry-run-checked; }
-                                CheckBox {
-                                    text: "Force";
-                                    checked <=> root.force-checked;
-                                    toggled => { if self.checked { root.retry-checked = false; } }
-                                }
-                                CheckBox {
-                                    text: "Retry errors";
-                                    checked <=> root.retry-checked;
-                                    toggled => { if self.checked { root.force-checked = false; } }
-                                }
-                                CheckBox { text: "Debug"; enabled: false; }
-                            }
-                            Text { text: root.run-info; color: #9aa4b2; font-size: 11px; }
-                        }
-                        Rectangle {}
-                        HorizontalLayout {
-                            spacing: 6px;
-                            Button {
-                                text: root.run-running ? "Running…" : "Run All";
-                                enabled: !root.run-running;
-                                clicked => { root.start-run(root.dry-run-checked, root.force-checked, root.retry-checked); }
-                            }
-                            Button {
-                                text: root.run-paused ? "Resume" : "Pause";
-                                enabled: root.run-running;
-                                clicked => { root.toggle-pause(); }
-                            }
-                            Button {
-                                text: "Cancel";
-                                enabled: root.run-running;
-                                clicked => { root.cancel-run(); }
-                            }
-                        }
-                    }
-                }
-
-                // Progress card
-                Rectangle {
-background: #ffffff;
-                    border-radius: 6px;
-                    HorizontalLayout {
-                        padding: 10px;
-                        spacing: 10px;
-                        VerticalLayout {
-                            spacing: 6px;
-                            Text { text: "Progress"; color: #d0d0d0; font-weight: 700; }
-                            Rectangle {
-                                height: 14px;
-                                background: #3a3d42;
-                                border-radius: 7px;
-                                Rectangle {
-                                    x: 0; y: 0;
-                                    height: parent.height;
-                                    border-radius: 7px;
-                                    background: #4c8bf5;
-                                    width: parent.width * root.run-percent / 100;
-                                }
-                            }
-                            HorizontalLayout {
-                                Text { text: root.run-paused ? "Paused" : root.run-running ? "Running" : "Ready"; color: root.run-paused ? #ffd166 : #9aa4b2; horizontal-stretch: 1; }
-                                Text { text: root.run-done + " / " + root.run-total; color: #9aa4b2; horizontal-stretch: 1; horizontal-alignment: center; }
-                                Text { text: "Rate: " + root.run-rate; color: #9aa4b2; horizontal-stretch: 1; horizontal-alignment: center; }
-                                Text { text: "ETA: " + root.run-eta; color: #9aa4b2; horizontal-stretch: 1; horizontal-alignment: right; }
-                            }
-                        }
-                    }
-                }
-
-                // Event Log card
-                Rectangle {
-background: #ffffff;
-                    border-radius: 6px;
-                    vertical-stretch: 1;
-                    clip: true;
-                    elv := ListView {
-                        x: 6px; y: 6px;
-                        width: parent.width - 12px;
-                        height: parent.height - 12px;
-                        for line in root.run-log: Text {
-                            height: 18px;
-                            width: elv.width;
-                            text: line;
-                            color: #cfd6dd;
-                            font-size: 11px;
-                        }
-                    }
-                }
+            if root.page == "process": ProcessPage {
+                run-running: root.run-running;
+                run-paused: root.run-paused;
+                run-percent: root.run-percent;
+                run-done: root.run-done;
+                run-total: root.run-total;
+                run-rate: root.run-rate;
+                run-eta: root.run-eta;
+                run-log: root.run-log;
+                run-info: root.run-info;
+                dry-run-checked <=> root.dry-run-checked;
+                force-checked <=> root.force-checked;
+                retry-checked <=> root.retry-checked;
+                start-run(dry, force, retry) => { root.start-run(dry, force, retry); }
+                cancel-run() => { root.cancel-run(); }
+                toggle-pause() => { root.toggle-pause(); }
             }
 
             // ══ Review page ══
-            if root.page == "review": VerticalLayout {
-                spacing: 6px;
-
-                HorizontalLayout {
-                    height: 32px;
-                    spacing: 8px;
-                    Text { text: "Review Queue"; color: #d0d0d0; font-weight: 700; width: 120px; }
-                    ComboBox {
-                        width: 160px;
-                        model: ["open", "resolved", "all"];
-                        current-index: 0;
-                        selected => { root.reviews-requested(self.current-value); }
-                    }
-                    Button { text: "Reload"; clicked => { root.reviews-requested("open"); } }
-                }
-
-                Rectangle {
-background: #ffffff;
-                    border-radius: 6px;
-                    clip: true;
-                    vertical-stretch: 1;
-                    rlv := ListView {
-                        x: 4px; y: 4px;
-                        width: parent.width - 8px;
-                        height: parent.height - 8px;
-                        for case in root.reviews: Rectangle {
-                            height: 46px;
-                            width: rlv.width;
-                            HorizontalLayout {
-                                padding-left: 10px;
-                                spacing: 8px;
-                                Text { text: "#" + case.number; color: #9aa4b2; width: 48px; vertical-alignment: center; }
-                                Text { text: case.reason; color: #ffd166; width: 110px; vertical-alignment: center; }
-                                Text { text: case.driver; color: #e6e6e6; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                Text { text: case.track; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                Text { text: case.model-value; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                Text { text: case.status; color: #9aa4b2; width: 96px; vertical-alignment: center; }
-                                if case.status == "open": HorizontalLayout {
-                                    spacing: 4px;
-                                    width: 230px;
-                                    Button { text: "Not dirty"; clicked => { root.case-decided(case.number, "dirty", "false"); } }
-                                    Button { text: "Dirty"; clicked => { root.case-decided(case.number, "dirty", "true"); } }
-                                    Button { text: "Ignore"; clicked => { root.case-ignored(case.number); } }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Text {
-                    text: "Decisions apply the correction, resolve the case and rebuild derived state.";
-                    color: #6c7683;
-                    font-size: 11px;
-                }
+            if root.page == "review": ReviewPage {
+                reviews: root.reviews;
+                reviews-requested(bucket) => { root.reviews-requested(bucket); }
+                case-decided(n, f, v) => { root.case-decided(n, f, v); }
+                case-ignored(n) => { root.case-ignored(n); }
             }
 
             // ══ Best Laps page ══
-            if root.page == "best-laps": VerticalLayout {
-                spacing: 6px;
-
-                Text { text: "Relational frontier equivalent to the PDF/CSV output."; color: #9aa4b2; font-size: 11px; }
-
-                Rectangle {
-                    height: 42px;
-background: #ffffff;
-                    border-radius: 6px;
-                    Text { x: 12px; y: 12px; text: root.best-laps-summary; color: #cfd6dd; }
-                }
-
-                HorizontalLayout {
-                    height: 32px;
-                    spacing: 8px;
-                    Text { text: "Best Laps"; color: #d0d0d0; font-weight: 700; width: 100px; }
-                    Button { text: "Reload"; clicked => { root.bestlaps-requested(); } }
-                    Button { text: "Rebuild derived state"; clicked => { root.rebuild-requested(); } }
-                }
-
-                Rectangle {
-background: #ffffff;
-                    border-radius: 6px;
-                    clip: true;
-                    vertical-stretch: 1;
-                    height: 420px;
-                    VerticalLayout {
-                        padding: 4px;
-                        spacing: 4px;
-                        Rectangle {
-                            height: 26px;
-                            background: #eaecf0;
-                            HorizontalLayout {
-                                padding-left: 8px;
-                                Text { text: "Track"; width: 300px; color: #344054; vertical-alignment: center; overflow: elide; }
-                                Text { text: "Class"; width: 65px; color: #667085; vertical-alignment: center; }
-                                Text { text: "Driver"; width: 130px; color: #344054; vertical-alignment: center; }
-                                Text { text: "Car"; width: 170px; color: #667085; vertical-alignment: center; overflow: elide; }
-                                Text { text: "Best lap"; width: 105px; color: #344054; vertical-alignment: center; }
-                                Text { text: "Weather"; width: 70px; color: #667085; vertical-alignment: center; }
-                                Text { text: "Temp"; width: 60px; color: #667085; vertical-alignment: center; }
-                                Text { text: "Source"; width: 100px; color: #667085; vertical-alignment: center; }
-                            }
-                        }
-                        blv := ListView {
-                            horizontal-stretch: 1;
-                            vertical-stretch: 1;
-                            for lap in root.best-laps: Rectangle {
-                                height: 30px;
-                                horizontal-stretch: 1;
-                                background: lap.mine ? #fff4cc : (lap.dirty ? #fee4e2 : transparent);
-                                HorizontalLayout {
-                                    padding-left: 8px;
-                                    Text { text: lap.track; color: #344054; width: 300px; overflow: elide; vertical-alignment: center; }
-                                    Text { text: lap.class; color: #667085; width: 65px; vertical-alignment: center; }
-                                    Text { text: lap.driver; color: lap.mine ? #946f00 : #344054; width: 130px; overflow: elide; vertical-alignment: center; }
-                                    Text { text: lap.car; color: #667085; width: 170px; overflow: elide; vertical-alignment: center; }
-                                    Text { text: lap.time; color: lap.dirty ? #b42318 : #087443; width: 105px; vertical-alignment: center; }
-                                    Text { text: lap.weather; color: #667085; width: 70px; overflow: elide; vertical-alignment: center; }
-                                    Text { text: lap.temp; color: #667085; width: 60px; vertical-alignment: center; }
-                                    Text { text: lap.source; color: #667085; width: 100px; overflow: elide; vertical-alignment: center; }
-                                }
-                            }
-                        }
-                    }
-                    if root.best-laps.length == 0: Text {
-                        x: 12px; y: 12px;
-                        text: "No best laps found. Use Reload or Rebuild derived state.";
-                        color: #9aa4b2;
-                    }
-                }
+            if root.page == "best-laps": BestLapsPage {
+                best-laps: root.best-laps;
+                best-laps-summary: root.best-laps-summary;
+                bestlaps-requested() => { root.bestlaps-requested(); }
+                rebuild-requested() => { root.rebuild-requested(); }
             }
 
             // ══ Diagnostics page ══
-            if root.page == "diagnostics": VerticalLayout {
-                spacing: 8px;
-
-                HorizontalLayout {
-                    height: 32px;
-                    spacing: 8px;
-                    Text { text: "Diagnostics"; color: #d0d0d0; font-weight: 700; width: 110px; }
-                    Button { text: "Run DB Doctor"; clicked => { root.doctor-requested(); } }
-                    Button { text: "Rebuild derived state"; clicked => { root.rebuild-requested(); } }
-                }
-
-                Rectangle {
-background: #ffffff;
-                    border-radius: 6px;
-                    vertical-stretch: 1;
-                    Text {
-                        x: 12px; y: 10px;
-                        width: parent.width - 24px;
-                        text: root.doctor-report;
-                        color: #cfd6dd;
-                        wrap: word-wrap;
-                    }
-                }
+            if root.page == "diagnostics": DiagnosticsPage {
+                doctor-report: root.doctor-report;
+                doctor-requested() => { root.doctor-requested(); }
+                rebuild-requested() => { root.rebuild-requested(); }
             }
 
             // ══ Image Debug page ══
-            if root.page == "image-debug": VerticalLayout {
-                spacing: 8px;
-
-                HorizontalLayout {
-                    height: 32px;
-                    spacing: 8px;
-                    Text { text: "Image Debug"; color: #d0d0d0; font-weight: 700; width: 120px; }
-                    Button { text: "Refresh"; clicked => { root.debug-refresh-requested(); } }
-                    Text { text: root.debug-selected-image-id; color: #6c7683; font-size: 10px; overflow: elide; horizontal-stretch: 1; }
-                }
-
-                // Cases list
-                Rectangle {
-background: #ffffff;
-                    border-radius: 6px;
-                    height: 260px;
-                    clip: true;
-                    dcv := ListView {
-                        x: 4px; y: 4px;
-                        width: parent.width - 8px;
-                        height: parent.height - 8px;
-                        for item[index] in root.debug-cases: TouchArea {
-                            height: 28px;
-                            width: dcv.width;
-                            clicked => { root.debug-case-selected(index); }
-                            Rectangle {
-                                x: 1px; y: 1px;
-                                width: parent.width - 2px;
-                                height: parent.height - 2px;
-                                border-radius: 4px;
-                                background: root.debug-selected-image-id == item.image-file-id ? #3a4048 : transparent;
-                                HorizontalLayout {
-                                    padding-left: 8px;
-                                    spacing: 6px;
-                                    Text { text: item.image-name; color: #e6e6e6; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
-                                    Text { text: item.processing; color: item.processing == "processed_ok" ? #7bd88f : item.processing == "processed_error" ? #ef6b6b : #9aa4b2; width: 110px; vertical-alignment: center; }
-                                    Text { text: item.latest-status; color: #9aa4b2; width: 90px; vertical-alignment: center; }
-                                    Text { text: item.model; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                    Text { text: item.attempts + " att"; color: #6c7683; width: 60px; vertical-alignment: center; }
-                                    Text { text: item.laps + " laps"; color: #6c7683; width: 70px; vertical-alignment: center; }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Detail header
-                HorizontalLayout {
-                    height: 32px;
-                    spacing: 8px;
-                    Text { text: root.debug-title; color: #e6e6e6; font-weight: 700; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                    ComboBox {
-                        width: 220px;
-                        model: root.debug-result-labels;
-                        current-index: 0;
-                        selected(value) => { root.debug-result-selected(root.debug-results[self.current-index].id); }
-                    }
-                    Button { text: "Image details"; clicked => { root.debug-open-image-detail(); } }
-                }
-
-                // Tabs
-                HorizontalLayout {
-                    height: 30px;
-                    spacing: 4px;
-                    for tab in [
-                        { key: "overview", label: "Overview" },
-                        { key: "metadata", label: "Metadata" },
-                        { key: "results", label: "Results" },
-                        { key: "attempts", label: "Attempts" },
-                        { key: "response", label: "Response" },
-                        { key: "parsed", label: "Parsed" },
-                        { key: "laps", label: "Laps & Reviews" },
-                        { key: "timeline", label: "Timeline" },
-                    ]: Rectangle {
-                        border-radius: 4px;
-                        background: root.debug-tab == tab.key ? #3a4048 : #26282c;
-                        width: 110px;
-                        TouchArea {
-                            clicked => { root.debug-tab = tab.key; }
-                            Text {
-                                text: tab.label;
-                                color: root.debug-tab == tab.key ? #ffffff : #9aa4b2;
-                                font-size: 11px;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                                width: parent.width;
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-background: #ffffff;
-                    border-radius: 6px;
-                    vertical-stretch: 1;
-                    clip: true;
-                    Text {
-                        x: 10px; y: 8px;
-                        width: parent.width - 20px;
-                        height: parent.height - 16px;
-                        text: root.debug-tab == "overview" ? root.debug-overview-text :
-                              root.debug-tab == "metadata" ? root.debug-metadata-text :
-                              root.debug-tab == "results" ? root.debug-results-text :
-                              root.debug-tab == "attempts" ? root.debug-attempts-text :
-                              root.debug-tab == "response" ? root.debug-response-text :
-                              root.debug-tab == "parsed" ? root.debug-parsed-text :
-                              root.debug-tab == "laps" ? root.debug-laps-reviews-text :
-                              root.debug-timeline-text;
-                        color: #cfd6dd;
-                        wrap: word-wrap;
-                        font-size: 11px;
-                    }
-                }
+            if root.page == "image-debug": ImageDebugPage {
+                debug-cases: root.debug-cases;
+                debug-results: root.debug-results;
+                debug-result-labels: root.debug-result-labels;
+                debug-title: root.debug-title;
+                debug-selected-image-id: root.debug-selected-image-id;
+                debug-selected-result-id: root.debug-selected-result-id;
+                debug-tab <=> root.debug-tab;
+                debug-overview-text: root.debug-overview-text;
+                debug-metadata-text: root.debug-metadata-text;
+                debug-results-text: root.debug-results-text;
+                debug-attempts-text: root.debug-attempts-text;
+                debug-response-text: root.debug-response-text;
+                debug-parsed-text: root.debug-parsed-text;
+                debug-laps-reviews-text: root.debug-laps-reviews-text;
+                debug-timeline-text: root.debug-timeline-text;
+                debug-refresh-requested() => { root.debug-refresh-requested(); }
+                debug-case-selected(i) => { root.debug-case-selected(i); }
+                debug-result-selected(id) => { root.debug-result-selected(id); }
+                debug-open-image-detail() => { root.debug-open-image-detail(); }
             }
 
             // ══ Logs page ══
-            if root.page == "logs": VerticalLayout {
-                spacing: 8px;
-
-                HorizontalLayout {
-                    height: 32px;
-                    spacing: 8px;
-                    Text { text: "Technical Logs"; color: #d0d0d0; font-weight: 700; width: 140px; }
-                    Rectangle {}
-                    Button { text: "Reload"; clicked => { root.logs-reload-requested(); } }
-                }
-
-                HorizontalLayout {
-                    height: 30px;
-                    spacing: 4px;
-                    for tab in [
-                        { key: "app", label: "Application Log" },
-                        { key: "errors", label: "Errors" },
-                    ]: Rectangle {
-                        border-radius: 4px;
-                        background: root.logs-tab == tab.key ? #3a4048 : #26282c;
-                        width: 150px;
-                        TouchArea {
-                            clicked => { root.logs-tab = tab.key; }
-                            Text {
-                                text: tab.label;
-                                color: root.logs-tab == tab.key ? #ffffff : #9aa4b2;
-                                font-size: 11px;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                                width: parent.width;
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-background: #ffffff;
-                    border-radius: 6px;
-                    vertical-stretch: 1;
-                    clip: true;
-                    Text {
-                        x: 10px; y: 8px;
-                        width: parent.width - 20px;
-                        height: parent.height - 16px;
-                        text: root.logs-tab == "app" ? root.app-log-text : root.error-log-text;
-                        color: #cfd6dd;
-                        wrap: word-wrap;
-                        font-size: 11px;
-                    }
-                }
+            if root.page == "logs": LogsPage {
+                app-log-text: root.app-log-text;
+                error-log-text: root.error-log-text;
+                logs-tab <=> root.logs-tab;
+                logs-reload-requested() => { root.logs-reload-requested(); }
             }
 
-            // ══ Performance page ══
-            if root.page == "performance": VerticalLayout {
-                spacing: 8px;
-
-                HorizontalLayout {
-                    height: 32px;
-                    spacing: 8px;
-                    Text { text: "Performance"; color: #d0d0d0; font-weight: 700; width: 120px; }
-                    Text { text: "TPS floor / reload policy from Settings (LM Studio backend)"; color: #6c7683; font-size: 11px; horizontal-stretch: 1; }
-                }
-
-                Rectangle {
-background: #ffffff;
-                    border-radius: 6px;
-                    vertical-stretch: 1;
-                    Text {
-                        x: 14px; y: 14px;
-                        width: parent.width - 28px;
-                        text: "Performance dashboard — live extraction metrics (tokens/s, slow-streak, reload triggers) will appear here after runs.\n\nCurrent policy from configuration:\n  • performance_tps_floor\n  • performance_reload_elapsed_s\n  • performance_reload_streak\n\nHistory is persisted per attempt (see Image Debug → Attempts).";
-                        color: #9aa4b2;
-                        wrap: word-wrap;
-                        font-size: 12px;
-                    }
-                }
-            }
+            // ══ Performance page (deferred scope) ══
+            if root.page == "performance": PerformancePage {}
 
             // ══ Image Detail page ══
-            if root.page == "image-detail": VerticalLayout {
-                spacing: 8px;
-
-                HorizontalLayout {
-                    height: 34px;
-                    spacing: 8px;
-                    Text {
-                        text: root.detail-title;
-color: #344054;
-                        font-weight: 800;
-                        font-size: 16px;
-                        horizontal-stretch: 1;
-                        overflow: elide;
-                        vertical-alignment: center;
-                    }
-                    Text { text: root.detail-badges; color: #7bd88f; font-size: 11px; vertical-alignment: center; }
-                }
-
-                HorizontalLayout {
-                    spacing: 8px;
-                    vertical-stretch: 1;
-
-                    // Preview card
-                    VerticalLayout {
-                        width: 460px;
-                        spacing: 6px;
-                        Text { text: "Preview"; color: #d0d0d0; font-weight: 700; }
-                        Rectangle {
-background: #ffffff;
-                            border-radius: 6px;
-                            vertical-stretch: 1;
-                            clip: true;
-                            if root.detail-has-preview: Image {
-                                width: parent.width;
-                                height: parent.height;
-                                source: root.detail-preview;
-                                image-fit: contain;
-                            }
-                            if !root.detail-has-preview: Text {
-                                width: parent.width;
-                                y: parent.height / 2 - 10px;
-                                text: "preview unavailable";
-                                color: #6c7683;
-                                horizontal-alignment: center;
-                            }
-                        }
-                        Text { text: root.detail-path; color: #6c7683; font-size: 10px; overflow: elide; }
-                    }
-
-                    // Tabs + content
-                    VerticalLayout {
-                        spacing: 6px;
-                        horizontal-stretch: 1;
-
-                        HorizontalLayout {
-                            height: 30px;
-                            spacing: 4px;
-                            for tab in [
-                                { key: "metadata", label: "Metadata" },
-                                { key: "laps", label: "Laps" },
-                                { key: "reviews", label: "Review cases" },
-                                { key: "extractions", label: "Extractions" },
-                                { key: "attempts", label: "Attempts" },
-                            ]: Rectangle {
-                                border-radius: 4px;
-                                background: root.detail-tab == tab.key ? #3a4048 : #26282c;
-                                width: 108px;
-                                TouchArea {
-                                    clicked => { root.detail-tab-changed(tab.key); }
-                                    Rectangle {
-                                        Text {
-                                            text: tab.label;
-                                            color: root.detail-tab == tab.key ? #ffffff : #9aa4b2;
-                                            font-size: 11px;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                            width: parent.width;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Rectangle {
-background: #ffffff;
-                            border-radius: 6px;
-                            vertical-stretch: 1;
-                            clip: true;
-
-                            // Metadata tab
-                            if root.detail-tab == "metadata": Text {
-                                x: 12px; y: 10px;
-                                width: parent.width - 24px;
-                                text: root.detail-meta;
-                                color: #cfd6dd;
-                                wrap: word-wrap;
-                                font-size: 12px;
-                            }
-
-                            // Laps tab
-                            if root.detail-tab == "laps": Rectangle {
-                                x: 4px; y: 4px;
-                                width: parent.width - 8px;
-                                height: parent.height - 8px;
-                                dl := ListView {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    for lap in root.detail-laps: Rectangle {
-                                        height: 28px;
-                                        width: dl.width;
-                                        background: lap.best ? #2c3325 : (lap.dirty ? #3a2525 : transparent);
-                                        HorizontalLayout {
-                                            padding-left: 10px;
-                                            spacing: 6px;
-                                            Text { text: lap.index; color: #6c7683; width: 36px; vertical-alignment: center; }
-                                            Text { text: lap.track; color: #e6e6e6; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
-                                            Text { text: lap.class; color: #9aa4b2; width: 54px; vertical-alignment: center; }
-                                            Text { text: lap.driver; color: lap.best ? #ffd166 : #cfd6dd; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                            Text { text: lap.car; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                            Text { text: lap.time; color: lap.dirty ? #ef6b6b : #7bd88f; width: 110px; vertical-alignment: center; }
-                                            Text { text: lap.flags; color: #9aa4b2; width: 60px; vertical-alignment: center; }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Review cases tab
-                            if root.detail-tab == "reviews": Rectangle {
-                                x: 4px; y: 4px;
-                                width: parent.width - 8px;
-                                height: parent.height - 8px;
-                                drl := ListView {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    for case in root.detail-reviews: Rectangle {
-                                        height: 30px;
-                                        width: drl.width;
-                                        HorizontalLayout {
-                                            padding-left: 10px;
-                                            spacing: 6px;
-                                            Text { text: "#" + case.number; color: #6c7683; width: 48px; vertical-alignment: center; }
-                                            Text { text: case.reason; color: #ffd166; width: 110px; vertical-alignment: center; }
-                                            Text { text: case.driver; color: #e6e6e6; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                            Text { text: case.track; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                            Text { text: case.model-value; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                            Text { text: case.status; color: #9aa4b2; width: 96px; vertical-alignment: center; }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Extractions tab
-                            if root.detail-tab == "extractions": Rectangle {
-                                x: 4px; y: 4px;
-                                width: parent.width - 8px;
-                                height: parent.height - 8px;
-                                derl := ListView {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    for result in root.detail-results: Rectangle {
-                                        height: 30px;
-                                        width: derl.width;
-                                        HorizontalLayout {
-                                            padding-left: 10px;
-                                            spacing: 6px;
-                                            Text { text: result.status; color: result.status == "ok" ? #7bd88f : #ef6b6b; width: 90px; vertical-alignment: center; }
-                                            Text { text: result.model; color: #e6e6e6; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
-                                            Text { text: result.attempts + " attempt(s)"; color: #9aa4b2; width: 90px; vertical-alignment: center; }
-                                            Text { text: result.duration; color: #9aa4b2; width: 100px; vertical-alignment: center; }
-                                            Text { text: result.tokens; color: #9aa4b2; width: 110px; vertical-alignment: center; }
-                                            Text { text: result.created; color: #6c7683; width: 150px; vertical-alignment: center; overflow: elide; }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Attempts tab
-                            if root.detail-tab == "attempts": Rectangle {
-                                x: 4px; y: 4px;
-                                width: parent.width - 8px;
-                                height: parent.height - 8px;
-                                dal := ListView {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    for attempt in root.detail-attempts: Rectangle {
-                                        height: 30px;
-                                        width: dal.width;
-                                        HorizontalLayout {
-                                            padding-left: 10px;
-                                            spacing: 6px;
-                                            Text { text: attempt.number; color: #6c7683; width: 30px; vertical-alignment: center; }
-                                            Text { text: attempt.reason; color: #ffd166; width: 100px; vertical-alignment: center; overflow: elide; }
-                                            Text { text: attempt.status; color: attempt.accepted ? #7bd88f : #ef6b6b; width: 80px; vertical-alignment: center; }
-                                            Text { text: attempt.rejected; color: #9aa4b2; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                            Text { text: attempt.duration; color: #9aa4b2; width: 90px; vertical-alignment: center; }
-                                            Text { text: attempt.tps; color: #9aa4b2; width: 90px; vertical-alignment: center; }
-                                            Text { text: attempt.created; color: #6c7683; width: 150px; vertical-alignment: center; overflow: elide; }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                HorizontalLayout {
-                    height: 34px;
-                    spacing: 8px;
-                    Button { text: "← Previous"; clicked => { root.detail-prev(); } }
-                    Button { text: "Next →"; clicked => { root.detail-next(); } }
-                    Button { text: "Open image debug"; enabled: root.detail-loaded; clicked => { root.open-image-debug(root.detail-image-id); } }
-                    Rectangle {}
-                    Button { text: "Close"; clicked => { root.detail-close(); } }
-                }
+            if root.page == "image-detail": ImageDetailPage {
+                detail-title: root.detail-title;
+                detail-badges: root.detail-badges;
+                detail-path: root.detail-path;
+                detail-image-id: root.detail-image-id;
+                detail-meta: root.detail-meta;
+                detail-tab: root.detail-tab;
+                detail-loaded: root.detail-loaded;
+                detail-preview: root.detail-preview;
+                detail-has-preview: root.detail-has-preview;
+                detail-laps: root.detail-laps;
+                detail-reviews: root.detail-reviews;
+                detail-results: root.detail-results;
+                detail-attempts: root.detail-attempts;
+                detail-tab-changed(t) => { root.detail-tab-changed(t); }
+                detail-prev() => { root.detail-prev(); }
+                detail-next() => { root.detail-next(); }
+                detail-close() => { root.detail-close(); }
+                open-image-debug(id) => { root.open-image-debug(id); }
             }
 
             // ══ Settings page ══
-            if root.page == "settings": VerticalLayout {
-                spacing: 8px;
-
-                HorizontalLayout {
-                    height: 40px;
-                    spacing: 8px;
-                    VerticalLayout {
-                        width: 320px;
-                        Text { text: "Settings"; color: #e6e6e6; font-weight: 800; font-size: 16px; }
-                        Text { text: "Paths, backend, model, prompt, and validation."; color: #9aa4b2; font-size: 11px; }
-                    }
-                    Rectangle {}
-                    Button { text: "Discard / reload"; clicked => { root.discard-settings(); } }
-                    Button {
-                        text: "Save changes";
-                        enabled: root.settings-dirty;
-                        clicked => { root.save-settings(); }
-                    }
-                }
-
-                // Validation bar
-                Rectangle {
-background: #ffffff;
-                    border-radius: 6px;
-                    height: 44px;
-                    HorizontalLayout {
-                        padding-left: 14px;
-                        padding-right: 14px;
-                        spacing: 10px;
-                        Text { text: "Validation"; color: #d0d0d0; font-weight: 700; vertical-alignment: center; }
-                        Rectangle {
-                            width: 64px;
-                            height: 20px;
-                            border-radius: 10px;
-                            y: 12px;
-                            background: root.settings-dirty && root.settings-valid ? #6b5b23 :
-                                        root.settings-valid ? #2c4a2e : #5a2626;
-                            Text {
-                                text: root.settings-dirty && root.settings-valid ? "changed" :
-                                      root.settings-valid ? "valid" : "invalid";
-                                color: root.settings-valid ? #cfe8cf : #f2c4c4;
-                                font-size: 10px;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                                width: parent.width;
-                                height: parent.height;
-                            }
-                        }
-                        Text {
-                            text: root.settings-validation-text;
-                            color: root.settings-valid ? #9aa4b2 : #ef6b6b;
-                            font-size: 11px;
-                            wrap: word-wrap;
-                            horizontal-stretch: 1;
-                            vertical-alignment: center;
-                        }
-                        Text {
-                            text: root.settings-message;
-                            color: #ffd166;
-                            font-size: 11px;
-                            horizontal-stretch: 1;
-                            vertical-alignment: center;
-                            overflow: elide;
-                        }
-                    }
-                }
-
-                // Rows
-                Rectangle {
-background: #ffffff;
-                    border-radius: 6px;
-                    vertical-stretch: 1;
-                    clip: true;
-                    slv := ListView {
-                        x: 4px; y: 4px;
-                        width: parent.width - 8px;
-                        height: parent.height - 8px;
-                        for row[index] in root.settings-rows: VerticalLayout {
-                            // Group header
-                            if index == 0 || root.settings-rows[index - 1].group != row.group: Rectangle {
-                                height: 26px;
-                                background: #303338;
-                                Text {
-                                    x: 10px;
-                                    text: row.group;
-color: #344054;
-                                    font-weight: 700;
-                                    font-size: 11px;
-                                    vertical-alignment: center;
-                                }
-                            }
-                            // Editable row
-                            Rectangle {
-                                height: 30px;
-                                background: row.status == "pending" ? #3a3325 : transparent;
-                                HorizontalLayout {
-                                    padding-left: 10px;
-                                    padding-right: 10px;
-                                    spacing: 8px;
-                                    Text { text: row.name; color: #cfd6dd; width: 200px; vertical-alignment: center; overflow: elide; }
-                                    if row.editor == "bool": ComboBox {
-                                        width: 110px;
-                                        model: ["True", "False"];
-                                        current-index: row.value == "True" ? 0 : 1;
-                                        selected => { root.setting-edited(row.key, self.current-value); }
-                                    }
-                                    if row.editor != "bool": LineEdit {
-                                        horizontal-stretch: 1;
-                                        text: row.value;
-                                        input-type: row.editor == "int" ? InputType.number :
-                                                    row.editor == "float" ? InputType.decimal : InputType.text;
-                                        accepted(value) => { root.setting-edited(row.key, value); }
-                                    }
-                                    Text {
-                                        text: row.status;
-                                        width: 70px;
-                                        vertical-alignment: center;
-                                        font-size: 11px;
-                                        color: row.status == "pending" ? #ffd166 :
-                                               row.status == "ok" ? #7bd88f :
-                                               row.status == "invalid" ? #ef6b6b : #d19a3d;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Text {
-                    text: "Edit values in the value column. Saving validates first, creates a backup of the current INI, then writes the file.";
-                    color: #6c7683;
-                    font-size: 11px;
-                }
+            if root.page == "settings": SettingsPage {
+                settings-rows: root.settings-rows;
+                settings-valid: root.settings-valid;
+                settings-validation-text: root.settings-validation-text;
+                settings-dirty: root.settings-dirty;
+                settings-message: root.settings-message;
+                setting-edited(k, v) => { root.setting-edited(k, v); }
+                discard-settings() => { root.discard-settings(); }
+                save-settings() => { root.save-settings(); }
             }
         }
     }

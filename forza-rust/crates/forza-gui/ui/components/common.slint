@@ -1,0 +1,97 @@
+// Shared visual components used by every page.
+
+import { ComboBox } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+
+// White content card with the standard padding and radius.
+export component Card inherits Rectangle {
+    background: Theme.card;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.border;
+}
+
+// Rounded pill label for status readouts (valid/invalid, PASS/WARN/FAIL...).
+export component Badge inherits Rectangle {
+    in property <string> label;
+    in property <color> fg;
+    in property <color> bg;
+    border-radius: 9px;
+    background: bg;
+    height: 18px;
+    min-width: 48px;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        Text {
+            text: root.label;
+            color: fg;
+            font-size: Theme.font-xs;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+    }
+}
+
+// Friendly empty state for list/table cards.
+export component EmptyState inherits Text {
+    color: Theme.text-faint;
+    font-size: Theme.font-md;
+    horizontal-alignment: center;
+    vertical-alignment: center;
+    wrap: word-wrap;
+}
+
+// One sortable column header cell: label + optional direction arrow.
+export component SortHeaderCell inherits TouchArea {
+    in property <string> label;
+    in property <length> col-min-width: 60px;
+    in property <int> sort-state; // 0 none, 1 asc, 2 desc
+    callback sort-clicked();
+    min-width: root.col-min-width;
+    height: 26px;
+    clicked => { root.sort-clicked(); }
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 4px;
+        alignment: start;
+        Text {
+            text: root.label;
+            color: Theme.text-muted;
+            font-size: Theme.font-sm;
+            font-weight: 700;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Text {
+            text: root.sort-state == 1 ? "▲" : root.sort-state == 2 ? "▼" : "";
+            color: Theme.accent;
+            font-size: Theme.font-xs;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// Standard filter-bar combo label + value pair.
+export component FilterCombo inherits HorizontalLayout {
+    in property <string> label;
+    in property <[string]> model-value;
+    in-out property <int> current-index;
+    callback selected(string);
+    spacing: 4px;
+    alignment: start;
+    Text {
+        text: root.label + ":";
+        color: Theme.text-muted;
+        font-size: Theme.font-sm;
+        vertical-alignment: center;
+    }
+    ComboBox {
+        min-width: 110px;
+        model: root.model-value;
+        current-index <=> root.current-index;
+        selected(value) => { root.selected(value); }
+    }
+}

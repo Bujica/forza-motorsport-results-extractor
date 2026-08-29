@@ -1,0 +1,142 @@
+// Settings page: grouped editable configuration rows with live validation.
+
+import { Button, ComboBox, LineEdit, ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { SettingItem } from "../models.slint";
+import { Card, Badge } from "../components/common.slint";
+
+export component SettingsPage inherits Rectangle {
+    background: transparent;
+
+    in property <[SettingItem]> settings-rows;
+    in property <bool> settings-valid;
+    in property <string> settings-validation-text;
+    in property <bool> settings-dirty;
+    in property <string> settings-message;
+
+    callback setting-edited(string, string);
+    callback discard-settings();
+    callback save-settings();
+
+    VerticalLayout {
+        spacing: 8px;
+
+        HorizontalLayout {
+            height: 40px;
+            spacing: 8px;
+            VerticalLayout {
+                width: 320px;
+                Text { text: "Settings"; color: Theme.text; font-weight: 800; font-size: Theme.font-xl; }
+                Text { text: "Paths, backend, model, prompt, and validation."; color: Theme.text-muted; font-size: Theme.font-sm; }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Button { text: "Discard / reload"; clicked => { root.discard-settings(); } }
+            Button {
+                text: "Save changes";
+                enabled: root.settings-dirty;
+                clicked => { root.save-settings(); }
+            }
+        }
+
+        // Validation bar
+        Card {
+            height: 44px;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 10px;
+                Text { text: "Validation"; color: Theme.text; font-weight: 700; vertical-alignment: center; }
+                Badge {
+                    label: root.settings-dirty && root.settings-valid ? "changed" :
+                           root.settings-valid ? "valid" : "invalid";
+                    fg: root.settings-dirty && root.settings-valid ? Theme.warn :
+                        root.settings-valid ? Theme.ok : Theme.danger;
+                    bg: root.settings-dirty && root.settings-valid ? Theme.warn-soft :
+                        root.settings-valid ? Theme.ok-soft : Theme.danger-soft;
+                }
+                Text {
+                    text: root.settings-validation-text;
+                    color: root.settings-valid ? Theme.text-muted : Theme.danger;
+                    font-size: Theme.font-sm;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.settings-message;
+                    color: Theme.warn;
+                    font-size: Theme.font-sm;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+        }
+
+        // Rows
+        Card {
+            vertical-stretch: 1;
+            clip: true;
+            slv := ListView {
+                x: 4px; y: 4px;
+                width: parent.width - 8px;
+                height: parent.height - 8px;
+                for row[index] in root.settings-rows: VerticalLayout {
+                    // Group header
+                    if index == 0 || root.settings-rows[index - 1].group != row.group: Rectangle {
+                        height: 26px;
+                        background: Theme.header-bg;
+                        border-radius: 4px;
+                        Text {
+                            x: 10px;
+                            text: row.group;
+                            color: Theme.text;
+                            font-weight: 700;
+                            font-size: Theme.font-sm;
+                            vertical-alignment: center;
+                        }
+                    }
+                    // Editable row
+                    Rectangle {
+                        height: Theme.row-h;
+                        background: row.status == "pending" ? Theme.warn-soft : transparent;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 8px;
+                            Text { text: row.name; color: Theme.text; width: 220px; vertical-alignment: center; overflow: elide; }
+                            if row.editor == "bool": ComboBox {
+                                width: 110px;
+                                model: ["True", "False"];
+                                current-index: row.value == "True" ? 0 : 1;
+                                selected => { root.setting-edited(row.key, self.current-value); }
+                            }
+                            if row.editor != "bool": LineEdit {
+                                horizontal-stretch: 1;
+                                text: row.value;
+                                input-type: row.editor == "int" ? InputType.number :
+                                            row.editor == "float" ? InputType.decimal : InputType.text;
+                                accepted(value) => { root.setting-edited(row.key, value); }
+                            }
+                            Text {
+                                text: row.status;
+                                width: 70px;
+                                vertical-alignment: center;
+                                font-size: Theme.font-sm;
+                                color: row.status == "pending" ? Theme.warn :
+                                       row.status == "ok" ? Theme.ok :
+                                       row.status == "invalid" ? Theme.danger : Theme.text-faint;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Text {
+            text: "Edit values in the value column. Saving validates first, creates a backup of the current INI, then writes the file.";
+            color: Theme.text-faint;
+            font-size: Theme.font-sm;
+        }
+    }
+}

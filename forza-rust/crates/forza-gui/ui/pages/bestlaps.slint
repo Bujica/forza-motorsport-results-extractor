@@ -1,0 +1,84 @@
+// Best Laps page: the persisted frontier shown as a flat table (grouping,
+// filters and exports arrive with the Best Laps parity phase).
+
+import { Button, ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { BestLapItem } from "../models.slint";
+import { Card, EmptyState } from "../components/common.slint";
+
+export component BestLapsPage inherits Rectangle {
+    background: transparent;
+
+    in property <[BestLapItem]> best-laps;
+    in property <string> best-laps-summary;
+    callback bestlaps-requested();
+    callback rebuild-requested();
+
+    VerticalLayout {
+        spacing: 6px;
+
+        Text { text: "Relational frontier equivalent to the PDF/CSV output."; color: Theme.text-muted; font-size: Theme.font-sm; }
+
+        Card {
+            height: 42px;
+            Text { x: 12px; y: 12px; text: root.best-laps-summary; color: Theme.text-muted; }
+        }
+
+        HorizontalLayout {
+            height: 32px;
+            spacing: 8px;
+            Text { text: "Best Laps"; color: Theme.text; font-weight: 700; min-width: 80px; vertical-alignment: center; }
+            Button { text: "Reload"; clicked => { root.bestlaps-requested(); } }
+            Button { text: "Rebuild derived state"; clicked => { root.rebuild-requested(); } }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        Card {
+            clip: true;
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding: 4px;
+                spacing: 4px;
+                Rectangle {
+                    height: 26px;
+                    background: Theme.header-bg;
+                    border-radius: 4px;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        Text { text: "Track"; min-width: 140px; horizontal-stretch: 2.4; vertical-alignment: center; overflow: elide; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
+                        Text { text: "Class"; min-width: 40px; horizontal-stretch: 0.6; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
+                        Text { text: "Driver"; min-width: 90px; horizontal-stretch: 1.4; vertical-alignment: center; overflow: elide; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
+                        Text { text: "Car"; min-width: 110px; horizontal-stretch: 1.6; vertical-alignment: center; overflow: elide; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
+                        Text { text: "Best lap"; min-width: 80px; horizontal-stretch: 1.1; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
+                        Text { text: "Weather"; min-width: 60px; horizontal-stretch: 0.9; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
+                        Text { text: "Temp"; min-width: 45px; horizontal-stretch: 0.7; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
+                        Text { text: "Source"; horizontal-stretch: 1; vertical-alignment: center; overflow: elide; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
+                    }
+                }
+                blv := ListView {
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+                    for lap[index] in root.best-laps: Rectangle {
+                        height: Theme.row-h;
+                        horizontal-stretch: 1;
+                        background: lap.mine ? Theme.row-mine : (lap.dirty ? Theme.row-dirty : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent));
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            Text { text: lap.track; color: Theme.text; min-width: 140px; horizontal-stretch: 2.4; overflow: elide; vertical-alignment: center; }
+                            Text { text: lap.class; color: Theme.text-muted; min-width: 40px; horizontal-stretch: 0.6; vertical-alignment: center; }
+                            Text { text: lap.driver; color: lap.mine ? Theme.warn : Theme.text; min-width: 90px; horizontal-stretch: 1.4; overflow: elide; vertical-alignment: center; }
+                            Text { text: lap.car; color: Theme.text-muted; min-width: 110px; horizontal-stretch: 1.6; overflow: elide; vertical-alignment: center; }
+                            Text { text: lap.time; color: lap.dirty ? Theme.danger : Theme.ok; min-width: 80px; horizontal-stretch: 1.1; vertical-alignment: center; }
+                            Text { text: lap.weather; color: Theme.text-muted; min-width: 60px; horizontal-stretch: 0.9; overflow: elide; vertical-alignment: center; }
+                            Text { text: lap.temp; color: Theme.text-muted; min-width: 45px; horizontal-stretch: 0.7; vertical-alignment: center; }
+                            Text { text: lap.source; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                        }
+                    }
+                }
+            }
+            if root.best-laps.length == 0: EmptyState {
+                text: "No best laps found. Use Reload or Rebuild derived state.";
+            }
+        }
+    }
+}

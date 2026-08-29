@@ -1,0 +1,106 @@
+// Data models exchanged between the Rust worker and the UI pages.
+
+export struct ImageItem {
+    id: string,
+    name: string,
+    processing: string,
+    best-lap: string,
+    file-status: string,
+    selected: bool,
+}
+
+export struct ReviewItem {
+    number: int,
+    reason: string,
+    trigger: string,
+    driver: string,
+    track: string,
+    model-value: string,
+    status: string,
+}
+
+export struct BestLapItem {
+    track: string,
+    class: string,
+    driver: string,
+    car: string,
+    time: string,
+    weather: string,
+    temp: string,
+    source: string,
+    dirty: bool,
+    mine: bool,
+}
+
+export struct DetailLapItem {
+    index: int,
+    track: string,
+    class: string,
+    driver: string,
+    car: string,
+    time: string,
+    flags: string,
+    dirty: bool,
+    best: bool,
+}
+
+export struct DetailReviewItem {
+    number: int,
+    reason: string,
+    trigger: string,
+    driver: string,
+    track: string,
+    model-value: string,
+    status: string,
+}
+
+export struct DetailResultItem {
+    run: string,
+    status: string,
+    model: string,
+    attempts: int,
+    duration: string,
+    tokens: string,
+    created: string,
+}
+
+export struct DetailAttemptItem {
+    number: int,
+    reason: string,
+    status: string,
+    accepted: bool,
+    rejected: string,
+    model: string,
+    duration: string,
+    tps: string,
+    created: string,
+}
+
+export struct SettingItem {
+    key: string,
+    name: string,
+    value: string,
+    status: string,
+    editor: string,
+    options: string,
+    group: string,
+}
+
+export struct DebugCaseItem {
+    image-file-id: string,
+    image-name: string,
+    file-status: string,
+    processing: string,
+    best-lap: string,
+    latest-status: string,
+    run-id: string,
+    model: string,
+    attempts: int,
+    laps: int,
+    reviews: int,
+}
+
+export struct DebugResultComboItem {
+    id: string,
+    label: string,
+}

@@ -1,0 +1,69 @@
+// Logs page: application log and errors log side-by-side tabs.
+
+import { Button } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Card, EmptyState } from "../components/common.slint";
+
+export component LogsPage inherits Rectangle {
+    background: transparent;
+
+    in property <string> app-log-text;
+    in property <string> error-log-text;
+    in-out property <string> logs-tab;
+
+    callback logs-reload-requested();
+
+    VerticalLayout {
+        spacing: 8px;
+
+        HorizontalLayout {
+            height: 32px;
+            spacing: 8px;
+            Text { text: "Technical Logs"; color: Theme.text; font-weight: 700; min-width: 110px; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Button { text: "Reload"; clicked => { root.logs-reload-requested(); } }
+        }
+
+        HorizontalLayout {
+            height: 30px;
+            spacing: 4px;
+            for tab in [
+                { key: "app", label: "Application Log" },
+                { key: "errors", label: "Errors" },
+            ]: Rectangle {
+                border-radius: 4px;
+                background: root.logs-tab == tab.key ? Theme.accent : Theme.header-bg;
+                min-width: 130px;
+                TouchArea {
+                    clicked => { root.logs-tab = tab.key; }
+                    Text {
+                        text: tab.label;
+                        color: root.logs-tab == tab.key ? #ffffff : Theme.text-muted;
+                        font-size: Theme.font-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        width: parent.width;
+                    }
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        Card {
+            vertical-stretch: 1;
+            clip: true;
+            Text {
+                x: 10px; y: 8px;
+                width: parent.width - 20px;
+                height: parent.height - 16px;
+                text: root.logs-tab == "app" ? root.app-log-text : root.error-log-text;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                font-size: Theme.font-sm;
+            }
+            if (root.logs-tab == "app" ? root.app-log-text : root.error-log-text) == "": EmptyState {
+                text: "Log file is empty or missing.";
+            }
+        }
+    }
+}

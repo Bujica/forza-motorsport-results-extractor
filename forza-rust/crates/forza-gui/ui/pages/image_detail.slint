@@ -1,0 +1,245 @@
+// Image Detail pseudo-page: full preview plus laps/reviews/extractions/attempts.
+
+import { Button, ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { DetailAttemptItem, DetailLapItem, DetailResultItem, DetailReviewItem } from "../models.slint";
+import { Card, EmptyState } from "../components/common.slint";
+
+export component ImageDetailPage inherits Rectangle {
+    background: transparent;
+
+    in property <string> detail-title;
+    in property <string> detail-badges;
+    in property <string> detail-path;
+    in property <string> detail-image-id;
+    in property <string> detail-meta;
+    in property <string> detail-tab;
+    in property <bool> detail-loaded;
+    in property <image> detail-preview;
+    in property <bool> detail-has-preview;
+    in property <[DetailLapItem]> detail-laps;
+    in property <[DetailReviewItem]> detail-reviews;
+    in property <[DetailResultItem]> detail-results;
+    in property <[DetailAttemptItem]> detail-attempts;
+
+    callback detail-tab-changed(string);
+    callback detail-prev();
+    callback detail-next();
+    callback detail-close();
+    callback open-image-debug(string);
+
+    VerticalLayout {
+        spacing: 8px;
+
+        HorizontalLayout {
+            height: 34px;
+            spacing: 8px;
+            Text {
+                text: root.detail-title;
+                color: Theme.text;
+                font-weight: 800;
+                font-size: Theme.font-xl;
+                horizontal-stretch: 1;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+            Text { text: root.detail-badges; color: Theme.ok; font-size: Theme.font-sm; vertical-alignment: center; }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            vertical-stretch: 1;
+
+            // Preview card
+            VerticalLayout {
+                width: 460px;
+                spacing: 6px;
+                Text { text: "Preview"; color: Theme.text; font-weight: 700; }
+                Card {
+                    vertical-stretch: 1;
+                    clip: true;
+                    if root.detail-has-preview: Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: root.detail-preview;
+                        image-fit: contain;
+                    }
+                    if !root.detail-has-preview: Text {
+                        width: parent.width;
+                        y: parent.height / 2 - 10px;
+                        text: "preview unavailable";
+                        color: Theme.text-faint;
+                        horizontal-alignment: center;
+                    }
+                }
+                Text { text: root.detail-path; color: Theme.text-faint; font-size: Theme.font-xs; overflow: elide; }
+            }
+
+            // Tabs + content
+            VerticalLayout {
+                spacing: 6px;
+                horizontal-stretch: 1;
+
+                HorizontalLayout {
+                    height: 30px;
+                    spacing: 4px;
+                    for tab in [
+                        { key: "metadata", label: "Metadata" },
+                        { key: "laps", label: "Laps" },
+                        { key: "reviews", label: "Review cases" },
+                        { key: "extractions", label: "Extractions" },
+                        { key: "attempts", label: "Attempts" },
+                    ]: Rectangle {
+                        border-radius: 4px;
+                        background: root.detail-tab == tab.key ? Theme.accent : Theme.header-bg;
+                        min-width: 100px;
+                        horizontal-stretch: 1;
+                        TouchArea {
+                            clicked => { root.detail-tab-changed(tab.key); }
+                            Text {
+                                text: tab.label;
+                                color: root.detail-tab == tab.key ? #ffffff : Theme.text-muted;
+                                font-size: Theme.font-sm;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                width: parent.width;
+                            }
+                        }
+                    }
+                }
+
+                Card {
+                    vertical-stretch: 1;
+                    clip: true;
+
+                    // Metadata tab
+                    if root.detail-tab == "metadata": Text {
+                        x: 12px; y: 10px;
+                        width: parent.width - 24px;
+                        text: root.detail-meta;
+                        color: Theme.text-muted;
+                        wrap: word-wrap;
+                        font-size: Theme.font-md;
+                    }
+
+                    // Laps tab
+                    if root.detail-tab == "laps": Rectangle {
+                        x: 4px; y: 4px;
+                        width: parent.width - 8px;
+                        height: parent.height - 8px;
+                        dl := ListView {
+                            width: parent.width;
+                            height: parent.height;
+                            for lap[index] in root.detail-laps: Rectangle {
+                                height: 28px;
+                                width: dl.width;
+                                background: lap.best ? Theme.row-mine : (lap.dirty ? Theme.row-dirty : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent));
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    spacing: 6px;
+                                    Text { text: lap.index; color: Theme.text-faint; width: 36px; vertical-alignment: center; }
+                                    Text { text: lap.track; color: Theme.text; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
+                                    Text { text: lap.class; color: Theme.text-muted; width: 54px; vertical-alignment: center; }
+                                    Text { text: lap.driver; color: lap.best ? Theme.warn : Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                    Text { text: lap.car; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                    Text { text: lap.time; color: lap.dirty ? Theme.danger : Theme.ok; width: 110px; vertical-alignment: center; }
+                                    Text { text: lap.flags; color: Theme.text-muted; width: 60px; vertical-alignment: center; }
+                                }
+                            }
+                        }
+                        if root.detail-laps.length == 0: EmptyState { text: "No lap records for this image."; }
+                    }
+
+                    // Review cases tab
+                    if root.detail-tab == "reviews": Rectangle {
+                        x: 4px; y: 4px;
+                        width: parent.width - 8px;
+                        height: parent.height - 8px;
+                        drl := ListView {
+                            width: parent.width;
+                            height: parent.height;
+                            for case in root.detail-reviews: Rectangle {
+                                height: Theme.row-h;
+                                width: drl.width;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    spacing: 6px;
+                                    Text { text: "#" + case.number; color: Theme.text-faint; width: 48px; vertical-alignment: center; }
+                                    Text { text: case.reason; color: Theme.warn; width: 105px; vertical-alignment: center; }
+                                    Text { text: case.driver; color: Theme.text; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                    Text { text: case.track; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                    Text { text: case.model-value; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                    Text { text: case.status; color: Theme.text-muted; width: 90px; vertical-alignment: center; }
+                                }
+                            }
+                        }
+                        if root.detail-reviews.length == 0: EmptyState { text: "No review cases for this image."; }
+                    }
+
+                    // Extractions tab
+                    if root.detail-tab == "extractions": Rectangle {
+                        x: 4px; y: 4px;
+                        width: parent.width - 8px;
+                        height: parent.height - 8px;
+                        derl := ListView {
+                            width: parent.width;
+                            height: parent.height;
+                            for result in root.detail-results: Rectangle {
+                                height: Theme.row-h;
+                                width: derl.width;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    spacing: 6px;
+                                    Text { text: result.status; color: result.status == "ok" ? Theme.ok : Theme.danger; width: 90px; vertical-alignment: center; }
+                                    Text { text: result.model; color: Theme.text; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
+                                    Text { text: result.attempts + " attempt(s)"; color: Theme.text-muted; width: 90px; vertical-alignment: center; }
+                                    Text { text: result.duration; color: Theme.text-muted; width: 100px; vertical-alignment: center; }
+                                    Text { text: result.tokens; color: Theme.text-muted; width: 110px; vertical-alignment: center; }
+                                    Text { text: result.created; color: Theme.text-faint; width: 150px; vertical-alignment: center; overflow: elide; }
+                                }
+                            }
+                        }
+                        if root.detail-results.length == 0: EmptyState { text: "No extraction results for this image."; }
+                    }
+
+                    // Attempts tab
+                    if root.detail-tab == "attempts": Rectangle {
+                        x: 4px; y: 4px;
+                        width: parent.width - 8px;
+                        height: parent.height - 8px;
+                        dal := ListView {
+                            width: parent.width;
+                            height: parent.height;
+                            for attempt in root.detail-attempts: Rectangle {
+                                height: Theme.row-h;
+                                width: dal.width;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    spacing: 6px;
+                                    Text { text: attempt.number; color: Theme.text-faint; width: 30px; vertical-alignment: center; }
+                                    Text { text: attempt.reason; color: Theme.warn; width: 100px; vertical-alignment: center; overflow: elide; }
+                                    Text { text: attempt.status; color: attempt.accepted ? Theme.ok : Theme.danger; width: 80px; vertical-alignment: center; }
+                                    Text { text: attempt.rejected; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                    Text { text: attempt.duration; color: Theme.text-muted; width: 90px; vertical-alignment: center; }
+                                    Text { text: attempt.tps; color: Theme.text-muted; width: 90px; vertical-alignment: center; }
+                                    Text { text: attempt.created; color: Theme.text-faint; width: 150px; vertical-alignment: center; overflow: elide; }
+                                }
+                            }
+                        }
+                        if root.detail-attempts.length == 0: EmptyState { text: "No attempts recorded."; }
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            height: 34px;
+            spacing: 8px;
+            Button { text: "← Previous"; clicked => { root.detail-prev(); } }
+            Button { text: "Next →"; clicked => { root.detail-next(); } }
+            Button { text: "Open image debug"; enabled: root.detail-loaded; clicked => { root.open-image-debug(root.detail-image-id); } }
+            Rectangle { horizontal-stretch: 1; }
+            Button { text: "Close"; clicked => { root.detail-close(); } }
+        }
+    }
+}

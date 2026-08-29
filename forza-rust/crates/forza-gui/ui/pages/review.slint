@@ -1,0 +1,74 @@
+// Review queue page: bucket filter, case list, and quick dirty-lap actions.
+// (Full per-reason action panel arrives with the Review parity phase.)
+
+import { Button, ComboBox, ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { ReviewItem } from "../models.slint";
+import { Card, EmptyState } from "../components/common.slint";
+
+export component ReviewPage inherits Rectangle {
+    background: transparent;
+
+    in property <[ReviewItem]> reviews;
+    callback reviews-requested(string);
+    callback case-decided(int, string, string);
+    callback case-ignored(int);
+
+    VerticalLayout {
+        spacing: 6px;
+
+        HorizontalLayout {
+            height: 32px;
+            spacing: 8px;
+            Text { text: "Review Queue"; color: Theme.text; font-weight: 700; min-width: 100px; vertical-alignment: center; }
+            ComboBox {
+                min-width: 150px;
+                model: ["open", "resolved", "all"];
+                current-index: 0;
+                selected => { root.reviews-requested(self.current-value); }
+            }
+            Button { text: "Reload"; clicked => { root.reviews-requested("open"); } }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        Card {
+            clip: true;
+            vertical-stretch: 1;
+            rlv := ListView {
+                x: 4px; y: 4px;
+                width: parent.width - 8px;
+                height: parent.height - 8px;
+                for case in root.reviews: Rectangle {
+                    height: Theme.row-h-tall;
+                    width: rlv.width;
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        spacing: 8px;
+                        Text { text: "#" + case.number; color: Theme.text-muted; min-width: 48px; vertical-alignment: center; }
+                        Text { text: case.reason; color: Theme.warn; min-width: 105px; vertical-alignment: center; }
+                        Text { text: case.driver; color: Theme.text; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                        Text { text: case.track; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                        Text { text: case.model-value; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                        Text { text: case.status; color: Theme.text-muted; min-width: 90px; vertical-alignment: center; }
+                        if case.status == "open": HorizontalLayout {
+                            spacing: 4px;
+                            width: 230px;
+                            Button { text: "Not dirty"; clicked => { root.case-decided(case.number, "dirty", "false"); } }
+                            Button { text: "Dirty"; clicked => { root.case-decided(case.number, "dirty", "true"); } }
+                            Button { text: "Ignore"; clicked => { root.case-ignored(case.number); } }
+                        }
+                    }
+                }
+            }
+            if root.reviews.length == 0: EmptyState {
+                text: "Review queue is clear.";
+            }
+        }
+
+        Text {
+            text: "Decisions apply the correction, resolve the case and rebuild derived state.";
+            color: Theme.text-faint;
+            font-size: Theme.font-sm;
+        }
+    }
+}

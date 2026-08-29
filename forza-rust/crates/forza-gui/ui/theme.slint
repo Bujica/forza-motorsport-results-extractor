@@ -1,0 +1,57 @@
+// Global design system: single source of truth for palette, typography and
+// spacing. Light theme — all text-on-card combinations must keep at least
+// WCAG-AA-ish contrast (the pre-theme layout mixed dark-theme leftovers on
+// white cards and was unreadable).
+
+export global Theme {
+    // ── Surfaces ──
+    out property <color> bg: #f5f7fa;            // window background
+    out property <color> card: #ffffff;          // content card
+    out property <color> card-alt: #f8f9fa;      // alternating rows
+    out property <color> header-bg: #eaecf0;     // table header strip
+    out property <color> border: #d8dee6;        // hairline borders
+    out property <color> divider: #e4e8ee;
+
+    // ── Sidebar (kept dark for contrast with the light workspace) ──
+    out property <color> sidebar-bg: #2c3138;
+    out property <color> sidebar-text: #e8ecef;
+    out property <color> sidebar-muted: #aeb6bf;
+    out property <color> sidebar-active: #3a4048;
+
+    // ── Text (dark on light surfaces) ──
+    out property <color> text: #1f2933;          // primary
+    out property <color> text-muted: #5f6b7a;    // secondary
+    out property <color> text-faint: #8a94a3;    // tertiary/hints
+    out property <color> text-on-dark: #e8ecef;
+
+    // ── Accents & status ──
+    out property <color> accent: #0f6cbd;
+    out property <color> accent-soft: #eaf3fc;
+    out property <color> ok: #1d7a45;
+    out property <color> ok-soft: #e2f5e9;
+    out property <color> warn: #8a6116;
+    out property <color> warn-soft: #fdf3d7;
+    out property <color> danger: #b3261e;
+    out property <color> danger-soft: #fde8e7;
+    out property <color> progress: #4c8bf5;
+    out property <color> selection-bg: #dbeafe;  // focused row on light cards
+    out property <color> row-selected: #e8f1fb;  // multi-selected row tint
+
+    // Best-laps semantic tints (Python parity)
+    out property <color> row-mine: #fff4cc;
+    out property <color> row-dirty: #fde8e7;
+    out property <color> row-external: #ddeefa;
+
+    // ── Typography ──
+    out property <length> font-xs: 9px;
+    out property <length> font-sm: 11px;
+    out property <length> font-md: 12px;
+    out property <length> font-lg: 15px;
+    out property <length> font-xl: 17px;
+
+    // ── Spacing & metrics ──
+    out property <length> radius: 6px;
+    out property <length> row-h: 30px;
+    out property <length> row-h-tall: 46px;
+    out property <length> card-pad: 8px;
+}

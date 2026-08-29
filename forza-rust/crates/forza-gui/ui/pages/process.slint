@@ -1,0 +1,133 @@
+// Process page: run configuration, progress with rate/ETA, and the event log.
+
+import { Button, CheckBox, ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Card, EmptyState } from "../components/common.slint";
+
+export component ProcessPage inherits Rectangle {
+    background: transparent;
+
+    in property <bool> run-running;
+    in property <bool> run-paused;
+    in property <float> run-percent;
+    in property <int> run-done;
+    in property <int> run-total;
+    in property <string> run-rate;
+    in property <string> run-eta;
+    in property <[string]> run-log;
+    in property <string> run-info;
+    in-out property <bool> dry-run-checked;
+    in-out property <bool> force-checked;
+    in-out property <bool> retry-checked;
+
+    callback start-run(bool, bool, bool);
+    callback cancel-run();
+    callback toggle-pause();
+
+    VerticalLayout {
+        spacing: 8px;
+
+        // Run Config card
+        Card {
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 10px;
+                VerticalLayout {
+                    spacing: 6px;
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: start;
+                        CheckBox { text: "Dry-run"; checked <=> root.dry-run-checked; }
+                        CheckBox {
+                            text: "Force";
+                            checked <=> root.force-checked;
+                            toggled => { if self.checked { root.retry-checked = false; } }
+                        }
+                        CheckBox {
+                            text: "Retry errors";
+                            checked <=> root.retry-checked;
+                            toggled => { if self.checked { root.force-checked = false; } }
+                        }
+                        CheckBox { text: "Debug"; enabled: false; }
+                    }
+                    Text { text: root.run-info; color: Theme.text-muted; font-size: Theme.font-sm; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: end;
+                    Button {
+                        text: root.run-running ? "Running…" : "Run All";
+                        enabled: !root.run-running;
+                        clicked => { root.start-run(root.dry-run-checked, root.force-checked, root.retry-checked); }
+                    }
+                    Button {
+                        text: root.run-paused ? "Resume" : "Pause";
+                        enabled: root.run-running;
+                        clicked => { root.toggle-pause(); }
+                    }
+                    Button {
+                        text: "Cancel";
+                        enabled: root.run-running;
+                        clicked => { root.cancel-run(); }
+                    }
+                }
+            }
+        }
+
+        // Progress card
+        Card {
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 10px;
+                VerticalLayout {
+                    spacing: 6px;
+                    Text { text: "Progress"; color: Theme.text; font-weight: 700; }
+                    Rectangle {
+                        height: 14px;
+                        background: Theme.header-bg;
+                        border-radius: 7px;
+                        Rectangle {
+                            x: 0; y: 0;
+                            height: parent.height;
+                            border-radius: 7px;
+                            background: Theme.progress;
+                            width: parent.width * root.run-percent / 100;
+                        }
+                    }
+                    HorizontalLayout {
+                        Text { text: root.run-paused ? "Paused" : root.run-running ? "Running" : "Ready";
+                               color: root.run-paused ? Theme.warn : Theme.text-muted; horizontal-stretch: 1; }
+                        Text { text: root.run-done + " / " + root.run-total; color: Theme.text-muted; horizontal-stretch: 1; horizontal-alignment: center; }
+                        Text { text: "Rate: " + root.run-rate; color: Theme.text-muted; horizontal-stretch: 1; horizontal-alignment: center; }
+                        Text { text: "ETA: " + root.run-eta; color: Theme.text-muted; horizontal-stretch: 1; horizontal-alignment: right; }
+                    }
+                }
+            }
+        }
+
+        // Event Log card
+        Card {
+            vertical-stretch: 1;
+            clip: true;
+            elv := ListView {
+                x: 6px; y: 6px;
+                width: parent.width - 12px;
+                height: parent.height - 12px;
+                for line in root.run-log: Text {
+                    height: 18px;
+                    width: elv.width;
+                    text: line;
+                    color: Theme.text-muted;
+                    font-size: Theme.font-sm;
+                }
+            }
+            if root.run-log.length == 0: Text {
+                text: "Run events and logs will appear here.";
+                color: Theme.text-faint;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

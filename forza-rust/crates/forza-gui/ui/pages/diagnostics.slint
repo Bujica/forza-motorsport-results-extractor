@@ -1,0 +1,42 @@
+// Diagnostics page: DB doctor report and derived-state rebuild.
+// (Overview / Image Debug / DB Doctor tabs arrive with the Diagnostics phase.)
+
+import { Button } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Card, EmptyState } from "../components/common.slint";
+
+export component DiagnosticsPage inherits Rectangle {
+    background: transparent;
+
+    in property <string> doctor-report;
+    callback doctor-requested();
+    callback rebuild-requested();
+
+    VerticalLayout {
+        spacing: 8px;
+
+        HorizontalLayout {
+            height: 32px;
+            spacing: 8px;
+            Text { text: "Diagnostics"; color: Theme.text; font-weight: 700; min-width: 90px; vertical-alignment: center; }
+            Button { text: "Run DB Doctor"; clicked => { root.doctor-requested(); } }
+            Button { text: "Rebuild derived state"; clicked => { root.rebuild-requested(); } }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        Card {
+            vertical-stretch: 1;
+            if root.doctor-report == "": EmptyState {
+                text: "Run DB Doctor to check the relational database integrity.";
+            }
+            if root.doctor-report != "": Text {
+                x: 12px; y: 10px;
+                width: parent.width - 24px;
+                text: root.doctor-report;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                font-size: Theme.font-sm;
+            }
+        }
+    }
+}

@@ -1,0 +1,33 @@
+// Performance page — intentionally out of scope for the parity work
+// (the Python performance dashboard will be redone upstream). Placeholder
+// kept so the sidebar entry still resolves.
+
+import { Theme } from "../theme.slint";
+import { Card } from "../components/common.slint";
+
+export component PerformancePage inherits Rectangle {
+    background: transparent;
+
+    VerticalLayout {
+        spacing: 8px;
+
+        HorizontalLayout {
+            height: 32px;
+            spacing: 8px;
+            Text { text: "Performance"; color: Theme.text; font-weight: 700; min-width: 100px; vertical-alignment: center; }
+            Text { text: "TPS floor / reload policy from Settings (LM Studio backend)"; color: Theme.text-faint; font-size: Theme.font-sm; horizontal-stretch: 1; vertical-alignment: center; }
+        }
+
+        Card {
+            vertical-stretch: 1;
+            Text {
+                x: 14px; y: 14px;
+                width: parent.width - 28px;
+                text: "Performance dashboard — intentionally deferred in the Rust GUI parity work (the Python dashboard is being redone upstream).\n\nCurrent policy from configuration:\n  • performance_tps_floor\n  • performance_reload_elapsed_s\n  • performance_reload_streak\n\nHistory is persisted per attempt (see Image Debug → Attempts).";
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                font-size: Theme.font-md;
+            }
+        }
+    }
+}
