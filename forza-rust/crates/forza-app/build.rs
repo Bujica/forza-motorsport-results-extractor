@@ -1,6 +1,9 @@
 //! Shared build metadata: expose the git hash and build time to the binary
 //! via `env!("APP_GIT_HASH")` / `env!("APP_BUILD_TIME")`, so every build
 //! identifies itself (no more guessing which binary produced a run).
+//!
+//! The script re-runs whenever HEAD or the current branch ref moves, so a
+//! rebuild right after a commit never displays a stale hash.
 
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -35,6 +38,28 @@ fn utc_now_text() -> String {
 }
 
 fn main() {
+    // The build script's CWD is this crate; resolve the repo's git dir so we
+    // can watch the right files for HEAD movement.
+    let git_dir = Command::new("git")
+        .args(["rev-parse", "--absolute-git-dir"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .unwrap_or_default();
+
+    if !git_dir.is_empty() {
+        println!("cargo:rerun-if-changed={git_dir}/HEAD");
+        // HEAD is usually a symbolic ref ("ref: refs/heads/..."); the branch
+        // file is what actually moves on commit.
+        let head_target = std::fs::read_to_string(format!("{git_dir}/HEAD"))
+            .map(|text| text.trim().to_string())
+            .unwrap_or_default();
+        if let Some(reference) = head_target.strip_prefix("ref: ") {
+            println!("cargo:rerun-if-changed={git_dir}/{reference}");
+        }
+    }
+
     let git_hash = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
