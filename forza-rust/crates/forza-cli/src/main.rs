@@ -66,10 +66,10 @@ enum Command {
 
 #[derive(Subcommand)]
 enum MaintenanceCommand {
-    /// Show the schema state of the runtime database.
+    /// Show the schema state and row counts for all relational tables.
     #[command(name = "db-status")]
     Status,
-    /// Run the basic DB doctor battery.
+    /// Run the full DB doctor battery with multi-severity grading.
     #[command(name = "db-doctor")]
     Doctor {
         /// Emit the report as JSON.
@@ -79,7 +79,7 @@ enum MaintenanceCommand {
     /// Create the schema on an empty database (refuses foreign versions).
     #[command(name = "db-upgrade")]
     Upgrade,
-    /// Delete the database files after warning about WAL/SHM sidecars.
+    /// Delete the database files after exclusive-lock check and WAL/SHM warnings.
     #[command(name = "db-reset")]
     Reset {
         /// Skip the confirmation prompt.

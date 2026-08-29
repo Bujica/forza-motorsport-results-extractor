@@ -1676,6 +1676,7 @@ dependencies = [
  "forza-gui",
  "forza-output",
  "forza-pipeline",
+ "rusqlite",
  "serde_json",
 ]
 
