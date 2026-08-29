@@ -647,6 +647,12 @@ fn main() -> anyhow::Result<()> {
 fn cmd_db_heal(db_path: &Path) -> anyhow::Result<()> {
     let conn = forza_db::open_connection(db_path)?;
 
+    // 0. Recover runs left running by a crashed/closed process first: this
+    //    cancels their pending results, heals missing results, and recomputes
+    //    the stored counters (the healer's own backfills then run on stable
+    //    rows).
+    let reconciled = forza_db::repositories::reconcile_abandoned_runs(&conn).unwrap_or(0);
+
     // 1. Results: retain the run's immutable prompt snapshot.
     let results_healed = conn.execute(
         "UPDATE extraction_results
@@ -740,8 +746,10 @@ fn cmd_db_heal(db_path: &Path) -> anyhow::Result<()> {
     }
 
     println!("db-heal: evidence backfill complete");
+    println!("  abandoned runs reconciled  : {reconciled} run(s)");
     println!("  results.prompt_snapshot_id : {results_healed} row(s)");
     println!("  attempts.runtime_snapshot  : {runtime_healed} row(s)");
     println!("  attempts.request_hash      : {hashes_healed} row(s)");
+    println!("next step: run `forza rebuild` to refresh best-lap status and review cases");
     Ok(())
 }
