@@ -50,6 +50,10 @@ export component BestLapsPage inherits Rectangle {
             root.driver-filter, root.car-filter, root.lap-filter, root.source-filter, root.best-laps-only-mine);
     }
 
+    function class-color(c: string) -> color {
+        return c == "E" ? #C7368E : c == "D" ? #127F85 : c == "C" ? #BB7A00 : c == "B" ? #C54E00 : c == "A" ? #992800 : c == "TCR" ? #1E90FF : c == "S" ? #613BBF : c == "R" ? #105DAB : c == "P" ? #0C8540 : c == "X" ? #006000 : c == "Mixed" ? #555555 : #000000;
+    }
+
     VerticalLayout {
         spacing: 6px;
 
@@ -90,24 +94,24 @@ export component BestLapsPage inherits Rectangle {
                     }
                     Rectangle { width: 6px; }
                     Text { text: "Track"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
-                    ComboBox { model: root.filter-tracks; current-value <=> root.track-filter; min-width: 120px; selected(v) => { root.track-filter = v; root.emit-filter(); } }
+                    ComboBox { model: root.filter-tracks; current-value: root.track-filter; min-width: 120px; selected(v) => { root.track-filter = v; root.emit-filter(); } }
                     Text { text: "Class"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
-                    ComboBox { model: root.filter-classes; current-value <=> root.class-filter; min-width: 80px; selected(v) => { root.class-filter = v; root.emit-filter(); } }
+                    ComboBox { model: root.filter-classes; current-value: root.class-filter; min-width: 80px; selected(v) => { root.class-filter = v; root.emit-filter(); } }
                     Text { text: "Weather"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
-                    ComboBox { model: root.filter-weathers; current-value <=> root.weather-filter; min-width: 90px; selected(v) => { root.weather-filter = v; root.emit-filter(); } }
+                    ComboBox { model: root.filter-weathers; current-value: root.weather-filter; min-width: 90px; selected(v) => { root.weather-filter = v; root.emit-filter(); } }
                     Text { text: "Driver"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
-                    ComboBox { model: root.filter-drivers; current-value <=> root.driver-filter; min-width: 110px; selected(v) => { root.driver-filter = v; root.emit-filter(); } }
+                    ComboBox { model: root.filter-drivers; current-value: root.driver-filter; min-width: 110px; selected(v) => { root.driver-filter = v; root.emit-filter(); } }
                     Rectangle { horizontal-stretch: 1; }
                 }
                 HorizontalLayout {
                     spacing: 8px;
                     height: 28px;
                     Text { text: "Car"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
-                    ComboBox { model: root.filter-cars; current-value <=> root.car-filter; min-width: 130px; selected(v) => { root.car-filter = v; root.emit-filter(); } }
+                    ComboBox { model: root.filter-cars; current-value: root.car-filter; min-width: 130px; selected(v) => { root.car-filter = v; root.emit-filter(); } }
                     Text { text: "Source"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
-                    ComboBox { model: root.filter-sources; current-value <=> root.source-filter; min-width: 120px; selected(v) => { root.source-filter = v; root.emit-filter(); } }
+                    ComboBox { model: root.filter-sources; current-value: root.source-filter; min-width: 120px; selected(v) => { root.source-filter = v; root.emit-filter(); } }
                     Text { text: "Lap"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
-                    ComboBox { model: root.filter-laps; current-value <=> root.lap-filter; min-width: 90px; selected(v) => { root.lap-filter = v; root.emit-filter(); } }
+                    ComboBox { model: root.filter-laps; current-value: root.lap-filter; min-width: 90px; selected(v) => { root.lap-filter = v; root.emit-filter(); } }
                     Rectangle { horizontal-stretch: 1; }
                 }
             }
@@ -141,9 +145,7 @@ export component BestLapsPage inherits Rectangle {
                     for lap[index] in root.best-laps: Rectangle {
                         height: lap.is-group ? 22px : Theme.row-h;
                         horizontal-stretch: 1;
-                        background: lap.is-group ?
-                            (lap.class == "E" ? #C7368E : lap.class == "D" ? #127F85 : lap.class == "C" ? #BB7A00 : lap.class == "B" ? #C54E00 : lap.class == "A" ? #992800 : lap.class == "TCR" ? #1E90FF : lap.class == "S" ? #613BBF : lap.class == "R" ? #105DAB : lap.class == "P" ? #0C8540 : lap.class == "X" ? #006000 : lap.class == "Mixed" ? #555555 : #000000)
-                            : (lap.mine ? Theme.row-mine : (lap.external ? Theme.row-external : (lap.dirty ? Theme.row-dirty : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent))));
+                        background: lap.is-group ? root.class-color(lap.class) : (lap.mine ? Theme.row-mine : (lap.external ? Theme.row-external : (lap.dirty ? Theme.row-dirty : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent))));
                         if lap.is-group: HorizontalLayout {
                             padding-left: 8px;
                             spacing: 8px;

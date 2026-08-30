@@ -67,7 +67,12 @@ pub fn upgrade(path: &Path) -> Result<(), DbError> {
     let mut conn = Connection::open(path)?;
 
     match schema_status(path)? {
-        SchemaStatus::Current => return Ok(()),
+        SchemaStatus::Current => {
+            if let Ok(c) = crate::open_connection(path) {
+                let _ = seed_reference_catalog(&c);
+            }
+            return Ok(());
+        }
         SchemaStatus::Incompatible { found } => {
             return Err(DbError::SchemaState {
                 message: format!(
@@ -91,5 +96,40 @@ pub fn upgrade(path: &Path) -> Result<(), DbError> {
     tx.pragma_update(None, "foreign_keys", "ON")?;
     tx.commit()?;
     crate::configure_connection(&conn)?;
+    // Seed reference catalog from embedded assets if tables are empty (first creation or legacy DB).
+    if let Ok(c) = crate::open_connection(path) {
+        let _ = seed_reference_catalog(&c);
+    }
+    Ok(())
+}
+
+/// Seed `reference_tracks` / `reference_cars` from embedded assets when empty.
+/// Idempotent and safe to call on every open.
+pub fn seed_reference_catalog(conn: &rusqlite::Connection) -> Result<(), crate::error::DbError> {
+    let track_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM reference_tracks", [], |r| r.get(0))?;
+    if track_count == 0 {
+        let data = forza_domain::reference_data::embedded_reference_data();
+        for name in data.tracks {
+            let id = format!("track-{}", name.to_lowercase().replace(' ', "_"));
+            conn.execute(
+                "INSERT OR IGNORE INTO reference_tracks (id, name, normalized_name, active, created_at, updated_at)
+                 VALUES (?1, ?2, lower(?2), 1, datetime('now'), datetime('now'))",
+                rusqlite::params![id, name],
+            )?;
+        }
+    }
+    let car_count: i64 = conn.query_row("SELECT COUNT(*) FROM reference_cars", [], |r| r.get(0))?;
+    if car_count == 0 {
+        let data = forza_domain::reference_data::embedded_reference_data();
+        for name in data.cars {
+            let id = format!("car-{}", name.to_lowercase().replace(' ', "_"));
+            conn.execute(
+                "INSERT OR IGNORE INTO reference_cars (id, name, normalized_name, active, created_at, updated_at)
+                 VALUES (?1, ?2, lower(?2), 1, datetime('now'), datetime('now'))",
+                rusqlite::params![id, name],
+            )?;
+        }
+    }
     Ok(())
 }

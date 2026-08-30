@@ -181,6 +181,7 @@ fn row_from_external(rec: ExternalLapRecord) -> BestLapRow {
 
 /// Load all best-lap rows (internal frontier + active external), sorted per domain ordering.
 pub fn list_best_laps(conn: &Connection, gamertag_lower: &str) -> Result<Vec<BestLapRow>, String> {
+    let _ = forza_db::migration::seed_reference_catalog(conn);
     let internal = forza_db::repositories::laps::list_clean_flat(conn, gamertag_lower)
         .map_err(|e| e.to_string())?;
     let mut rows: Vec<BestLapRow> = internal.into_iter().map(row_from_export).collect();

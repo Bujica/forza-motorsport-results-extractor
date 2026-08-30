@@ -301,6 +301,7 @@ pub fn import_spreadsheet(
 
 /// Import and atomically activate the snapshot in the DB.
 pub fn import_to_db(conn: &Connection, source_path: &Path) -> Result<ExternalImportResult, String> {
+    let _ = forza_db::migration::seed_reference_catalog(conn);
     let known_tracks = list_reference_tracks(conn).map_err(|e| e.to_string())?;
     let canonical_cars = list_reference_cars(conn).map_err(|e| e.to_string())?;
     let result = import_spreadsheet(source_path, &known_tracks, &canonical_cars, None)?;
@@ -326,10 +327,15 @@ fn read_csv_rows(path: &Path) -> Result<Vec<HashMap<String, String>>, String> {
         .has_headers(true)
         .from_path(path)
         .map_err(|e| format!("CSV open failed: {e}"))?;
-    let headers = rdr
+    let raw_headers = rdr
         .headers()
         .map_err(|e| format!("CSV header failed: {e}"))?
         .clone();
+    // Strip BOM (utf-8-sig) from first header like Python's encoding="utf-8-sig".
+    let headers: Vec<String> = raw_headers
+        .iter()
+        .map(|h| h.trim_start_matches('\u{feff}').trim().to_string())
+        .collect();
     let missing: Vec<String> = REQUIRED_COLUMNS
         .iter()
         .filter(|c| !headers.iter().any(|h| h == **c))
@@ -355,9 +361,27 @@ fn read_xlsx_rows(path: &Path, sheet_name: &str) -> Result<Vec<HashMap<String, S
         return Err(format!("File not found: {}", path.display()));
     }
     let mut workbook = open_workbook_auto(path).map_err(|e| format!("XLSX open failed: {e}"))?;
-    let range = workbook
-        .worksheet_range(sheet_name)
-        .map_err(|e| format!("Worksheet '{sheet_name}' not found: {e}"))?;
+    let range = match workbook.worksheet_range(sheet_name) {
+        Ok(r) => r,
+        Err(_) => {
+            // Fallback: case-insensitive sheet lookup (handles "Main Leaderboard" vs "MAIN LEADERBOARD")
+            let names = workbook.sheet_names().to_owned();
+            let found = names
+                .iter()
+                .find(|n| n.eq_ignore_ascii_case(sheet_name))
+                .cloned();
+            if let Some(actual) = found {
+                workbook
+                    .worksheet_range(&actual)
+                    .map_err(|e| format!("Worksheet '{actual}' not found: {e}"))?
+            } else {
+                return Err(format!(
+                    "Worksheet '{sheet_name}' not found. Available: {:?}",
+                    workbook.sheet_names()
+                ));
+            }
+        }
+    };
     if range.is_empty() {
         return Err(format!("Worksheet '{sheet_name}' is empty"));
     }
@@ -541,5 +565,29 @@ mod tests {
         let (lap, ms) = normalize_lap("1:31.900").unwrap();
         assert_eq!(lap, "01:31.900");
         assert_eq!(ms, 91_900);
+    }
+
+    #[test]
+    fn import_csv_end_to_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        forza_db::upgrade(&db_path).unwrap();
+        let conn = forza_db::open_connection(&db_path).unwrap();
+        let csv_path = dir.path().join("test.csv");
+        std::fs::write(
+            &csv_path,
+            "Track,Class,Gamertag,Vehicle,Laptime\n\"Daytona International Speedway Sports Car Circuit\",A,TestDriver,\"Audi R8 LMS\",1:30.000\n",
+        )
+        .unwrap();
+        let res = import_to_db(&conn, &csv_path).unwrap();
+        assert_eq!(res.records.len(), 1);
+        assert_eq!(res.total_rows, 1);
+        let active =
+            forza_db::repositories::external_records::list_active_external_records(&conn).unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(
+            active[0].track,
+            "Daytona International Speedway Sports Car Circuit"
+        );
     }
 }
