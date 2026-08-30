@@ -1,3 +1,5 @@
+pub mod best_laps;
+pub mod external_import;
 pub mod extraction_replay;
 pub mod extraction_runner;
 pub mod image_debug;

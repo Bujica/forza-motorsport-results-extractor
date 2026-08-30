@@ -4,6 +4,7 @@
 
 pub mod best_laps;
 pub mod corrections;
+pub mod external_records;
 pub mod images;
 pub mod laps;
 pub mod reviews;

@@ -1703,6 +1703,7 @@ dependencies = [
  "forza-db",
  "forza-domain",
  "forza-lmstudio",
+ "forza-output",
  "forza-pipeline",
  "rusqlite",
  "serde_json",

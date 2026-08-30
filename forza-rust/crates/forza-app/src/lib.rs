@@ -19,6 +19,10 @@ pub const APP_VERSION: &str = concat!(
     env!("APP_BUILD_TIME")
 );
 
+pub use services::best_laps::{
+    BestLapFilter, BestLapFilterOptions, BestLapRow, BestLapSummary, apply_filters, filter_options,
+    list_best_laps, summary, summary_text,
+};
 pub use services::{
     BestLapEntry, DoctorSummary, ImageDebugFilter, ImageDetailData, ImageInventoryEntry,
     ImageInventoryFilter, ImageInventoryOptions, ImageInventoryService, RebuildOutcome,

@@ -18,9 +18,9 @@ use std::sync::mpsc;
 
 use forza_app::{
     ImageDebugFilter, ImageInventoryFilter, ImageInventoryService, ReviewCaseEntry,
-    ReviewQueueFilter, decide_case, ignore_case, list_clean_flat_entries, list_debug_cases,
-    list_review_cases, load_debug_detail, load_debug_detail_by_result, load_image_detail, rebuild,
-    reopen_case, settings_snapshot,
+    ReviewQueueFilter, decide_case, ignore_case, list_debug_cases, list_review_cases,
+    load_debug_detail, load_debug_detail_by_result, load_image_detail, rebuild, reopen_case,
+    settings_snapshot,
 };
 
 /// Live configuration owned by the worker thread.
@@ -201,7 +201,7 @@ pub enum Response {
         filter: ReviewQueueFilter,
     },
     CaseDecided(Result<(), String>),
-    BestLaps(Result<Vec<forza_app::BestLapEntry>, String>),
+    BestLaps(Result<Vec<forza_app::BestLapRow>, String>),
     Doctor(Result<forza_app::DoctorSummary, String>),
     Rebuild(Result<forza_app::RebuildOutcome, String>),
     RunDryRunDone(String),
@@ -302,7 +302,7 @@ pub fn handle_request(
         Request::ListBestLaps => Response::BestLaps((|| {
             let gamertag = ctx.gamertag();
             let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
-            list_clean_flat_entries(&conn, &gamertag.to_lowercase())
+            forza_app::list_best_laps(&conn, &gamertag.to_lowercase())
         })()),
         Request::RunDoctor => Response::Doctor(
             forza_db::doctor::doctor_on_path(&ctx.database_file)
