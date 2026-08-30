@@ -44,6 +44,9 @@ thread_local! {
     static INVENTORY_REFRESH_IN_FLIGHT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static PENDING_INVENTORY_FILTER: std::cell::RefCell<Option<ImageInventoryFilter>> =
         const { std::cell::RefCell::new(None) };
+    static REVIEW_REFRESH_IN_FLIGHT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static PENDING_REVIEW_FILTER: std::cell::RefCell<Option<ReviewQueueFilter>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 fn current_inventory_filter() -> ImageInventoryFilter {
@@ -524,84 +527,116 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                     result,
                     options,
                     filter,
-                } => match &result {
-                    Ok(entries) => {
-                        REVIEW_CASES_CACHE.with(|slot| *slot.borrow_mut() = entries.clone());
-                        REVIEW_MODEL.with(|slot| {
-                            if let Some(model) = slot.borrow().as_ref() {
-                                let items: Vec<ReviewItem> = entries
-                                    .iter()
-                                    .map(|c| ReviewItem {
-                                        number: c.case_number as i32,
-                                        outcome: c.outcome.clone().unwrap_or_default().into(),
-                                        reason: c.reason.clone().into(),
-                                        trigger: c.trigger.clone().unwrap_or_default().into(),
-                                        decision: match (
-                                            c.decision_field.as_deref(),
-                                            c.model_value.as_deref(),
-                                            c.corrected_value.as_deref(),
-                                        ) {
-                                            (Some(field), Some(model_value), Some(corrected)) => {
-                                                format!("{field}: {model_value} -> {corrected}")
+                } => {
+                    match &result {
+                        Ok(entries) => {
+                            REVIEW_CASES_CACHE.with(|slot| *slot.borrow_mut() = entries.clone());
+                            REVIEW_MODEL.with(|slot| {
+                                if let Some(model) = slot.borrow().as_ref() {
+                                    let items: Vec<ReviewItem> = entries
+                                        .iter()
+                                        .map(|c| ReviewItem {
+                                            number: c.case_number as i32,
+                                            outcome: c.outcome.clone().unwrap_or_default().into(),
+                                            reason: c.reason.clone().into(),
+                                            trigger: c.trigger.clone().unwrap_or_default().into(),
+                                            decision: match (
+                                                c.decision_field.as_deref(),
+                                                c.model_value.as_deref(),
+                                                c.corrected_value.as_deref(),
+                                            ) {
+                                                (
+                                                    Some(field),
+                                                    Some(model_value),
+                                                    Some(corrected),
+                                                ) => {
+                                                    format!("{field}: {model_value} -> {corrected}")
+                                                }
+                                                (Some(field), Some(model_value), None) => {
+                                                    format!("{field}: {model_value}")
+                                                }
+                                                _ => String::new(),
                                             }
-                                            (Some(field), Some(model_value), None) => {
-                                                format!("{field}: {model_value}")
-                                            }
-                                            _ => String::new(),
-                                        }
-                                        .into(),
-                                        driver: c.driver.clone().unwrap_or_default().into(),
-                                        lap: if c.best_lap.clone().unwrap_or_default().is_empty() {
-                                            String::new()
-                                        } else if c.status == "open" {
-                                            format!(
-                                                "{} dirty",
-                                                c.best_lap.clone().unwrap_or_default()
-                                            )
-                                        } else {
-                                            c.best_lap.clone().unwrap_or_default()
-                                        }
-                                        .into(),
-                                        lap_dirty: c.status == "open"
-                                            && !c.best_lap.clone().unwrap_or_default().is_empty(),
-                                        status: c.status.clone().into(),
-                                        image_file_id: c
-                                            .image_file_id
-                                            .clone()
-                                            .unwrap_or_default()
                                             .into(),
-                                    })
-                                    .collect();
-                                model.set_vec(items);
+                                            driver: c.driver.clone().unwrap_or_default().into(),
+                                            lap: if c
+                                                .best_lap
+                                                .clone()
+                                                .unwrap_or_default()
+                                                .is_empty()
+                                            {
+                                                String::new()
+                                            } else if c.status == "open" {
+                                                format!(
+                                                    "{} dirty",
+                                                    c.best_lap.clone().unwrap_or_default()
+                                                )
+                                            } else {
+                                                c.best_lap.clone().unwrap_or_default()
+                                            }
+                                            .into(),
+                                            lap_dirty: c.status == "open"
+                                                && !c
+                                                    .best_lap
+                                                    .clone()
+                                                    .unwrap_or_default()
+                                                    .is_empty(),
+                                            status: c.status.clone().into(),
+                                            image_file_id: c
+                                                .image_file_id
+                                                .clone()
+                                                .unwrap_or_default()
+                                                .into(),
+                                        })
+                                        .collect();
+                                    model.set_vec(items);
+                                }
+                            });
+                            let options_model =
+                                |values: &[String]| -> ModelRc<slint::SharedString> {
+                                    ModelRc::from(Rc::new(VecModel::from(
+                                        std::iter::once("all".to_string())
+                                            .chain(values.iter().cloned())
+                                            .map(Into::into)
+                                            .collect::<Vec<_>>(),
+                                    )))
+                                };
+                            if let Some(w) = ui.upgrade() {
+                                w.set_review_reasons(options_model(&options.reasons));
+                                w.set_review_outcomes(options_model(&options.outcomes));
+                                w.set_review_runs(options_model(&options.runs));
+                                w.set_review_selected_index(if entries.is_empty() {
+                                    -1
+                                } else {
+                                    0
+                                });
+                                apply_review_detail(&w);
+                                w.set_status_text(
+                                    format!("{} review case(s) [{}]", entries.len(), filter.bucket)
+                                        .into(),
+                                );
                             }
-                        });
-                        let options_model = |values: &[String]| -> ModelRc<slint::SharedString> {
-                            ModelRc::from(Rc::new(VecModel::from(
-                                std::iter::once("all".to_string())
-                                    .chain(values.iter().cloned())
-                                    .map(Into::into)
-                                    .collect::<Vec<_>>(),
-                            )))
-                        };
-                        if let Some(w) = ui.upgrade() {
-                            w.set_review_reasons(options_model(&options.reasons));
-                            w.set_review_outcomes(options_model(&options.outcomes));
-                            w.set_review_runs(options_model(&options.runs));
-                            w.set_review_selected_index(if entries.is_empty() { -1 } else { 0 });
-                            apply_review_detail(&w);
-                            w.set_status_text(
-                                format!("{} review case(s) [{}]", entries.len(), filter.bucket)
-                                    .into(),
-                            );
+                        }
+                        Err(message) => {
+                            REVIEW_CASES_CACHE.with(|slot| slot.borrow_mut().clear());
+                            if let Some(w) = ui.upgrade() {
+                                w.set_status_text(format!("error: {message}").into());
+                            }
                         }
                     }
-                    Err(message) => {
-                        REVIEW_CASES_CACHE.with(|slot| slot.borrow_mut().clear());
-                        if let Some(w) = ui.upgrade() {
-                            w.set_status_text(format!("error: {message}").into());
-                        }
+                    REVIEW_REFRESH_IN_FLIGHT.with(|f| f.set(false));
+                    if let Some(pending) =
+                        PENDING_REVIEW_FILTER.with(|slot| slot.borrow_mut().take())
+                    {
+                        REVIEW_REFRESH_IN_FLIGHT.with(|f| f.set(true));
+                        let ui2 = ui.clone();
+                        enqueue(
+                            Request::ListReviews { filter: pending },
+                            &ui2,
+                            "loading reviews…",
+                        );
                     }
-                },
+                }
                 Response::Preview(result) => match result {
                     Ok(Some(path)) => {
                         if let Some(w) = ui.upgrade() {
@@ -1158,6 +1193,12 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
         let ui = main.as_weak();
         main.on_reviews_requested(move || {
             let filter = REVIEW_FILTER.with(|slot| slot.borrow().clone());
+            PENDING_REVIEW_FILTER.with(|slot| *slot.borrow_mut() = Some(filter.clone()));
+            if REVIEW_REFRESH_IN_FLIGHT.with(|f| f.get()) {
+                return;
+            }
+            REVIEW_REFRESH_IN_FLIGHT.with(|f| f.set(true));
+            PENDING_REVIEW_FILTER.with(|slot| *slot.borrow_mut() = None);
             enqueue(Request::ListReviews { filter }, &ui, "loading reviews…");
         });
     }
@@ -1174,6 +1215,12 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 };
             });
             let filter = REVIEW_FILTER.with(|slot| slot.borrow().clone());
+            PENDING_REVIEW_FILTER.with(|slot| *slot.borrow_mut() = Some(filter.clone()));
+            if REVIEW_REFRESH_IN_FLIGHT.with(|f| f.get()) {
+                return;
+            }
+            REVIEW_REFRESH_IN_FLIGHT.with(|f| f.set(true));
+            PENDING_REVIEW_FILTER.with(|slot| *slot.borrow_mut() = None);
             enqueue(Request::ListReviews { filter }, &ui, "loading reviews…");
         });
     }

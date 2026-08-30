@@ -237,21 +237,39 @@ pub fn handle_request(
     request: &Request,
 ) -> Response {
     match request {
-        Request::RefreshInventory { filter } => Response::Inventory {
-            result: service.list(filter).map_err(|e| e.to_string()),
-            options: service.options().map_err(|e| e.to_string()),
-            filter_label: filter
-                .processing_status
-                .clone()
-                .unwrap_or_else(|| "all".to_string()),
-        },
+        Request::RefreshInventory { filter } => {
+            let options = if filter.track.is_none() && filter.run_id.is_none() {
+                service.options().map_err(|e| e.to_string())
+            } else {
+                Ok(forza_app::ImageInventoryOptions {
+                    tracks: Vec::new(),
+                    runs: Vec::new(),
+                })
+            };
+            Response::Inventory {
+                result: service.list(filter).map_err(|e| e.to_string()),
+                options,
+                filter_label: filter
+                    .processing_status
+                    .clone()
+                    .unwrap_or_else(|| "all".to_string()),
+            }
+        }
         Request::SyncInputFolder { filter } => {
             let sync_result = service.sync_input_folder(&ctx.input_dir());
+            let options = if filter.track.is_none() && filter.run_id.is_none() {
+                service.options().map_err(|e| e.to_string())
+            } else {
+                Ok(forza_app::ImageInventoryOptions {
+                    tracks: Vec::new(),
+                    runs: Vec::new(),
+                })
+            };
             Response::Inventory {
                 result: sync_result
                     .and_then(|_| service.list(filter))
                     .map_err(|e| e.to_string()),
-                options: service.options().map_err(|e| e.to_string()),
+                options,
                 filter_label: filter
                     .processing_status
                     .clone()

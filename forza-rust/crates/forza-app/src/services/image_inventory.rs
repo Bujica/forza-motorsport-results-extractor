@@ -131,8 +131,8 @@ impl ImageInventoryService {
                     dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
                 });
 
-            if let (Some(size), Some(mtime)) = (fs_size, fs_mtime.as_deref()) {
-                if let Ok(Some((id, _hash, db_size, db_mtime))) = conn
+            if let (Some(size), Some(mtime)) = (fs_size, fs_mtime.as_deref())
+                && let Ok(Some((id, _hash, db_size, db_mtime))) = conn
                     .query_row(
                         "SELECT id, file_hash, size_bytes, file_modified_at FROM image_files WHERE current_path = ?1 LIMIT 1",
                         [&path_text],
@@ -146,16 +146,15 @@ impl ImageInventoryService {
                         },
                     )
                     .optional()
-                {
-                    if db_size == Some(size) && db_mtime.as_deref() == Some(mtime) {
-                        // Unchanged file — just refresh last_seen_at without re-hashing
-                        conn.execute(
-                            "UPDATE image_files SET last_seen_at=datetime('now'), updated_at=datetime('now') WHERE id=?1",
-                            params![id],
-                        )?;
-                        continue;
-                    }
-                }
+                && db_size == Some(size)
+                && db_mtime.as_deref() == Some(mtime)
+            {
+                // Unchanged file — just refresh last_seen_at without re-hashing
+                conn.execute(
+                    "UPDATE image_files SET last_seen_at=datetime('now'), updated_at=datetime('now') WHERE id=?1",
+                    params![id],
+                )?;
+                continue;
             }
 
             let Ok(file_hash) = forza_pipeline::file_hash(&path) else {
