@@ -17,10 +17,10 @@ use ui_state::{
     BESTLAP_ALL, BESTLAP_FILTER, BESTLAP_MODEL, BESTLAP_SORT, CONFIG_PATH, DEBUG_CASE_MODEL,
     DEBUG_CASES_CACHE, DEBUG_DETAIL_CACHE, DEBUG_RESULT_MODEL, DETAIL_ATTEMPT_MODEL, DETAIL_INDEX,
     DETAIL_LAP_MODEL, DETAIL_RESULT_MODEL, DETAIL_REVIEW_MODEL, GAMERTAG, LIST_MODEL,
-    PENDING_SETTINGS, REVIEW_MODEL, ROW_CACHE, RUN_CONFIG, RUN_CONTROL, RUN_LOG, RUN_SELECTED_IDS,
-    RUN_START, SELECTED_IMAGE_IDS, SETTINGS_LOADED, SETTINGS_MODEL, WORKER_TX, append_run_log,
-    compute_rate_eta, enqueue, image_items, run_info_line, send_request, set_status,
-    update_image_selection,
+    PENDING_IMPORT_MESSAGE, PENDING_SETTINGS, REVIEW_MODEL, ROW_CACHE, RUN_CONFIG, RUN_CONTROL,
+    RUN_LOG, RUN_SELECTED_IDS, RUN_START, SELECTED_IMAGE_IDS, SETTINGS_LOADED, SETTINGS_MODEL,
+    WORKER_TX, append_run_log, compute_rate_eta, enqueue, image_items, run_info_line, send_request,
+    set_status, update_image_selection,
 };
 
 use std::cell::RefCell;
@@ -642,8 +642,14 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                             });
                             if let Some(w) = ui.upgrade() {
                                 apply_bestlaps_filters(&w);
-                                let count = BESTLAP_ALL.with(|s| s.borrow().len());
-                                w.set_status_text(format!("{count} best lap(s) loaded").into());
+                                let pending =
+                                    PENDING_IMPORT_MESSAGE.with(|s| s.borrow_mut().take());
+                                if let Some(msg) = pending {
+                                    w.set_status_text(msg.into());
+                                } else {
+                                    let count = BESTLAP_ALL.with(|s| s.borrow().len());
+                                    w.set_status_text(format!("{count} best lap(s) loaded").into());
+                                }
                             }
                         }
                         Err(message) => {
@@ -824,9 +830,8 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 },
                 Response::ImportDone(result) => match result {
                     Ok(info) => {
-                        if let Some(w) = ui.upgrade() {
-                            w.set_status_text(info.message().into());
-                        }
+                        let msg = info.message();
+                        PENDING_IMPORT_MESSAGE.with(|s| *s.borrow_mut() = Some(msg));
                         send_request(Request::ListBestLaps);
                     }
                     Err(message) => {

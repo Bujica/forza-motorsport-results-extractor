@@ -81,52 +81,67 @@ pub fn replace_active_snapshot(
         .and_then(|v| v.as_array().map(|a| i64::try_from(a.len()).unwrap_or(0)))
         .unwrap_or(0);
 
-    conn.execute(
-        "UPDATE external_record_imports SET active = 0 WHERE active = 1",
-        [],
-    )?;
-    conn.execute(
-        "INSERT INTO external_record_imports
-            (id, source_path, source_hash, status, active, total_rows, accepted_rows, rejected_rows, issue_count, issues_json, created_at, imported_at, activated_at)
-         VALUES (?1, ?2, ?3, 'active', 1, ?4, ?5, ?6, ?7, ?8, datetime('now'), datetime('now'), datetime('now'))",
-        params![
-            import_id,
-            source_path,
-            source_hash,
-            total_rows,
-            accepted,
-            rejected_rows,
-            issue_count,
-            issues_json
-        ],
-    )?;
-    // Deactivate old lap rows (keep history, but only new ones are active).
-    conn.execute(
-        "UPDATE external_lap_records SET active = 0 WHERE active = 1",
-        [],
-    )?;
-    for rec in records {
-        let lap_id = format!("ext-{}-{}-{}", import_id, rec.track, rec.race_class)
-            .replace(' ', "_")
-            .to_lowercase();
-        // Ensure uniqueness across re-imports of same track/class (second import
-        // reuses same import_id, so include driver hash fallback when needed).
-        let lap_id = format!("{lap_id}-{:x}", {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut h = DefaultHasher::new();
-            rec.driver.hash(&mut h);
-            rec.car.hash(&mut h);
-            h.finish()
-        });
+    // Atomic snapshot replacement — use explicit transaction so a failure doesn't leave
+    // the DB with imports deactivated but no new rows.
+    let _ = conn.execute_batch("BEGIN IMMEDIATE");
+    let inner: Result<String, DbError> = (|| {
         conn.execute(
-            "INSERT INTO external_lap_records
-                (id, import_id, track, track_normalized, race_class, driver, driver_normalized, car, car_normalized, weather, best_lap, best_lap_ms, active, created_at)
-             VALUES (?1, ?2, ?3, lower(?3), ?4, ?5, lower(?5), ?6, lower(?6), 'dry', ?7, ?8, 1, datetime('now'))",
-            params![lap_id, import_id, rec.track, rec.race_class, rec.driver, rec.car, rec.best_lap, rec.best_lap_ms],
+            "UPDATE external_record_imports SET active = 0 WHERE active = 1",
+            [],
         )?;
+        conn.execute(
+            "INSERT INTO external_record_imports
+                (id, source_path, source_hash, status, active, total_rows, accepted_rows, rejected_rows, issue_count, issues_json, created_at, imported_at, activated_at)
+             VALUES (?1, ?2, ?3, 'active', 1, ?4, ?5, ?6, ?7, ?8, datetime('now'), datetime('now'), datetime('now'))",
+            params![
+                import_id,
+                source_path,
+                source_hash,
+                total_rows,
+                accepted,
+                rejected_rows,
+                issue_count,
+                issues_json
+            ],
+        )?;
+        // Deactivate old lap rows (keep history, but only new ones are active).
+        conn.execute(
+            "UPDATE external_lap_records SET active = 0 WHERE active = 1",
+            [],
+        )?;
+        for rec in records {
+            let lap_id = format!("ext-{}-{}-{}", import_id, rec.track, rec.race_class)
+                .replace(' ', "_")
+                .to_lowercase();
+            // Ensure uniqueness across re-imports of same track/class (second import
+            // reuses same import_id, so include driver hash fallback when needed).
+            let lap_id = format!("{lap_id}-{:x}", {
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+                let mut h = DefaultHasher::new();
+                rec.driver.hash(&mut h);
+                rec.car.hash(&mut h);
+                h.finish()
+            });
+            conn.execute(
+                "INSERT INTO external_lap_records
+                    (id, import_id, track, track_normalized, race_class, driver, driver_normalized, car, car_normalized, weather, best_lap, best_lap_ms, active, created_at)
+                 VALUES (?1, ?2, ?3, lower(?3), ?4, ?5, lower(?5), ?6, lower(?6), 'dry', ?7, ?8, 1, datetime('now'))",
+                params![lap_id, import_id, rec.track, rec.race_class, rec.driver, rec.car, rec.best_lap, rec.best_lap_ms],
+            )?;
+        }
+        Ok(import_id.clone())
+    })();
+    match inner {
+        Ok(id) => {
+            let _ = conn.execute_batch("COMMIT");
+            Ok(id)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
     }
-    Ok(import_id)
 }
 
 /// Lightweight helper: list all known reference track names (for alias validation).

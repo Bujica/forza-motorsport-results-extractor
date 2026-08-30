@@ -16,6 +16,7 @@ const REQUIRED_COLUMNS: &[&str] = &["Track", "Class", "Gamertag", "Vehicle", "La
 const MAX_XLSX_ROWS: usize = 100_000;
 const DEFAULT_SHEET: &str = "MAIN LEADERBOARD";
 const DEFAULT_ALIASES: &str = "data/external/track_aliases.json";
+const EMBEDDED_ALIASES_JSON: &str = include_str!("../../../../assets/track_aliases.json");
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExternalImportResult {
@@ -103,7 +104,7 @@ pub fn import_spreadsheet(
     let alias_path = aliases_file
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_ALIASES));
-    let (aliases, mut alias_issues) = load_aliases(&alias_path, &known_track_set);
+    let (aliases, mut alias_issues) = load_aliases_robust(&alias_path, &known_track_set);
     let (canonical_by_key, collisions) = car_canonical_map(
         &canonical_cars
             .iter()
@@ -461,21 +462,63 @@ fn load_aliases(
     path: &Path,
     known_tracks: &HashSet<String>,
 ) -> (HashMap<String, String>, Vec<Issue>) {
-    let mut issues = Vec::new();
     if !path.exists() {
-        return (HashMap::new(), issues);
+        return (HashMap::new(), Vec::new());
     }
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
-        Err(_) => return (HashMap::new(), issues),
+        Err(_) => return (HashMap::new(), Vec::new()),
     };
     let payload: serde_json::Value = match serde_json::from_str(&text) {
         Ok(v) => v,
-        Err(_) => return (HashMap::new(), issues),
+        Err(_) => return (HashMap::new(), Vec::new()),
     };
+    parse_aliases_value(&payload, known_tracks)
+}
+
+fn load_aliases_robust(
+    path: &Path,
+    known_tracks: &HashSet<String>,
+) -> (HashMap<String, String>, Vec<Issue>) {
+    // Try the requested path first.
+    if path.exists() {
+        let (m, i) = load_aliases(path, known_tracks);
+        if !m.is_empty() || !i.is_empty() || path.exists() {
+            // If file existed we return whatever we parsed (even if empty, it was intentional).
+            return (m, i);
+        }
+    }
+    // Try alternative cwd-relative candidates (covers `cargo run` vs double-click exe).
+    for cand in [
+        PathBuf::from("forza-rust/assets/track_aliases.json"),
+        PathBuf::from("assets/track_aliases.json"),
+        PathBuf::from("../../data/external/track_aliases.json"),
+        PathBuf::from("../../../data/external/track_aliases.json"),
+        PathBuf::from("data/external/track_aliases.json"),
+    ] {
+        if cand.exists() {
+            let (m, i) = load_aliases(&cand, known_tracks);
+            if !m.is_empty() {
+                return (m, i);
+            }
+        }
+    }
+    // Fallback to embedded asset (always available, built from forza-rust/assets/track_aliases.json).
+    let payload: serde_json::Value = match serde_json::from_str(EMBEDDED_ALIASES_JSON) {
+        Ok(v) => v,
+        Err(_) => return (HashMap::new(), Vec::new()),
+    };
+    parse_aliases_value(&payload, known_tracks)
+}
+
+fn parse_aliases_value(
+    payload: &serde_json::Value,
+    known_tracks: &HashSet<String>,
+) -> (HashMap<String, String>, Vec<Issue>) {
     let Some(obj) = payload.as_object() else {
-        return (HashMap::new(), issues);
+        return (HashMap::new(), Vec::new());
     };
+    let mut issues = Vec::new();
     let mut aliases = HashMap::new();
     for (k, v) in obj {
         let source = k.trim().to_string();
