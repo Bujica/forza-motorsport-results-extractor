@@ -40,6 +40,10 @@ thread_local! {
     static SELECTION_ANCHOR: std::cell::RefCell<usize> = const { std::cell::RefCell::new(0) };
     /// (column index, ascending)
     static SORT_STATE: std::cell::RefCell<(usize, bool)> = const { std::cell::RefCell::new((0, true)) };
+    /// Coalesce rapid filter changes like Python's _refresh_pending_args.
+    static INVENTORY_REFRESH_IN_FLIGHT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static PENDING_INVENTORY_FILTER: std::cell::RefCell<Option<ImageInventoryFilter>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 fn current_inventory_filter() -> ImageInventoryFilter {
@@ -458,47 +462,64 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                     result,
                     options,
                     filter_label,
-                } => match result {
-                    Ok(entries) => {
-                        let count = entries.len();
-                        ROW_CACHE.with(|slot| *slot.borrow_mut() = entries.clone());
-                        LIST_MODEL.with(|slot| {
-                            if let Some(model) = slot.borrow().as_ref() {
-                                SELECTED_IMAGE_IDS.with(|selected| {
-                                    selected
-                                        .borrow_mut()
-                                        .retain(|id| entries.iter().any(|e| &e.id == id));
-                                });
-                                model.set_vec(image_items(&entries));
+                } => {
+                    match result {
+                        Ok(entries) => {
+                            let count = entries.len();
+                            ROW_CACHE.with(|slot| *slot.borrow_mut() = entries.clone());
+                            LIST_MODEL.with(|slot| {
+                                if let Some(model) = slot.borrow().as_ref() {
+                                    SELECTED_IMAGE_IDS.with(|selected| {
+                                        selected
+                                            .borrow_mut()
+                                            .retain(|id| entries.iter().any(|e| &e.id == id));
+                                    });
+                                    model.set_vec(image_items(&entries));
+                                }
+                            });
+                            if let Some(w) = ui.upgrade() {
+                                apply_inventory_sort(&w);
+                                update_image_selection(&w);
+                                update_selection_summary(&w);
+                                w.set_status_text(
+                                    format!("{count} image(s) [{filter_label}]").into(),
+                                );
                             }
-                        });
-                        if let Some(w) = ui.upgrade() {
-                            apply_inventory_sort(&w);
-                            update_image_selection(&w);
-                            update_selection_summary(&w);
-                            w.set_status_text(format!("{count} image(s) [{filter_label}]").into());
+                            if let Ok(options) = options
+                                && let Some(w) = ui.upgrade()
+                                && w.get_image_track_filter() == "all"
+                                && w.get_image_run_filter() == "all"
+                            {
+                                let tracks: Vec<slint::SharedString> =
+                                    std::iter::once("all".into())
+                                        .chain(options.tracks.into_iter().map(Into::into))
+                                        .collect();
+                                let runs: Vec<slint::SharedString> = std::iter::once("all".into())
+                                    .chain(options.runs.into_iter().map(Into::into))
+                                    .collect();
+                                w.set_image_tracks(ModelRc::from(Rc::new(VecModel::from(tracks))));
+                                w.set_image_runs(ModelRc::from(Rc::new(VecModel::from(runs))));
+                            }
                         }
-                        if let Ok(options) = options
-                            && let Some(w) = ui.upgrade()
-                            && w.get_image_track_filter() == "all"
-                            && w.get_image_run_filter() == "all"
-                        {
-                            let tracks: Vec<slint::SharedString> = std::iter::once("all".into())
-                                .chain(options.tracks.into_iter().map(Into::into))
-                                .collect();
-                            let runs: Vec<slint::SharedString> = std::iter::once("all".into())
-                                .chain(options.runs.into_iter().map(Into::into))
-                                .collect();
-                            w.set_image_tracks(ModelRc::from(Rc::new(VecModel::from(tracks))));
-                            w.set_image_runs(ModelRc::from(Rc::new(VecModel::from(runs))));
-                        }
-                    }
-                    Err(message) => {
-                        if let Some(w) = ui.upgrade() {
-                            w.set_status_text(format!("error: {message}").into());
+                        Err(message) => {
+                            if let Some(w) = ui.upgrade() {
+                                w.set_status_text(format!("error: {message}").into());
+                            }
                         }
                     }
-                },
+                    INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(false));
+                    if let Some(pending) =
+                        PENDING_INVENTORY_FILTER.with(|slot| slot.borrow_mut().take())
+                    {
+                        INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(true));
+                        let ui2 = ui.clone();
+                        enqueue(
+                            Request::RefreshInventory { filter: pending },
+                            &ui2,
+                            "loading images…",
+                        );
+                    }
+                }
                 Response::Reviews {
                     result,
                     options,
@@ -745,6 +766,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                                 ),
                             );
                         }
+                        INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(true));
                         send_request(Request::RefreshInventory {
                             filter: ImageInventoryFilter::default(),
                         });
@@ -763,6 +785,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                                 &format!("deleted {deleted} image(s); refused {refused} {sample}"),
                             );
                         }
+                        INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(true));
                         send_request(Request::RefreshInventory {
                             filter: ImageInventoryFilter::default(),
                         });
@@ -778,6 +801,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         match result {
                             Ok(message) => {
                                 set_status(&w, &message);
+                                INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(true));
                                 send_request(Request::RefreshInventory {
                                     filter: ImageInventoryFilter::default(),
                                 });
@@ -849,6 +873,14 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
         let _ = slot.set(tx);
     });
 
+    // Initial inventory load (fast, no filesystem scan) — mirrors Python's
+    // ImageController which refreshes from DB on startup and only scans on demand.
+    {
+        let filter = ImageInventoryFilter::default();
+        INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(true));
+        send_request(Request::RefreshInventory { filter });
+    }
+
     // ── Page callbacks ────────────────────────────────────────────────────
     {
         let ui = main.as_weak();
@@ -869,6 +901,14 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                     processing_status: (process_value != "all").then(|| process_value.to_string()),
                     ..Default::default()
                 };
+                // Coalesce rapid changes like Python's ImageController._refresh_pending_args
+                PENDING_INVENTORY_FILTER.with(|slot| *slot.borrow_mut() = Some(filter.clone()));
+                if INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.get()) {
+                    return;
+                }
+                INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(true));
+                // Clear pending because we're about to process this exact filter
+                PENDING_INVENTORY_FILTER.with(|slot| *slot.borrow_mut() = None);
                 enqueue(
                     Request::RefreshInventory { filter },
                     &ui,
@@ -989,10 +1029,13 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             if let Some(w) = ui.upgrade() {
                 set_status(&w, "Syncing input folder...");
             }
-            let ui = ui.clone();
             let filter = current_inventory_filter();
-            send_request(Request::RefreshInventory { filter });
-            let _ = ui;
+            INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(true));
+            enqueue(
+                Request::SyncInputFolder { filter },
+                &ui,
+                "syncing input folder…",
+            );
         });
     }
     {

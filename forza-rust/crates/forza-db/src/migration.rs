@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::DbError;
 pub use crate::schema_ddl::{INDEX_DDL, SCHEMA_VERSION, TABLE_DDL};
@@ -70,6 +70,28 @@ pub fn upgrade(path: &Path) -> Result<(), DbError> {
         SchemaStatus::Current => {
             if let Ok(c) = crate::open_connection(path) {
                 let _ = seed_reference_catalog(&c);
+                for (name, sql) in [
+                    (
+                        "idx_extraction_results_image_file_created",
+                        "CREATE INDEX idx_extraction_results_image_file_created ON extraction_results(image_file_id, created_at DESC, id DESC)",
+                    ),
+                    (
+                        "idx_run_inputs_image_file_latest",
+                        "CREATE INDEX idx_run_inputs_image_file_latest ON run_inputs(image_file_id, id DESC)",
+                    ),
+                ] {
+                    let exists: Option<String> = c
+                        .query_row(
+                            "SELECT name FROM sqlite_master WHERE type='index' AND name=?1",
+                            [name],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .unwrap_or(None);
+                    if exists.is_none() {
+                        let _ = c.execute_batch(sql);
+                    }
+                }
             }
             return Ok(());
         }
@@ -92,6 +114,14 @@ pub fn upgrade(path: &Path) -> Result<(), DbError> {
     for statement in INDEX_DDL {
         tx.execute_batch(statement)?;
     }
+    // Performance indexes for the Images inventory (not in the Python baseline but
+    // critical for the Rust GUI's filtered queries).
+    tx.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_extraction_results_image_file_created
+         ON extraction_results(image_file_id, created_at DESC, id DESC);
+         CREATE INDEX IF NOT EXISTS idx_run_inputs_image_file_latest
+         ON run_inputs(image_file_id, id DESC);",
+    )?;
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.pragma_update(None, "foreign_keys", "ON")?;
     tx.commit()?;
@@ -99,6 +129,28 @@ pub fn upgrade(path: &Path) -> Result<(), DbError> {
     // Seed reference catalog from embedded assets if tables are empty (first creation or legacy DB).
     if let Ok(c) = crate::open_connection(path) {
         let _ = seed_reference_catalog(&c);
+        for (name, sql) in [
+            (
+                "idx_extraction_results_image_file_created",
+                "CREATE INDEX idx_extraction_results_image_file_created ON extraction_results(image_file_id, created_at DESC, id DESC)",
+            ),
+            (
+                "idx_run_inputs_image_file_latest",
+                "CREATE INDEX idx_run_inputs_image_file_latest ON run_inputs(image_file_id, id DESC)",
+            ),
+        ] {
+            let exists: Option<String> = c
+                .query_row(
+                    "SELECT name FROM sqlite_master WHERE type='index' AND name=?1",
+                    [name],
+                    |r| r.get(0),
+                )
+                .optional()
+                .unwrap_or(None);
+            if exists.is_none() {
+                let _ = c.execute_batch(sql);
+            }
+        }
     }
     Ok(())
 }

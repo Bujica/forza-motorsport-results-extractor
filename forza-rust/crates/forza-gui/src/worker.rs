@@ -60,6 +60,9 @@ pub enum Request {
     RefreshInventory {
         filter: ImageInventoryFilter,
     },
+    SyncInputFolder {
+        filter: ImageInventoryFilter,
+    },
     ListReviews {
         filter: ReviewQueueFilter,
     },
@@ -234,7 +237,15 @@ pub fn handle_request(
     request: &Request,
 ) -> Response {
     match request {
-        Request::RefreshInventory { filter } => {
+        Request::RefreshInventory { filter } => Response::Inventory {
+            result: service.list(filter).map_err(|e| e.to_string()),
+            options: service.options().map_err(|e| e.to_string()),
+            filter_label: filter
+                .processing_status
+                .clone()
+                .unwrap_or_else(|| "all".to_string()),
+        },
+        Request::SyncInputFolder { filter } => {
             let sync_result = service.sync_input_folder(&ctx.input_dir());
             Response::Inventory {
                 result: sync_result

@@ -113,14 +113,54 @@ impl ImageInventoryService {
         let mut inserted = 0;
 
         for path in images {
-            let Ok(file_hash) = forza_pipeline::file_hash(&path) else {
-                continue;
-            };
             let path_text = path.to_string_lossy().to_string();
             let name = path
                 .file_name()
                 .map(|value| value.to_string_lossy().to_string())
                 .unwrap_or_default();
+
+            // Fast path: if the file is already known by this exact path and its
+            // size + mtime match the DB, reuse the stored hash without re-reading
+            // the whole file (like Python's plan_images would still hash, but we
+            // avoid the heavy SHA256 for unchanged files).
+            let fs_meta = std::fs::metadata(&path).ok();
+            let fs_size = fs_meta.as_ref().map(|m| m.len() as i64);
+            let fs_mtime: Option<String> =
+                fs_meta.as_ref().and_then(|m| m.modified().ok()).map(|t| {
+                    let dt: chrono::DateTime<chrono::Utc> = t.into();
+                    dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                });
+
+            if let (Some(size), Some(mtime)) = (fs_size, fs_mtime.as_deref()) {
+                if let Ok(Some((id, _hash, db_size, db_mtime))) = conn
+                    .query_row(
+                        "SELECT id, file_hash, size_bytes, file_modified_at FROM image_files WHERE current_path = ?1 LIMIT 1",
+                        [&path_text],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, Option<i64>>(2)?,
+                                row.get::<_, Option<String>>(3)?,
+                            ))
+                        },
+                    )
+                    .optional()
+                {
+                    if db_size == Some(size) && db_mtime.as_deref() == Some(mtime) {
+                        // Unchanged file — just refresh last_seen_at without re-hashing
+                        conn.execute(
+                            "UPDATE image_files SET last_seen_at=datetime('now'), updated_at=datetime('now') WHERE id=?1",
+                            params![id],
+                        )?;
+                        continue;
+                    }
+                }
+            }
+
+            let Ok(file_hash) = forza_pipeline::file_hash(&path) else {
+                continue;
+            };
             let Some(metadata) = forza_pipeline::inspect_metadata(&path).ok() else {
                 continue;
             };

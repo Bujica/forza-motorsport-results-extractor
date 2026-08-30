@@ -41,6 +41,7 @@ pub struct ImageInventoryFilter {
     pub include_missing_files: bool,
 }
 
+#[allow(dead_code)]
 const PROCESSING_PROJECTION: &str = "
     COALESCE(
         CASE
@@ -55,6 +56,7 @@ const PROCESSING_PROJECTION: &str = "
     )
 ";
 
+#[allow(dead_code)]
 const FROM_CLAUSE: &str = "
     FROM image_files i
     LEFT JOIN (
@@ -77,6 +79,12 @@ const FROM_CLAUSE: &str = "
         ) l ON ri.id = l.latest_input_id
         WHERE ri.decision <> 'process'
     ) li ON li.image_file_id = i.id
+    LEFT JOIN (
+        SELECT duplicate_of_image_file_id, COUNT(*) AS cnt
+        FROM image_files
+        WHERE duplicate_of_image_file_id IS NOT NULL
+        GROUP BY duplicate_of_image_file_id
+    ) dup ON dup.duplicate_of_image_file_id = i.id
 ";
 
 fn row_to_inventory(row: &Row<'_>) -> rusqlite::Result<ImageInventoryRow> {
@@ -104,10 +112,73 @@ fn row_to_inventory(row: &Row<'_>) -> rusqlite::Result<ImageInventoryRow> {
 }
 
 /// List the image inventory applying the given filters.
+///
+/// Python parity: first compute the filtered ID set via `_image_ids_query`
+/// (including `processing_status` as a subquery filter, not a per-row
+/// projection), then fetch the rows and compute `processing_status` only for
+/// those IDs — matching `forza/application/gui_read/image_reads.py`.
 pub fn image_inventory(
     conn: &Connection,
     filter: &ImageInventoryFilter,
 ) -> Result<Vec<ImageInventoryRow>, DbError> {
+    // 1) Filtered IDs (no processing_status projection, just subquery filters)
+    let (where_clause, args) = filtered_ids_where_clause(filter);
+    let ids_sql = if where_clause.is_empty() {
+        "SELECT id FROM image_files".to_string()
+    } else {
+        format!("SELECT id FROM image_files i {where_clause}")
+    };
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+        args.iter().map(|item| item.as_ref()).collect();
+    let mut stmt = conn.prepare(&ids_sql)?;
+    let ids: Vec<String> = stmt
+        .query_map(params_ref.as_slice(), |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // 2) Fetch rows for those IDs with the duplicate count (no window function)
+    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT i.id, i.current_name, i.file_status, i.best_lap_status,
+                '' AS processing_status, i.size_bytes,
+                i.race_date, i.semantic_name, i.file_hash, i.current_path,
+                i.duplicate_of_image_file_id,
+                COALESCE(dup.cnt, 0) AS is_canonical
+         FROM image_files i
+         LEFT JOIN (
+            SELECT duplicate_of_image_file_id, COUNT(*) AS cnt
+            FROM image_files
+            WHERE duplicate_of_image_file_id IS NOT NULL
+            GROUP BY duplicate_of_image_file_id
+         ) dup ON dup.duplicate_of_image_file_id = i.id
+         WHERE i.id IN ({placeholders})
+         ORDER BY LOWER(i.current_name), i.id"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let params: Vec<&dyn rusqlite::types::ToSql> = ids
+        .iter()
+        .map(|id| id as &dyn rusqlite::types::ToSql)
+        .collect();
+    let mut rows: Vec<ImageInventoryRow> = stmt
+        .query_map(params.as_slice(), row_to_inventory)?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // 3) Compute processing_status only for the returned IDs (like Python's
+    //    _latest_processing_statuses which does ROW_NUMBER only for those IDs).
+    let status_map = processing_status_map(conn, &ids)?;
+    for row in &mut rows {
+        if let Some(status) = status_map.get(&row.id) {
+            row.processing_status = status.clone();
+        }
+    }
+    Ok(rows)
+}
+
+fn filtered_ids_where_clause(
+    filter: &ImageInventoryFilter,
+) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
     let mut clauses: Vec<String> = Vec::new();
     let mut args: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -116,10 +187,6 @@ pub fn image_inventory(
         args.push(Box::new(file_status.clone()));
     } else if !filter.include_missing_files {
         clauses.push("i.file_status = 'available'".to_string());
-    }
-    if let Some(status) = &filter.processing_status {
-        clauses.push(format!("{PROCESSING_PROJECTION} = ?"));
-        args.push(Box::new(status.clone()));
     }
     if let Some(best) = &filter.best_lap_status {
         clauses.push("i.best_lap_status = ?".to_string());
@@ -143,31 +210,140 @@ pub fn image_inventory(
     } else if filter.inventory_filter.is_some() {
         clauses.push("0".to_string());
     }
+    if let Some(status) = &filter.processing_status {
+        let (clause, mut sub_args) = processing_status_filter_clause(status);
+        clauses.push(clause);
+        args.append(&mut sub_args);
+    }
     let where_clause = if clauses.is_empty() {
         String::new()
     } else {
         format!("WHERE {}", clauses.join(" AND "))
     };
+    (where_clause, args)
+}
 
+fn processing_status_filter_clause(status: &str) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
+    match status {
+        "unprocessed" => (
+            "i.id NOT IN (SELECT image_file_id FROM extraction_results WHERE image_file_id IS NOT NULL)
+             AND i.id NOT IN (
+                SELECT ri.image_file_id FROM run_inputs ri
+                JOIN (SELECT image_file_id, MAX(id) AS latest_input_id FROM run_inputs WHERE image_file_id IS NOT NULL GROUP BY image_file_id) l
+                  ON ri.id = l.latest_input_id
+                WHERE ri.decision <> 'process'
+             )"
+                .to_string(),
+            Vec::new(),
+        ),
+        "skipped" => (
+            "i.id IN (
+                SELECT ri.image_file_id FROM run_inputs ri
+                JOIN (SELECT image_file_id, MAX(id) AS latest_input_id FROM run_inputs WHERE image_file_id IS NOT NULL GROUP BY image_file_id) l
+                  ON ri.id = l.latest_input_id
+                WHERE ri.decision <> 'process' AND ri.image_file_id IS NOT NULL
+                  AND ri.image_file_id NOT IN (SELECT image_file_id FROM extraction_results WHERE image_file_id IS NOT NULL)
+             )"
+                .to_string(),
+            Vec::new(),
+        ),
+        other => {
+            let statuses: Vec<&str> = match other {
+                "processing" => vec!["pending", "running"],
+                "processed_ok" => vec!["ok"],
+                "processed_error" => vec!["error"],
+                "cancelled" => vec!["cancelled"],
+                _ => vec![],
+            };
+            if statuses.is_empty() {
+                return ("0".to_string(), Vec::new());
+            }
+            let placeholders = statuses.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let clause = format!(
+                "i.id IN (
+                    SELECT image_file_id FROM (
+                        SELECT image_file_id, status,
+                               ROW_NUMBER() OVER (PARTITION BY image_file_id ORDER BY created_at DESC, id DESC) AS rn
+                        FROM extraction_results WHERE image_file_id IS NOT NULL
+                    ) WHERE rn = 1 AND status IN ({placeholders})
+                )"
+            );
+            let args = statuses
+                .into_iter()
+                .map(|s| Box::new(s.to_string()) as Box<dyn rusqlite::types::ToSql>)
+                .collect();
+            (clause, args)
+        }
+    }
+}
+
+fn processing_status_map(
+    conn: &Connection,
+    ids: &[String],
+) -> Result<std::collections::HashMap<String, String>, DbError> {
+    use std::collections::HashMap;
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    // Latest result per image (window function only for the filtered IDs)
     let sql = format!(
-        "SELECT i.id, i.current_name, i.file_status, i.best_lap_status,
-                {PROCESSING_PROJECTION} AS processing_status, i.size_bytes,
-                i.race_date, i.semantic_name, i.file_hash, i.current_path,
-                i.duplicate_of_image_file_id,
-                (SELECT COUNT(*) FROM image_files d
-                 WHERE d.duplicate_of_image_file_id = i.id) AS is_canonical
-         {FROM_CLAUSE}
-         {where_clause}
-         ORDER BY LOWER(i.current_name), i.id"
+        "SELECT image_file_id, status FROM (
+            SELECT image_file_id, status,
+                   ROW_NUMBER() OVER (PARTITION BY image_file_id ORDER BY created_at DESC, id DESC) AS rn
+            FROM extraction_results
+            WHERE image_file_id IN ({placeholders})
+        ) WHERE rn = 1"
     );
-
-    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
-        args.iter().map(|item| item.as_ref()).collect();
+    let params: Vec<&dyn rusqlite::types::ToSql> = ids
+        .iter()
+        .map(|id| id as &dyn rusqlite::types::ToSql)
+        .collect();
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt
-        .query_map(params_ref.as_slice(), row_to_inventory)?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows)
+    let mut map: HashMap<String, String> = HashMap::new();
+    let rows = stmt.query_map(params.as_slice(), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for (image_id, status) in rows.collect::<Result<Vec<_>, _>>()? {
+        let proc = match status.as_str() {
+            "pending" | "running" => "processing",
+            "ok" => "processed_ok",
+            "error" => "processed_error",
+            "cancelled" => "cancelled",
+            _ => "processed_error",
+        };
+        map.insert(image_id, proc.to_string());
+    }
+    // For those without a result, check run_inputs for skipped
+    let missing: Vec<String> = ids
+        .iter()
+        .filter(|id| !map.contains_key(*id))
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
+        let placeholders2 = missing.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql2 = format!(
+            "SELECT ri.image_file_id FROM run_inputs ri
+             JOIN (SELECT image_file_id, MAX(id) AS latest_input_id FROM run_inputs WHERE image_file_id IS NOT NULL GROUP BY image_file_id) l
+               ON ri.id = l.latest_input_id
+             WHERE ri.image_file_id IN ({placeholders2}) AND ri.decision <> 'process'"
+        );
+        let params2: Vec<&dyn rusqlite::types::ToSql> = missing
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
+        let mut stmt2 = conn.prepare(&sql2)?;
+        let rows2 = stmt2.query_map(params2.as_slice(), |row| row.get::<_, String>(0))?;
+        for id in rows2.collect::<Result<Vec<_>, _>>()? {
+            map.insert(id, "skipped".to_string());
+        }
+    }
+    // Default to unprocessed
+    for id in ids {
+        map.entry(id.clone())
+            .or_insert_with(|| "unprocessed".to_string());
+    }
+    Ok(map)
 }
 
 pub fn image_inventory_options(conn: &Connection) -> Result<(Vec<String>, Vec<String>), DbError> {

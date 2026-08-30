@@ -576,6 +576,10 @@ pub const INDEX_DDL: &[&str] = &[
     r#"CREATE INDEX idx_run_inputs_process_reason ON run_inputs (run_id, process_reason)"#,
     // idx_run_inputs_run_decision
     r#"CREATE INDEX idx_run_inputs_run_decision ON run_inputs (run_id, decision)"#,
+    // idx_extraction_results_image_file_created (perf for Images inventory window function)
+    r#"CREATE INDEX idx_extraction_results_image_file_created ON extraction_results (image_file_id, created_at DESC, id DESC)"#,
+    // idx_run_inputs_image_file_latest (perf for Images inventory latest input)
+    r#"CREATE INDEX idx_run_inputs_image_file_latest ON run_inputs (image_file_id, id DESC)"#,
 ];
 
 /// Schema version stamped into `PRAGMA user_version` after a full build.
