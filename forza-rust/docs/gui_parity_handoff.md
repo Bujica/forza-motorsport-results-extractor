@@ -1,6 +1,6 @@
 # GUI Rust Parity — Plano e Estado (handoff)
 
-**Última atualização:** 2026-08-29
+**Última atualização:** 2026-08-31
 **Objetivo:** GUI Rust funcionalmente igual ou melhor que a Python (`forza/gui/`),
 exceto a view Records/Performance (adiada por decisão do usuário — o dashboard
 Python será refeito upstream). Deve funcionar de 1080p a 4K (usuário usa QHD).
@@ -12,7 +12,7 @@ Python será refeito upstream). Deve funcionar de 1080p a 4K (usuário usa QHD).
 | A | Modularização (slint: theme/models/components/9 pages; rust: ui_state + detail_views), tema claro legível, layouts adaptativos (min-width 1180, stretch, sem binding loops) | ✅ | `7b043a0` |
 | B | Images parity: 7 colunas + sort por header (Rust sobre ROW_CACHE), seleção Ctrl/Shift/Ctrl+A (pointer-event modifiers + FocusScope), Export (rfd picker)/Rescan/Delete c/ confirmação, Scan folder, resumo de seleção, painel lateral c/ hash/semantic/path/duplicate; detail: colunas Run + Model | ✅ | `6d611ab` |
 | C | Review parity: ReviewQueueFilter (bucket+reason/outcome/run), 19 campos/caso, reopen_case; worker retorna ReviewOptions dinâmicas; página de 3 painéis (preview/fila/detalhes+ações), ações por motivo (dirty, track combo c/ referência, weather, class, car/driver), atalhos ↑↓/D/C/I/Enter, auto-advance | ✅ | `35e0f99` |
-| D | Best Laps: filtros em cascata (track/class/weather/driver/car/source/lap/only-mine), resumo (Tracks/Clean/Dirty/Screenshots/External), merge external_lap_records ativos, grupos Track·Class c/ cor de classe, tintas (mine/external/dirty), sort, Export CSV (forza_output::export_csv), Generate PDF filtrado, Open last PDF, **Import CSV + XLSX (calamine)** → external_record_imports + external_lap_records com matching de pistas/carros e relatório | ⬜ | — |
+| D | Best Laps: filtros em cascata (track/class/weather/driver/car/source/lap/only-mine), resumo (Tracks/Clean/Dirty/Screenshots/External), merge external_lap_records ativos, grupos Track·Class c/ cor de classe, tintas (mine/external/dirty), sort, Export CSV (forza_output::export_csv), Generate PDF filtrado, Open last PDF, **Import CSV + XLSX (calamine 0.26)** → external_record_imports + external_lap_records com matching de pistas/carros e relatório | ✅ | `d91b051` (D1 `9261fce` · D2 `4a3bade` · D3 `d91b051`) |
 | E | Diagnostics: `forza_app::run_doctor` passa a rodar `run_full_doctor` (63 checks c/ severity+count — hoje só 2 checks básicos); aba DB Doctor c/ tabela Result/Count/Check/Description colorida + badge PASS/WARN/FAIL; Logs c/ busca, Clear log (truncate c/ confirmação), Open log folder, scroll-to-end; Overview tab novo (ping LM Studio `/api/v1/models` + fast DB report + contagens) | ⬜ | — |
 | F | Image Debug polish (11 colunas, abas como tabelas), About dialog (versão/build/db/copy diagnostics), status bar (versão · db · schema), percent=100 só se não cancelado, selected-index reset no refresh | ⬜ | — |
 
