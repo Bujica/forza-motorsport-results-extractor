@@ -290,6 +290,7 @@ pub(crate) fn apply_debug_cases(
                         .map(|c| DebugCaseItem {
                             image_file_id: c.image_file_id.clone().into(),
                             image_name: c.image_name.clone().into(),
+                            race_date: c.race_date.clone().unwrap_or_default().into(),
                             file_status: c.file_status.clone().into(),
                             processing: c.processing_status.clone().into(),
                             best_lap: c.best_lap_status.clone().into(),
@@ -310,6 +311,47 @@ pub(crate) fn apply_debug_cases(
             });
             if let Some(w) = ui.upgrade() {
                 w.set_status_text(format!("{count} debug case(s)").into());
+                // Populate filter combos (distinct values, like Python _sync_filter_options)
+                let mut backends: std::collections::BTreeSet<String> =
+                    std::collections::BTreeSet::new();
+                let mut models: std::collections::BTreeSet<String> =
+                    std::collections::BTreeSet::new();
+                let mut prompts: std::collections::BTreeSet<String> =
+                    std::collections::BTreeSet::new();
+                let mut runs: std::collections::BTreeSet<String> =
+                    std::collections::BTreeSet::new();
+                for c in &cases {
+                    if let Some(v) = &c.backend {
+                        if !v.is_empty() {
+                            backends.insert(v.clone());
+                        }
+                    }
+                    if let Some(v) = &c.model {
+                        if !v.is_empty() {
+                            models.insert(v.clone());
+                        }
+                    }
+                    if let Some(v) = &c.prompt_name {
+                        if !v.is_empty() {
+                            prompts.insert(v.clone());
+                        }
+                    }
+                    if let Some(v) = &c.run_id {
+                        if !v.is_empty() {
+                            runs.insert(v.clone());
+                        }
+                    }
+                }
+                let to_model =
+                    |set: std::collections::BTreeSet<String>| -> ModelRc<slint::SharedString> {
+                        let mut v = vec!["all".into()];
+                        v.extend(set.into_iter().map(|s| s.into()));
+                        ModelRc::from(std::rc::Rc::new(slint::VecModel::from(v)))
+                    };
+                w.set_debug_backend_options(to_model(backends));
+                w.set_debug_model_options(to_model(models));
+                w.set_debug_prompt_options(to_model(prompts));
+                w.set_debug_run_options(to_model(runs));
             }
         }
         Err(message) => {
@@ -526,6 +568,8 @@ pub(crate) fn apply_debug_detail(
                 .into(),
         );
         w.set_debug_laps_reviews_text(laps_reviews.into());
+        w.set_debug_artifacts_text("No artifacts (see DB)".into());
+        w.set_debug_runtime_text("No runtime snapshot linked".into());
         w.set_debug_timeline_text(detail.timeline.join("\n").into());
         w.set_status_text("debug detail loaded".into());
     }

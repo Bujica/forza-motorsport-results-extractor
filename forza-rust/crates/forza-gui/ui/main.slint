@@ -2,6 +2,7 @@
 // Page internals live in ui/pages/*.slint; shared visuals in ui/components;
 // data models in ui/models.slint; palette/typography in ui/theme.slint.
 
+import { Button } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { ImageItem, ReviewItem, BestLapItem, DetailLapItem, DetailReviewItem, DetailResultItem, DetailAttemptItem, SettingItem, DebugCaseItem, DebugResultComboItem, DoctorCheckItem } from "models.slint";
 import { ImagesPage } from "pages/images.slint";
@@ -69,6 +70,7 @@ export component MainWindow inherits Window {
     callback save-settings();
     callback page-changed(string);
     callback debug-refresh-requested();
+    callback debug-filter-changed(string, string, string, string, string);
     callback debug-case-selected(int);
     callback debug-result-selected(string);
     callback open-image-debug(string);
@@ -77,6 +79,8 @@ export component MainWindow inherits Window {
     callback logs-clear-requested(string);
     callback logs-open-folder();
     callback logs-search-changed(string);
+    callback about-requested();
+    callback copy-diagnostics-requested();
 
     in property <[ImageItem]> images;
     in property <[ReviewItem]> reviews;
@@ -177,13 +181,27 @@ export component MainWindow inherits Window {
     in property <string> debug-response-text;
     in property <string> debug-parsed-text;
     in property <string> debug-laps-reviews-text;
+    in property <string> debug-artifacts-text;
+    in property <string> debug-runtime-text;
     in property <string> debug-timeline-text;
+    in-out property <string> debug-status-filter: "all";
+    in-out property <string> debug-backend-filter: "all";
+    in-out property <string> debug-model-filter: "all";
+    in-out property <string> debug-prompt-filter: "all";
+    in-out property <string> debug-run-filter: "all";
+    in property <[string]> debug-status-options: ["all", "ok", "error", "pending", "running", "cancelled"];
+    in property <[string]> debug-backend-options: ["all"];
+    in property <[string]> debug-model-options: ["all"];
+    in property <[string]> debug-prompt-options: ["all"];
+    in property <[string]> debug-run-options: ["all"];
 
     in property <string> app-log-text;
     in property <string> error-log-text;
     in-out property <string> logs-tab: "app";
     in-out property <string> logs-search: "";
     in property <string> logs-status;
+    in-out property <bool> about-visible: false;
+    in property <string> about-text;
 
     in property <bool> run-running;
     in property <bool> run-paused;
@@ -258,6 +276,15 @@ export component MainWindow inherits Window {
             }
 
             Rectangle { vertical-stretch: 1; }
+            TouchArea {
+                height: 34px;
+                clicked => { root.about-requested(); }
+                Rectangle {
+                    border-radius: 6px;
+                    background: transparent;
+                    Text { x: 10px; text: "About"; color: Theme.sidebar-muted; vertical-alignment: center; }
+                }
+            }
             Text {
                 text: root.context-db;
                 color: Theme.sidebar-muted;
@@ -437,8 +464,21 @@ export component MainWindow inherits Window {
                 debug-response-text: root.debug-response-text;
                 debug-parsed-text: root.debug-parsed-text;
                 debug-laps-reviews-text: root.debug-laps-reviews-text;
+                debug-artifacts-text: root.debug-artifacts-text;
+                debug-runtime-text: root.debug-runtime-text;
                 debug-timeline-text: root.debug-timeline-text;
+                debug-status-filter <=> root.debug-status-filter;
+                debug-backend-filter <=> root.debug-backend-filter;
+                debug-model-filter <=> root.debug-model-filter;
+                debug-prompt-filter <=> root.debug-prompt-filter;
+                debug-run-filter <=> root.debug-run-filter;
+                debug-status-options: root.debug-status-options;
+                debug-backend-options: root.debug-backend-options;
+                debug-model-options: root.debug-model-options;
+                debug-prompt-options: root.debug-prompt-options;
+                debug-run-options: root.debug-run-options;
                 debug-refresh-requested() => { root.debug-refresh-requested(); }
+                debug-filter-changed(s, b, m, p, r) => { root.debug-filter-changed(s, b, m, p, r); }
                 debug-case-selected(i) => { root.debug-case-selected(i); }
                 debug-result-selected(id) => { root.debug-result-selected(id); }
                 debug-open-image-detail() => { root.debug-open-image-detail(); }
@@ -493,6 +533,46 @@ export component MainWindow inherits Window {
                 discard-settings() => { root.discard-settings(); }
                 save-settings() => { root.save-settings(); }
             }
+
+            // ── Status bar (versão · db · schema) ──
+            Rectangle { height: 1px; background: Theme.border; }
+            Rectangle {
+                height: 22px;
+                background: Theme.header-bg;
+                HorizontalLayout {
+                    padding-left: 8px; padding-right: 8px;
+                    spacing: 8px;
+                    Text { text: root.app-version; color: Theme.text-muted; font-size: Theme.font-xs; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    Text { text: root.context-db; color: Theme.text-muted; font-size: Theme.font-xs; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; horizontal-alignment: right; }
+                    Text { text: root.doctor-summary == "Not checked" ? root.overview-schema : root.doctor-summary; color: Theme.text-muted; font-size: Theme.font-xs; vertical-alignment: center; }
+                }
+            }
         }
+    }
+
+    // ── About dialog (overlay, outside layout) ──
+    if root.about-visible: Rectangle {
+            x: 0; y: 0; width: root.width; height: root.height;
+            background: #00000060;
+            TouchArea { x: 0; y: 0; width: root.width; height: root.height; clicked => { root.about-visible = false; } }
+            Rectangle {
+                width: 520px; height: 420px;
+                x: (root.width - self.width) / 2;
+                y: (root.height - self.height) / 2;
+                background: Theme.card;
+                border-radius: Theme.radius;
+                border-width: 1px; border-color: Theme.border;
+                VerticalLayout {
+                    padding: 16px; spacing: 8px;
+                    Text { text: "About — Forza Motorsport Results Extractor"; color: Theme.text; font-weight: 700; font-size: Theme.font-lg; }
+                    Text { text: root.about-text; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; vertical-stretch: 1; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle { horizontal-stretch: 1; }
+                        Button { text: "Copy diagnostics"; clicked => { root.copy-diagnostics-requested(); } }
+                        Button { text: "Close"; clicked => { root.about-visible = false; } }
+                    }
+                }
+            }
     }
 }

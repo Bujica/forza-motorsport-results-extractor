@@ -1,4 +1,5 @@
-// Image Debug page: case list, result selector and the detail tabs.
+// Image Debug page: 11-column case table + filter bar + 10 detail tabs.
+// Parity with Python ImageDebugView (280px Image, fixed cols, 5-filter bar).
 
 import { Button, ComboBox, ListView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
@@ -22,12 +23,31 @@ export component ImageDebugPage inherits Rectangle {
     in property <string> debug-response-text;
     in property <string> debug-parsed-text;
     in property <string> debug-laps-reviews-text;
+    in property <string> debug-artifacts-text;
+    in property <string> debug-runtime-text;
     in property <string> debug-timeline-text;
 
+    // Filter bar (Python: status/backend/model/prompt/run)
+    in-out property <string> debug-status-filter: "all";
+    in-out property <string> debug-backend-filter: "all";
+    in-out property <string> debug-model-filter: "all";
+    in-out property <string> debug-prompt-filter: "all";
+    in-out property <string> debug-run-filter: "all";
+    in property <[string]> debug-status-options: ["all", "ok", "error", "pending", "running", "cancelled"];
+    in property <[string]> debug-backend-options: ["all"];
+    in property <[string]> debug-model-options: ["all"];
+    in property <[string]> debug-prompt-options: ["all"];
+    in property <[string]> debug-run-options: ["all"];
+
     callback debug-refresh-requested();
+    callback debug-filter-changed(string, string, string, string, string);
     callback debug-case-selected(int);
     callback debug-result-selected(string);
     callback debug-open-image-detail();
+
+    function emit-filter() {
+        root.debug-filter-changed(root.debug-status-filter, root.debug-backend-filter, root.debug-model-filter, root.debug-prompt-filter, root.debug-run-filter);
+    }
 
     function tab-text(key: string) -> string {
         return key == "overview" ? root.debug-overview-text :
@@ -37,6 +57,8 @@ export component ImageDebugPage inherits Rectangle {
                key == "response" ? root.debug-response-text :
                key == "parsed" ? root.debug-parsed-text :
                key == "laps" ? root.debug-laps-reviews-text :
+               key == "artifacts" ? root.debug-artifacts-text :
+               key == "runtime" ? root.debug-runtime-text :
                root.debug-timeline-text;
     }
 
@@ -51,33 +73,81 @@ export component ImageDebugPage inherits Rectangle {
             Text { text: root.debug-selected-image-id; color: Theme.text-faint; font-size: Theme.font-xs; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
         }
 
-        // Cases list
+        // Filter bar
         Card {
-            height: 260px;
+            HorizontalLayout {
+                padding: 6px;
+                spacing: 8px;
+                height: 30px;
+                Text { text: "Status"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+                ComboBox { model: root.debug-status-options; current-value: root.debug-status-filter; min-width: 90px; selected(v) => { root.debug-status-filter = v; root.emit-filter(); } }
+                Text { text: "Backend"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+                ComboBox { model: root.debug-backend-options; current-value: root.debug-backend-filter; min-width: 90px; selected(v) => { root.debug-backend-filter = v; root.emit-filter(); } }
+                Text { text: "Model"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+                ComboBox { model: root.debug-model-options; current-value: root.debug-model-filter; min-width: 110px; selected(v) => { root.debug-model-filter = v; root.emit-filter(); } }
+                Text { text: "Prompt"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+                ComboBox { model: root.debug-prompt-options; current-value: root.debug-prompt-filter; min-width: 110px; selected(v) => { root.debug-prompt-filter = v; root.emit-filter(); } }
+                Text { text: "Run"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+                ComboBox { model: root.debug-run-options; current-value: root.debug-run-filter; min-width: 110px; selected(v) => { root.debug-run-filter = v; root.emit-filter(); } }
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
+
+        // Cases table — 11 columns (Python widths)
+        Card {
+            height: 300px;
             clip: true;
-            dcv := ListView {
-                x: 4px; y: 4px;
-                width: parent.width - 8px;
-                height: parent.height - 8px;
-                for item[index] in root.debug-cases: TouchArea {
-                    height: 28px;
-                    width: dcv.width;
-                    clicked => { root.debug-case-selected(index); }
-                    Rectangle {
-                        x: 1px; y: 1px;
-                        width: parent.width - 2px;
-                        height: parent.height - 2px;
-                        border-radius: 4px;
-                        background: root.debug-selected-image-id == item.image-file-id ? Theme.selection-bg : transparent;
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            spacing: 6px;
-                            Text { text: item.image-name; color: Theme.text; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
-                            Text { text: item.processing; color: item.processing == "processed_ok" ? Theme.ok : item.processing == "processed_error" ? Theme.danger : Theme.text-muted; min-width: 105px; vertical-alignment: center; }
-                            Text { text: item.latest-status; color: Theme.text-muted; min-width: 85px; vertical-alignment: center; }
-                            Text { text: item.model; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                            Text { text: item.attempts + " att"; color: Theme.text-faint; min-width: 55px; vertical-alignment: center; }
-                            Text { text: item.laps + " laps"; color: Theme.text-faint; min-width: 65px; vertical-alignment: center; }
+            VerticalLayout {
+                padding: 4px;
+                spacing: 4px;
+                // Header
+                Rectangle {
+                    height: 26px;
+                    background: Theme.header-bg;
+                    border-radius: 4px;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        spacing: 4px;
+                        Text { text: "Image"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 280px; horizontal-stretch: 2.2; overflow: elide; vertical-alignment: center; }
+                        Text { text: "Race Date"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 95px; vertical-alignment: center; }
+                        Text { text: "File"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 85px; vertical-alignment: center; }
+                        Text { text: "Process"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 85px; vertical-alignment: center; }
+                        Text { text: "Best"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 100px; vertical-alignment: center; }
+                        Text { text: "Latest"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 100px; vertical-alignment: center; }
+                        Text { text: "Run"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 90px; overflow: elide; vertical-alignment: center; }
+                        Text { text: "Model"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 85px; overflow: elide; vertical-alignment: center; }
+                        Text { text: "Att"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 65px; vertical-alignment: center; }
+                        Text { text: "Laps"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 55px; vertical-alignment: center; }
+                        Text { text: "Rev"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 60px; vertical-alignment: center; }
+                    }
+                }
+                dcv := ListView {
+                    vertical-stretch: 1;
+                    for item[index] in root.debug-cases: TouchArea {
+                        height: 28px;
+                        width: dcv.width;
+                        clicked => { root.debug-case-selected(index); }
+                        Rectangle {
+                            x: 1px; y: 1px;
+                            width: parent.width - 2px;
+                            height: parent.height - 2px;
+                            border-radius: 4px;
+                            background: root.debug-selected-image-id == item.image-file-id ? Theme.selection-bg : transparent;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                spacing: 4px;
+                                Text { text: item.image-name; color: Theme.text; min-width: 280px; horizontal-stretch: 2.2; overflow: elide; vertical-alignment: center; font-size: Theme.font-sm; }
+                                Text { text: item.race-date; color: Theme.text-muted; min-width: 95px; vertical-alignment: center; font-size: Theme.font-sm; overflow: elide; }
+                                Text { text: item.file-status; color: Theme.text-muted; min-width: 85px; vertical-alignment: center; font-size: Theme.font-sm; }
+                                Text { text: item.processing; color: item.processing == "processed_ok" ? Theme.ok : item.processing == "processed_error" ? Theme.danger : Theme.text-muted; min-width: 85px; vertical-alignment: center; font-size: Theme.font-sm; }
+                                Text { text: item.best-lap; color: Theme.text-muted; min-width: 100px; vertical-alignment: center; font-size: Theme.font-sm; }
+                                Text { text: item.latest-status; color: item.latest-status == "ok" ? Theme.ok : item.latest-status == "error" ? Theme.danger : Theme.text-muted; min-width: 100px; vertical-alignment: center; font-size: Theme.font-sm; }
+                                Text { text: item.run-id; color: Theme.text-muted; min-width: 90px; overflow: elide; vertical-alignment: center; font-size: Theme.font-sm; }
+                                Text { text: item.model; color: Theme.text-muted; min-width: 85px; overflow: elide; vertical-alignment: center; font-size: Theme.font-sm; }
+                                Text { text: item.attempts; color: Theme.text-faint; min-width: 65px; vertical-alignment: center; font-size: Theme.font-sm; }
+                                Text { text: item.laps; color: Theme.text-faint; min-width: 55px; vertical-alignment: center; font-size: Theme.font-sm; }
+                                Text { text: item.reviews; color: Theme.text-faint; min-width: 60px; vertical-alignment: center; font-size: Theme.font-sm; }
+                            }
                         }
                     }
                 }
@@ -101,7 +171,7 @@ export component ImageDebugPage inherits Rectangle {
             Button { text: "Image details"; clicked => { root.debug-open-image-detail(); } }
         }
 
-        // Tabs
+        // Tabs — 10 tabs (Python parity)
         HorizontalLayout {
             height: 30px;
             spacing: 4px;
@@ -113,11 +183,13 @@ export component ImageDebugPage inherits Rectangle {
                 { key: "response", label: "Response" },
                 { key: "parsed", label: "Parsed" },
                 { key: "laps", label: "Laps & Reviews" },
+                { key: "artifacts", label: "Artifacts" },
+                { key: "runtime", label: "Runtime" },
                 { key: "timeline", label: "Timeline" },
             ]: Rectangle {
                 border-radius: 4px;
                 background: root.debug-tab == tab.key ? Theme.accent : Theme.header-bg;
-                min-width: 100px;
+                min-width: 85px;
                 horizontal-stretch: 1;
                 TouchArea {
                     clicked => { root.debug-tab = tab.key; }
