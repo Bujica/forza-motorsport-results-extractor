@@ -47,6 +47,12 @@ export component MainWindow inherits Window {
     callback review-open-detail(int);
     callback review-preview-requested(string);
     callback bestlaps-requested();
+    callback bestlaps-filter-changed(string, string, string, string, string, string, string, bool);
+    callback bestlaps-sort-changed(int);
+    callback bestlaps-export-csv();
+    callback bestlaps-generate-pdf();
+    callback bestlaps-open-pdf();
+    callback bestlaps-import();
     callback doctor-requested();
     callback rebuild-requested();
     callback start-run(bool, bool, bool);
@@ -92,6 +98,17 @@ export component MainWindow inherits Window {
     in property <[BestLapItem]> best-laps;
     in property <string> status-text;
     in property <string> best-laps-summary;
+    in property <string> best-laps-gamertag;
+    in-out property <bool> best-laps-only-mine: false;
+    in property <[string]> best-laps-tracks: ["all"];
+    in property <[string]> best-laps-classes: ["all"];
+    in property <[string]> best-laps-weathers: ["all"];
+    in property <[string]> best-laps-drivers: ["all"];
+    in property <[string]> best-laps-cars: ["all"];
+    in property <[string]> best-laps-sources: ["all", "screenshots", "external"];
+    in property <[string]> best-laps-laps: ["all", "clean", "dirty"];
+    in property <int> best-laps-sort-column: 0;
+    in property <bool> best-laps-sort-ascending: true;
     in property <string> selection-summary;
     in property <int> sort-column;
     in property <bool> sort-ascending;
@@ -327,8 +344,25 @@ export component MainWindow inherits Window {
             if root.page == "best-laps": BestLapsPage {
                 best-laps: root.best-laps;
                 best-laps-summary: root.best-laps-summary;
+                best-laps-gamertag: root.best-laps-gamertag;
+                best-laps-only-mine: root.best-laps-only-mine;
+                filter-tracks: root.best-laps-tracks;
+                filter-classes: root.best-laps-classes;
+                filter-weathers: root.best-laps-weathers;
+                filter-drivers: root.best-laps-drivers;
+                filter-cars: root.best-laps-cars;
+                filter-sources: root.best-laps-sources;
+                filter-laps: root.best-laps-laps;
+                sort-column: root.best-laps-sort-column;
+                sort-ascending: root.best-laps-sort-ascending;
                 bestlaps-requested() => { root.bestlaps-requested(); }
                 rebuild-requested() => { root.rebuild-requested(); }
+                filter-changed(t, c, w, d, ca, l, s, m) => { root.bestlaps-filter-changed(t, c, w, d, ca, l, s, m); }
+                sort-changed(col) => { root.bestlaps-sort-changed(col); }
+                export-csv-requested() => { root.bestlaps-export-csv(); }
+                generate-pdf-requested() => { root.bestlaps-generate-pdf(); }
+                open-pdf-requested() => { root.bestlaps-open-pdf(); }
+                import-requested() => { root.bestlaps-import(); }
             }
 
             // ══ Diagnostics page ══

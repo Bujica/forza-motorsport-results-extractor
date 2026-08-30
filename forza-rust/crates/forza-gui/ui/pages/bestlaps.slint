@@ -1,18 +1,54 @@
-// Best Laps page: the persisted frontier shown as a flat table (grouping,
-// filters and exports arrive with the Best Laps parity phase).
+// Best Laps page: cascade filters, Track·Class groups with class colours,
+// and filtered exports (CSV/PDF) + import. Parity with
+// forza/gui/views/best_laps_view.py + controllers/best_laps_controller.py.
 
-import { Button, ListView } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, ListView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { BestLapItem } from "../models.slint";
-import { Card, EmptyState } from "../components/common.slint";
+import { Card, EmptyState, SortHeaderCell } from "../components/common.slint";
 
 export component BestLapsPage inherits Rectangle {
     background: transparent;
 
     in property <[BestLapItem]> best-laps;
     in property <string> best-laps-summary;
+    in property <string> best-laps-gamertag;
+    in-out property <bool> best-laps-only-mine;
+
+    // Filter option models (always include "all" at position 0).
+    in property <[string]> filter-tracks: ["all"];
+    in property <[string]> filter-classes: ["all"];
+    in property <[string]> filter-weathers: ["all"];
+    in property <[string]> filter-drivers: ["all"];
+    in property <[string]> filter-cars: ["all"];
+    in property <[string]> filter-sources: ["all", "screenshots", "external"];
+    in property <[string]> filter-laps: ["all", "clean", "dirty"];
+
+    // Current selections (string values).
+    in-out property <string> track-filter: "all";
+    in-out property <string> class-filter: "all";
+    in-out property <string> weather-filter: "all";
+    in-out property <string> driver-filter: "all";
+    in-out property <string> car-filter: "all";
+    in-out property <string> source-filter: "all";
+    in-out property <string> lap-filter: "all";
+
+    in property <int> sort-column: 0;
+    in property <bool> sort-ascending: true;
+
     callback bestlaps-requested();
     callback rebuild-requested();
+    callback filter-changed(string, string, string, string, string, string, string, bool);
+    callback sort-changed(int);
+    callback export-csv-requested();
+    callback generate-pdf-requested();
+    callback open-pdf-requested();
+    callback import-requested();
+
+    function emit-filter() {
+        root.filter-changed(root.track-filter, root.class-filter, root.weather-filter,
+            root.driver-filter, root.car-filter, root.lap-filter, root.source-filter, root.best-laps-only-mine);
+    }
 
     VerticalLayout {
         spacing: 6px;
@@ -21,16 +57,60 @@ export component BestLapsPage inherits Rectangle {
 
         Card {
             height: 42px;
-            Text { x: 12px; y: 12px; text: root.best-laps-summary; color: Theme.text-muted; }
+            Text { x: 12px; y: 12px; text: root.best-laps-summary; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
         }
 
-        HorizontalLayout {
-            height: 32px;
-            spacing: 8px;
-            Text { text: "Best Laps"; color: Theme.text; font-weight: 700; min-width: 80px; vertical-alignment: center; }
-            Button { text: "Reload"; clicked => { root.bestlaps-requested(); } }
-            Button { text: "Rebuild derived state"; clicked => { root.rebuild-requested(); } }
-            Rectangle { horizontal-stretch: 1; }
+        // ── Action bar ──
+        Card {
+            VerticalLayout {
+                padding: 6px;
+                spacing: 4px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    height: 30px;
+                    Text { text: "Best Laps"; color: Theme.text; font-weight: 700; min-width: 80px; vertical-alignment: center; }
+                    Button { text: "Reload"; clicked => { root.bestlaps-requested(); } }
+                    Button { text: "Rebuild"; clicked => { root.rebuild-requested(); } }
+                    Button { text: "Export CSV"; clicked => { root.export-csv-requested(); } }
+                    Button { text: "Generate PDF"; clicked => { root.generate-pdf-requested(); } }
+                    Button { text: "Open last PDF"; clicked => { root.open-pdf-requested(); } }
+                    Button { text: "Import spreadsheet"; clicked => { root.import-requested(); } }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                // ── Filter bar (cascade: each combo lists values excluding its own constraint) ──
+                HorizontalLayout {
+                    spacing: 8px;
+                    height: 28px;
+                    Text { text: root.best-laps-gamertag == "" ? "Gamertag: not set" : "Gamertag: " + root.best-laps-gamertag; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; min-width: 160px; overflow: elide; }
+                    CheckBox {
+                        text: "Only this driver";
+                        checked <=> root.best-laps-only-mine;
+                        enabled: root.best-laps-gamertag != "";
+                        toggled => { root.emit-filter(); }
+                    }
+                    Rectangle { width: 6px; }
+                    Text { text: "Track"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+                    ComboBox { model: root.filter-tracks; current-value <=> root.track-filter; min-width: 120px; selected(v) => { root.track-filter = v; root.emit-filter(); } }
+                    Text { text: "Class"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+                    ComboBox { model: root.filter-classes; current-value <=> root.class-filter; min-width: 80px; selected(v) => { root.class-filter = v; root.emit-filter(); } }
+                    Text { text: "Weather"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+                    ComboBox { model: root.filter-weathers; current-value <=> root.weather-filter; min-width: 90px; selected(v) => { root.weather-filter = v; root.emit-filter(); } }
+                    Text { text: "Driver"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+                    ComboBox { model: root.filter-drivers; current-value <=> root.driver-filter; min-width: 110px; selected(v) => { root.driver-filter = v; root.emit-filter(); } }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    height: 28px;
+                    Text { text: "Car"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+                    ComboBox { model: root.filter-cars; current-value <=> root.car-filter; min-width: 130px; selected(v) => { root.car-filter = v; root.emit-filter(); } }
+                    Text { text: "Source"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+                    ComboBox { model: root.filter-sources; current-value <=> root.source-filter; min-width: 120px; selected(v) => { root.source-filter = v; root.emit-filter(); } }
+                    Text { text: "Lap"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+                    ComboBox { model: root.filter-laps; current-value <=> root.lap-filter; min-width: 90px; selected(v) => { root.lap-filter = v; root.emit-filter(); } }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+            }
         }
 
         Card {
@@ -47,10 +127,10 @@ export component BestLapsPage inherits Rectangle {
                         padding-left: 8px;
                         Text { text: "Track"; min-width: 140px; horizontal-stretch: 2.4; vertical-alignment: center; overflow: elide; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
                         Text { text: "Class"; min-width: 40px; horizontal-stretch: 0.6; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
-                        Text { text: "Driver"; min-width: 90px; horizontal-stretch: 1.4; vertical-alignment: center; overflow: elide; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
-                        Text { text: "Car"; min-width: 110px; horizontal-stretch: 1.6; vertical-alignment: center; overflow: elide; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
-                        Text { text: "Best lap"; min-width: 80px; horizontal-stretch: 1.1; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
-                        Text { text: "Weather"; min-width: 60px; horizontal-stretch: 0.9; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
+                        SortHeaderCell { label: "Driver"; col-min-width: 90px; horizontal-stretch: 1.4; sort-state: root.sort-column == 0 ? (root.sort-ascending ? 1 : 2) : 0; sort-clicked => { root.sort-changed(0); } }
+                        SortHeaderCell { label: "Car"; col-min-width: 110px; horizontal-stretch: 1.6; sort-state: root.sort-column == 1 ? (root.sort-ascending ? 1 : 2) : 0; sort-clicked => { root.sort-changed(1); } }
+                        SortHeaderCell { label: "Best lap"; col-min-width: 80px; horizontal-stretch: 1.1; sort-state: root.sort-column == 2 ? (root.sort-ascending ? 1 : 2) : 0; sort-clicked => { root.sort-changed(2); } }
+                        SortHeaderCell { label: "Weather"; col-min-width: 60px; horizontal-stretch: 0.9; sort-state: root.sort-column == 3 ? (root.sort-ascending ? 1 : 2) : 0; sort-clicked => { root.sort-changed(3); } }
                         Text { text: "Temp"; min-width: 45px; horizontal-stretch: 0.7; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
                         Text { text: "Source"; horizontal-stretch: 1; vertical-alignment: center; overflow: elide; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
                     }
@@ -59,19 +139,27 @@ export component BestLapsPage inherits Rectangle {
                     horizontal-stretch: 1;
                     vertical-stretch: 1;
                     for lap[index] in root.best-laps: Rectangle {
-                        height: Theme.row-h;
+                        height: lap.is-group ? 22px : Theme.row-h;
                         horizontal-stretch: 1;
-                        background: lap.mine ? Theme.row-mine : (lap.dirty ? Theme.row-dirty : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent));
-                        HorizontalLayout {
+                        background: lap.is-group ?
+                            (lap.class == "E" ? #C7368E : lap.class == "D" ? #127F85 : lap.class == "C" ? #BB7A00 : lap.class == "B" ? #C54E00 : lap.class == "A" ? #992800 : lap.class == "TCR" ? #1E90FF : lap.class == "S" ? #613BBF : lap.class == "R" ? #105DAB : lap.class == "P" ? #0C8540 : lap.class == "X" ? #006000 : lap.class == "Mixed" ? #555555 : #000000)
+                            : (lap.mine ? Theme.row-mine : (lap.external ? Theme.row-external : (lap.dirty ? Theme.row-dirty : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent))));
+                        if lap.is-group: HorizontalLayout {
                             padding-left: 8px;
-                            Text { text: lap.track; color: Theme.text; min-width: 140px; horizontal-stretch: 2.4; overflow: elide; vertical-alignment: center; }
-                            Text { text: lap.class; color: Theme.text-muted; min-width: 40px; horizontal-stretch: 0.6; vertical-alignment: center; }
-                            Text { text: lap.driver; color: lap.mine ? Theme.warn : Theme.text; min-width: 90px; horizontal-stretch: 1.4; overflow: elide; vertical-alignment: center; }
-                            Text { text: lap.car; color: Theme.text-muted; min-width: 110px; horizontal-stretch: 1.6; overflow: elide; vertical-alignment: center; }
-                            Text { text: lap.time; color: lap.dirty ? Theme.danger : Theme.ok; min-width: 80px; horizontal-stretch: 1.1; vertical-alignment: center; }
-                            Text { text: lap.weather; color: Theme.text-muted; min-width: 60px; horizontal-stretch: 0.9; overflow: elide; vertical-alignment: center; }
-                            Text { text: lap.temp; color: Theme.text-muted; min-width: 45px; horizontal-stretch: 0.7; vertical-alignment: center; }
-                            Text { text: lap.source; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                            spacing: 8px;
+                            Text { text: lap.track + " · " + lap.class; color: #ffffff; font-weight: 700; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                            Text { text: lap.group-count + " lap(s)"; color: #ffffff; font-size: Theme.font-sm; vertical-alignment: center; }
+                        }
+                        if !lap.is-group: HorizontalLayout {
+                            padding-left: 8px;
+                            Text { text: lap.track; color: Theme.text; min-width: 140px; horizontal-stretch: 2.4; overflow: elide; vertical-alignment: center; font-size: Theme.font-sm; }
+                            Text { text: lap.class; color: Theme.text-muted; min-width: 40px; horizontal-stretch: 0.6; vertical-alignment: center; font-size: Theme.font-sm; }
+                            Text { text: lap.driver; color: lap.mine ? Theme.warn : Theme.text; min-width: 90px; horizontal-stretch: 1.4; overflow: elide; vertical-alignment: center; font-size: Theme.font-sm; }
+                            Text { text: lap.car; color: Theme.text-muted; min-width: 110px; horizontal-stretch: 1.6; overflow: elide; vertical-alignment: center; font-size: Theme.font-sm; }
+                            Text { text: lap.time; color: lap.dirty ? Theme.danger : Theme.ok; min-width: 80px; horizontal-stretch: 1.1; vertical-alignment: center; font-size: Theme.font-sm; }
+                            Text { text: lap.weather; color: Theme.text-muted; min-width: 60px; horizontal-stretch: 0.9; overflow: elide; vertical-alignment: center; font-size: Theme.font-sm; }
+                            Text { text: lap.temp; color: Theme.text-muted; min-width: 45px; horizontal-stretch: 0.7; vertical-alignment: center; font-size: Theme.font-sm; }
+                            Text { text: lap.source; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; font-size: Theme.font-sm; }
                         }
                     }
                 }

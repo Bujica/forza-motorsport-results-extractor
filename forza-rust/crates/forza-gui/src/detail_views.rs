@@ -251,6 +251,7 @@ pub(crate) fn apply_settings(
         if outcome.gamertag_recomputed {
             GAMERTAG.with(|slot| *slot.borrow_mut() = outcome.config.gamertag.clone());
             w.set_context_gamertag(outcome.config.gamertag.clone().into());
+            w.set_best_laps_gamertag(outcome.config.gamertag.clone().into());
             w.set_run_info(run_info_line(&outcome.config).into());
             set_status(&w, "gamertag changed; best laps recomputed");
             send_request(Request::ListBestLaps);
@@ -268,6 +269,10 @@ pub(crate) fn apply_settings(
     RUN_CONFIG.with(|slot| {
         *slot.borrow_mut() = Some(forza_app::RunParams::from_config(&outcome.config, false));
     });
+    if let Some(w) = ui.upgrade() {
+        w.set_best_laps_gamertag(outcome.config.gamertag.clone().into());
+    }
+    GAMERTAG.with(|slot| *slot.borrow_mut() = outcome.config.gamertag.clone());
 }
 
 pub(crate) fn apply_debug_cases(

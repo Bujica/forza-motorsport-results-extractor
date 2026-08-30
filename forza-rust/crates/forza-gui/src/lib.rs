@@ -14,12 +14,13 @@ use detail_views::{
     apply_debug_cases, apply_debug_detail, apply_image_detail, apply_settings, step_detail,
 };
 use ui_state::{
-    BESTLAP_MODEL, CONFIG_PATH, DEBUG_CASE_MODEL, DEBUG_CASES_CACHE, DEBUG_DETAIL_CACHE,
-    DEBUG_RESULT_MODEL, DETAIL_ATTEMPT_MODEL, DETAIL_INDEX, DETAIL_LAP_MODEL, DETAIL_RESULT_MODEL,
-    DETAIL_REVIEW_MODEL, GAMERTAG, LIST_MODEL, PENDING_SETTINGS, REVIEW_MODEL, ROW_CACHE,
-    RUN_CONFIG, RUN_CONTROL, RUN_LOG, RUN_SELECTED_IDS, RUN_START, SELECTED_IMAGE_IDS,
-    SETTINGS_LOADED, SETTINGS_MODEL, WORKER_TX, append_run_log, compute_rate_eta, enqueue,
-    image_items, run_info_line, send_request, set_status, update_image_selection,
+    BESTLAP_ALL, BESTLAP_FILTER, BESTLAP_MODEL, BESTLAP_SORT, CONFIG_PATH, DEBUG_CASE_MODEL,
+    DEBUG_CASES_CACHE, DEBUG_DETAIL_CACHE, DEBUG_RESULT_MODEL, DETAIL_ATTEMPT_MODEL, DETAIL_INDEX,
+    DETAIL_LAP_MODEL, DETAIL_RESULT_MODEL, DETAIL_REVIEW_MODEL, GAMERTAG, LIST_MODEL,
+    PENDING_SETTINGS, REVIEW_MODEL, ROW_CACHE, RUN_CONFIG, RUN_CONTROL, RUN_LOG, RUN_SELECTED_IDS,
+    RUN_START, SELECTED_IMAGE_IDS, SETTINGS_LOADED, SETTINGS_MODEL, WORKER_TX, append_run_log,
+    compute_rate_eta, enqueue, image_items, run_info_line, send_request, set_status,
+    update_image_selection,
 };
 
 use std::cell::RefCell;
@@ -131,6 +132,148 @@ fn update_selection_summary(ui: &MainWindow) {
         )
         .into(),
     );
+}
+
+#[allow(dead_code)]
+fn class_color(class: &str) -> &'static str {
+    match class {
+        "E" => "#C7368E",
+        "D" => "#127F85",
+        "C" => "#BB7A00",
+        "B" => "#C54E00",
+        "A" => "#992800",
+        "TCR" => "#1E90FF",
+        "S" => "#613BBF",
+        "R" => "#105DAB",
+        "P" => "#0C8540",
+        "X" => "#006000",
+        "Mixed" => "#555555",
+        _ => "#000000",
+    }
+}
+
+fn apply_bestlaps_filters(ui: &MainWindow) {
+    let gamertag_lower = GAMERTAG.with(|s| s.borrow().clone().to_lowercase());
+    let (all_rows, filter, sort) = (
+        BESTLAP_ALL.with(|s| s.borrow().clone()),
+        BESTLAP_FILTER.with(|s| s.borrow().clone()),
+        BESTLAP_SORT.with(|s| *s.borrow()),
+    );
+    let mut filtered = forza_app::apply_filters(&all_rows, &filter, &gamertag_lower, None);
+    // Sort: 0 driver, 1 car, 2 best_lap_ms, 3 weather; fall back to domain ordering for track/class.
+    filtered.sort_by(|a, b| {
+        let ord = match sort.0 {
+            0 => a.driver.to_lowercase().cmp(&b.driver.to_lowercase()),
+            1 => a.car.to_lowercase().cmp(&b.car.to_lowercase()),
+            2 => a.best_lap_ms.cmp(&b.best_lap_ms),
+            3 => a.weather.to_lowercase().cmp(&b.weather.to_lowercase()),
+            _ => std::cmp::Ordering::Equal,
+        };
+        let ord = if ord == std::cmp::Ordering::Equal {
+            // Tie-breaker: track/class ordering via domain key
+            let map = std::collections::HashMap::new();
+            forza_domain::ordering::ordered_lap_key(a, &map)
+                .cmp(&forza_domain::ordering::ordered_lap_key(b, &map))
+        } else {
+            ord
+        };
+        if sort.1 { ord } else { ord.reverse() }
+    });
+    let summary = forza_app::summary(&filtered, filter.only_mine);
+    ui.set_best_laps_summary(forza_app::summary_text(&summary, filter.only_mine).into());
+    ui.set_best_laps_sort_column(sort.0 as i32);
+    ui.set_best_laps_sort_ascending(sort.1);
+    // Filter option models (cascade: exclude self)
+    let options = forza_app::filter_options(&all_rows, &filter, &gamertag_lower);
+    let to_model = |values: Vec<String>| -> ModelRc<slint::SharedString> {
+        let mut with_all = vec!["all".into()];
+        with_all.extend(values.into_iter().map(|v| v.into()));
+        ModelRc::from(Rc::new(VecModel::from(with_all)))
+    };
+    ui.set_best_laps_tracks(to_model(options.tracks));
+    ui.set_best_laps_classes(to_model(options.race_classes));
+    ui.set_best_laps_weathers(to_model(options.weather));
+    ui.set_best_laps_drivers(to_model(options.drivers));
+    ui.set_best_laps_cars(to_model(options.cars));
+    ui.set_best_laps_sources({
+        let mut vals = options.source_states;
+        if vals.is_empty() {
+            vals = vec!["screenshots".to_string(), "external".to_string()];
+        }
+        let mut with_all = vec!["all".into()];
+        with_all.extend(vals.into_iter().map(|v| v.into()));
+        ModelRc::from(Rc::new(VecModel::from(with_all)))
+    });
+    ui.set_best_laps_laps({
+        let mut vals = options.dirty_states;
+        if vals.is_empty() {
+            vals = vec!["clean".to_string(), "dirty".to_string()];
+        }
+        let mut with_all = vec!["all".into()];
+        with_all.extend(vals.into_iter().map(|v| v.into()));
+        ModelRc::from(Rc::new(VecModel::from(with_all)))
+    });
+    // Build grouped display list: group header + rows.
+    let mut counts: std::collections::HashMap<(String, String), usize> =
+        std::collections::HashMap::new();
+    for r in &filtered {
+        *counts
+            .entry((r.track.clone(), r.race_class.clone()))
+            .or_insert(0) += 1;
+    }
+    let mut items: Vec<BestLapItem> = Vec::new();
+    let mut current_key: Option<(String, String)> = None;
+    for r in &filtered {
+        let key = (r.track.clone(), r.race_class.clone());
+        if current_key.as_ref() != Some(&key) {
+            let cnt = *counts.get(&key).unwrap_or(&0) as i32;
+            items.push(BestLapItem {
+                track: r.track.clone().into(),
+                class: r.race_class.clone().into(),
+                driver: "".into(),
+                car: "".into(),
+                time: "".into(),
+                weather: "".into(),
+                temp: "".into(),
+                source: "".into(),
+                dirty: false,
+                mine: false,
+                external: false,
+                is_group: true,
+                group_count: cnt,
+            });
+            current_key = Some(key);
+        }
+        let is_mine = !gamertag_lower.is_empty() && r.driver.to_lowercase() == gamertag_lower;
+        items.push(BestLapItem {
+            track: r.track.clone().into(),
+            class: r.race_class.clone().into(),
+            driver: r.driver.clone().into(),
+            car: r.car.clone().into(),
+            time: r.best_lap.clone().into(),
+            weather: r.weather.clone().into(),
+            temp: r
+                .temp_c
+                .map(|v| format!("{v:.0}°C"))
+                .unwrap_or_default()
+                .into(),
+            source: if r.is_external {
+                r.source_label.clone().into()
+            } else {
+                "screenshots".into()
+            },
+            dirty: r.dirty,
+            mine: is_mine,
+            external: r.is_external,
+            is_group: false,
+            group_count: 0,
+        });
+    }
+    BESTLAP_MODEL.with(|slot| {
+        if let Some(model) = slot.borrow().as_ref() {
+            model.set_vec(items);
+        }
+    });
 }
 
 thread_local! {
@@ -253,6 +396,13 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     main.set_best_laps(ModelRc::from(bestlap_model.clone()));
     BESTLAP_MODEL.with(|slot| *slot.borrow_mut() = Some(bestlap_model));
     GAMERTAG.with(|slot| *slot.borrow_mut() = cfg.gamertag.clone());
+    main.set_best_laps_gamertag(cfg.gamertag.clone().into());
+    // Ensure filter defaults are "all" so cascade options start complete.
+    BESTLAP_FILTER.with(|slot| {
+        let mut f = slot.borrow_mut();
+        f.dirty = "all".to_string();
+        f.source = "all".to_string();
+    });
     CONFIG_PATH.with(|slot| *slot.borrow_mut() = config_path.to_path_buf());
 
     // Run log model + params snapshot for the extraction runner.
@@ -471,58 +621,29 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                     }
                 }
                 Response::BestLaps(result) => {
-                    BESTLAP_MODEL.with(|slot| {
-                        if let Some(model) = slot.borrow().as_ref()
-                            && let Ok(rows) = &result
-                        {
-                            let items: Vec<BestLapItem> = rows
-                                .iter()
-                                .map(|b| BestLapItem {
-                                    track: b.track.clone().into(),
-                                    class: b.race_class.clone().into(),
-                                    driver: b.driver.clone().into(),
-                                    car: b.car.clone().into(),
-                                    time: b.best_lap.clone().into(),
-                                    weather: b.weather.clone().into(),
-                                    temp: b
-                                        .temp_c
-                                        .map(|v| format!("{v:.0}°C"))
-                                        .unwrap_or_default()
-                                        .into(),
-                                    source: if b.is_external {
-                                        b.source_label.clone().into()
-                                    } else {
-                                        "screenshots".into()
-                                    },
-                                    dirty: b.dirty,
-                                    mine: {
-                                        let g =
-                                            GAMERTAG.with(|s| s.borrow().clone()).to_lowercase();
-                                        !g.is_empty() && b.driver.to_lowercase() == g
-                                    },
-                                })
-                                .collect();
-                            model.set_vec(items);
-                        }
-                    });
-                    if let Some(w) = ui.upgrade() {
-                        match result {
-                            Ok(rows) => {
-                                let external = rows.iter().filter(|r| r.is_external).count();
-                                let screenshots = rows.len() - external;
-                                let clean = rows.iter().filter(|row| !row.dirty).count();
-                                let dirty = rows.len() - clean;
-                                let tracks = rows
-                                    .iter()
-                                    .map(|row| &row.track)
-                                    .collect::<std::collections::HashSet<_>>()
-                                    .len();
-                                w.set_best_laps_summary(format!(
-                                    "Tracks: {tracks} · Clean: {clean} · Dirty: {dirty} · Screenshots: {screenshots} · External: {external}",
-                                ).into());
-                                w.set_status_text(format!("{} best lap(s)", rows.len()).into())
+                    match result {
+                        Ok(rows) => {
+                            BESTLAP_ALL.with(|slot| *slot.borrow_mut() = rows);
+                            // Ensure filter defaults are "all" when fresh.
+                            BESTLAP_FILTER.with(|slot| {
+                                let mut f = slot.borrow_mut();
+                                if f.dirty.is_empty() {
+                                    f.dirty = "all".to_string();
+                                }
+                                if f.source.is_empty() {
+                                    f.source = "all".to_string();
+                                }
+                            });
+                            if let Some(w) = ui.upgrade() {
+                                apply_bestlaps_filters(&w);
+                                let count = BESTLAP_ALL.with(|s| s.borrow().len());
+                                w.set_status_text(format!("{count} best lap(s) loaded").into());
                             }
-                            Err(message) => w.set_status_text(format!("error: {message}").into()),
+                        }
+                        Err(message) => {
+                            if let Some(w) = ui.upgrade() {
+                                w.set_status_text(format!("error: {message}").into());
+                            }
                         }
                     }
                 }
@@ -1073,6 +1194,71 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
         let ui = main.as_weak();
         main.on_bestlaps_requested(move || {
             enqueue(Request::ListBestLaps, &ui, "loading best laps…");
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_bestlaps_filter_changed(
+            move |track, class, weather, driver, car, lap, source, only_mine| {
+                BESTLAP_FILTER.with(|slot| {
+                    *slot.borrow_mut() = forza_app::BestLapFilter::from_strings(
+                        &track, &class, &weather, &driver, &car, &lap, &source, only_mine,
+                    );
+                });
+                if let Some(w) = ui.upgrade() {
+                    apply_bestlaps_filters(&w);
+                }
+            },
+        );
+    }
+    {
+        let ui = main.as_weak();
+        main.on_bestlaps_sort_changed(move |col| {
+            BESTLAP_SORT.with(|slot| {
+                let mut state = slot.borrow_mut();
+                let (cur_col, cur_asc) = *state;
+                let asc = if cur_col == col as usize {
+                    !cur_asc
+                } else {
+                    true
+                };
+                *state = (col as usize, asc);
+            });
+            if let Some(w) = ui.upgrade() {
+                apply_bestlaps_filters(&w);
+            }
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_bestlaps_export_csv(move || {
+            if let Some(w) = ui.upgrade() {
+                set_status(&w, "Export CSV lands in D3");
+            }
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_bestlaps_generate_pdf(move || {
+            if let Some(w) = ui.upgrade() {
+                set_status(&w, "Generate PDF lands in D3");
+            }
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_bestlaps_open_pdf(move || {
+            if let Some(w) = ui.upgrade() {
+                set_status(&w, "Open last PDF lands in D3");
+            }
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_bestlaps_import(move || {
+            if let Some(w) = ui.upgrade() {
+                set_status(&w, "Import spreadsheet lands in D3");
+            }
         });
     }
     {
