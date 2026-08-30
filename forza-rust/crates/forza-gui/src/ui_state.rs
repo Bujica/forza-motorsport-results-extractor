@@ -49,6 +49,8 @@ thread_local! {
     pub(crate) static DEBUG_CASES_CACHE: RefCell<Vec<forza_db::image_debug::ImageDebugCase>> = const { RefCell::new(Vec::new()) };
     pub(crate) static CONFIG_PATH: RefCell<PathBuf> = const { RefCell::new(PathBuf::new()) };
     pub(crate) static PENDING_IMPORT_MESSAGE: RefCell<Option<String>> = const { RefCell::new(None) };
+    pub(crate) static LOGS_APP_RAW: RefCell<String> = const { RefCell::new(String::new()) };
+    pub(crate) static LOGS_ERROR_RAW: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 /// Rate/ETA readout for the run progress bar, measured from the run's

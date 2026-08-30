@@ -3,7 +3,7 @@
 // data models in ui/models.slint; palette/typography in ui/theme.slint.
 
 import { Theme } from "theme.slint";
-import { ImageItem, ReviewItem, BestLapItem, DetailLapItem, DetailReviewItem, DetailResultItem, DetailAttemptItem, SettingItem, DebugCaseItem, DebugResultComboItem } from "models.slint";
+import { ImageItem, ReviewItem, BestLapItem, DetailLapItem, DetailReviewItem, DetailResultItem, DetailAttemptItem, SettingItem, DebugCaseItem, DebugResultComboItem, DoctorCheckItem } from "models.slint";
 import { ImagesPage } from "pages/images.slint";
 import { ProcessPage } from "pages/process.slint";
 import { ReviewPage } from "pages/review.slint";
@@ -55,6 +55,7 @@ export component MainWindow inherits Window {
     callback bestlaps-import();
     callback doctor-requested();
     callback rebuild-requested();
+    callback overview-requested();
     callback start-run(bool, bool, bool);
     callback cancel-run();
     callback toggle-pause();
@@ -73,6 +74,9 @@ export component MainWindow inherits Window {
     callback open-image-debug(string);
     callback debug-open-image-detail();
     callback logs-reload-requested();
+    callback logs-clear-requested(string);
+    callback logs-open-folder();
+    callback logs-search-changed(string);
 
     in property <[ImageItem]> images;
     in property <[ReviewItem]> reviews;
@@ -116,6 +120,27 @@ export component MainWindow inherits Window {
     in property <string> detail-title;
     in property <string> detail-lines;
     in property <string> doctor-report;
+    in property <string> doctor-overall: "PASS";
+    in property <string> doctor-summary: "Not checked";
+    in property <[DoctorCheckItem]> doctor-checks;
+    in-out property <string> diagnostics-tab: "overview";
+    in property <string> overview-lm-level: "info";
+    in property <string> overview-lm-message: "Not checked";
+    in property <string> overview-endpoint: "—";
+    in property <string> overview-model: "—";
+    in property <string> overview-loaded-instance: "—";
+    in property <string> overview-configured-load: "—";
+    in property <string> overview-configured-request: "—";
+    in property <string> overview-configured-image: "—";
+    in property <string> overview-runtime-policy: "—";
+    in property <string> overview-loaded-runtime: "—";
+    in property <string> overview-capabilities: "—";
+    in property <string> overview-model-info: "—";
+    in property <string> overview-warnings: "—";
+    in property <string> overview-db-status: "Not checked";
+    in property <string> overview-schema: "—";
+    in property <string> overview-inventory: "—";
+    in property <string> overview-review: "—";
     in property <string> context-db;
     in property <string> context-gamertag;
 
@@ -157,6 +182,8 @@ export component MainWindow inherits Window {
     in property <string> app-log-text;
     in property <string> error-log-text;
     in-out property <string> logs-tab: "app";
+    in-out property <string> logs-search: "";
+    in property <string> logs-status;
 
     in property <bool> run-running;
     in property <bool> run-paused;
@@ -368,8 +395,30 @@ export component MainWindow inherits Window {
             // ══ Diagnostics page ══
             if root.page == "diagnostics": DiagnosticsPage {
                 doctor-report: root.doctor-report;
+                doctor-overall: root.doctor-overall;
+                doctor-summary: root.doctor-summary;
+                doctor-checks: root.doctor-checks;
+                diagnostics-tab <=> root.diagnostics-tab;
+                overview-lm-level: root.overview-lm-level;
+                overview-lm-message: root.overview-lm-message;
+                overview-endpoint: root.overview-endpoint;
+                overview-model: root.overview-model;
+                overview-loaded-instance: root.overview-loaded-instance;
+                overview-configured-load: root.overview-configured-load;
+                overview-configured-request: root.overview-configured-request;
+                overview-configured-image: root.overview-configured-image;
+                overview-runtime-policy: root.overview-runtime-policy;
+                overview-loaded-runtime: root.overview-loaded-runtime;
+                overview-capabilities: root.overview-capabilities;
+                overview-model-info: root.overview-model-info;
+                overview-warnings: root.overview-warnings;
+                overview-db-status: root.overview-db-status;
+                overview-schema: root.overview-schema;
+                overview-inventory: root.overview-inventory;
+                overview-review: root.overview-review;
                 doctor-requested() => { root.doctor-requested(); }
                 rebuild-requested() => { root.rebuild-requested(); }
+                overview-requested() => { root.overview-requested(); }
             }
 
             // ══ Image Debug page ══
@@ -400,7 +449,12 @@ export component MainWindow inherits Window {
                 app-log-text: root.app-log-text;
                 error-log-text: root.error-log-text;
                 logs-tab <=> root.logs-tab;
+                logs-search <=> root.logs-search;
+                logs-status: root.logs-status;
                 logs-reload-requested() => { root.logs-reload-requested(); }
+                logs-clear-requested(which) => { root.logs-clear-requested(which); }
+                logs-open-folder() => { root.logs-open-folder(); }
+                logs-search-changed(text) => { root.logs-search-changed(text); }
             }
 
             // ══ Performance page (deferred scope) ══

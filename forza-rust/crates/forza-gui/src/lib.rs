@@ -16,11 +16,11 @@ use detail_views::{
 use ui_state::{
     BESTLAP_ALL, BESTLAP_FILTER, BESTLAP_MODEL, BESTLAP_SORT, CONFIG_PATH, DEBUG_CASE_MODEL,
     DEBUG_CASES_CACHE, DEBUG_DETAIL_CACHE, DEBUG_RESULT_MODEL, DETAIL_ATTEMPT_MODEL, DETAIL_INDEX,
-    DETAIL_LAP_MODEL, DETAIL_RESULT_MODEL, DETAIL_REVIEW_MODEL, GAMERTAG, LIST_MODEL,
-    PENDING_IMPORT_MESSAGE, PENDING_SETTINGS, REVIEW_MODEL, ROW_CACHE, RUN_CONFIG, RUN_CONTROL,
-    RUN_LOG, RUN_SELECTED_IDS, RUN_START, SELECTED_IMAGE_IDS, SETTINGS_LOADED, SETTINGS_MODEL,
-    WORKER_TX, append_run_log, compute_rate_eta, enqueue, image_items, run_info_line, send_request,
-    set_status, update_image_selection,
+    DETAIL_LAP_MODEL, DETAIL_RESULT_MODEL, DETAIL_REVIEW_MODEL, GAMERTAG, LIST_MODEL, LOGS_APP_RAW,
+    LOGS_ERROR_RAW, PENDING_IMPORT_MESSAGE, PENDING_SETTINGS, REVIEW_MODEL, ROW_CACHE, RUN_CONFIG,
+    RUN_CONTROL, RUN_LOG, RUN_SELECTED_IDS, RUN_START, SELECTED_IMAGE_IDS, SETTINGS_LOADED,
+    SETTINGS_MODEL, WORKER_TX, append_run_log, compute_rate_eta, enqueue, image_items,
+    run_info_line, send_request, set_status, update_image_selection,
 };
 
 use std::cell::RefCell;
@@ -448,6 +448,14 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     let debug_result_model = Rc::new(VecModel::<DebugResultComboItem>::from(Vec::new()));
     main.set_debug_results(ModelRc::from(debug_result_model.clone()));
     DEBUG_RESULT_MODEL.with(|slot| *slot.borrow_mut() = Some(debug_result_model));
+    main.set_doctor_checks(ModelRc::from(Rc::new(VecModel::<DoctorCheckItem>::from(
+        Vec::new(),
+    ))));
+    main.set_doctor_overall("PASS".into());
+    main.set_doctor_summary("Not checked".into());
+    main.set_overview_lm_level("info".into());
+    main.set_overview_lm_message("Not checked".into());
+    main.set_logs_status("".into());
 
     // Context header values.
     main.set_context_db(db_path.display().to_string().into());
@@ -484,6 +492,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                                 apply_inventory_sort(&w);
                                 update_image_selection(&w);
                                 update_selection_summary(&w);
+                                w.set_selected_index(-1);
                                 w.set_status_text(
                                     format!("{count} image(s) [{filter_label}]").into(),
                                 );
@@ -719,15 +728,103 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                     if let Some(w) = ui.upgrade() {
                         match result {
                             Ok(summary) => {
-                                w.set_doctor_report(
-                                    format!(
-                                        "schema: {} (user_version={})\nok: {}",
-                                        summary.schema_status, summary.user_version, summary.ok
-                                    )
-                                    .into(),
+                                w.set_doctor_report(summary.summary_text.clone().into());
+                                w.set_doctor_overall(summary.overall.clone().into());
+                                w.set_doctor_summary(summary.summary_text.clone().into());
+                                let items: Vec<DoctorCheckItem> = summary
+                                    .checks
+                                    .into_iter()
+                                    .map(|c| DoctorCheckItem {
+                                        result: c.result.into(),
+                                        count: c.count as i32,
+                                        check: c.key.into(),
+                                        description: c.detail.into(),
+                                    })
+                                    .collect();
+                                let cnt = items.len();
+                                w.set_doctor_checks(ModelRc::from(Rc::new(VecModel::from(items))));
+                                w.set_status_text(
+                                    format!("doctor: {} · {} checks", summary.overall, cnt).into(),
                                 );
                             }
-                            Err(message) => w.set_doctor_report(format!("error: {message}").into()),
+                            Err(message) => {
+                                w.set_doctor_report(format!("error: {message}").into());
+                                w.set_doctor_overall("FAIL".into());
+                                w.set_doctor_summary(message.into());
+                                w.set_doctor_checks(ModelRc::from(Rc::new(VecModel::from(Vec::<
+                                    DoctorCheckItem,
+                                >::new(
+                                )))));
+                            }
+                        }
+                    }
+                }
+                Response::Overview(result) => {
+                    if let Some(w) = ui.upgrade() {
+                        match result {
+                            Ok(s) => {
+                                w.set_overview_lm_level(s.lm_level.clone().into());
+                                w.set_overview_lm_message(s.lm_message.clone().into());
+                                w.set_overview_endpoint(s.lm_endpoint.clone().into());
+                                w.set_overview_model(s.lm_model.clone().into());
+                                w.set_overview_loaded_instance(s.lm_loaded_instance.clone().into());
+                                w.set_overview_configured_load(s.lm_configured_load.clone().into());
+                                w.set_overview_configured_request(
+                                    s.lm_configured_request.clone().into(),
+                                );
+                                w.set_overview_configured_image(
+                                    s.lm_configured_image.clone().into(),
+                                );
+                                w.set_overview_runtime_policy(s.lm_runtime_policy.clone().into());
+                                w.set_overview_loaded_runtime(s.lm_loaded_runtime.clone().into());
+                                w.set_overview_capabilities(s.lm_capabilities.clone().into());
+                                w.set_overview_model_info(s.lm_model_info.clone().into());
+                                w.set_overview_warnings(s.lm_warnings.clone().into());
+                                w.set_overview_db_status(
+                                    if s.db_ok {
+                                        "ok".into()
+                                    } else {
+                                        format!("{} error(s)", s.db_errors)
+                                    }
+                                    .into(),
+                                );
+                                w.set_overview_schema(s.schema_state.clone().into());
+                                w.set_overview_inventory(
+                                    format!("{}/{} available", s.available_images, s.images).into(),
+                                );
+                                w.set_overview_review(format!("{} open", s.review_open).into());
+                                w.set_doctor_report(
+                                    format!("db: {} · schema {}", s.schema_state, s.db_errors)
+                                        .into(),
+                                );
+                                w.set_status_text("overview refreshed".into());
+                            }
+                            Err(message) => {
+                                w.set_status_text(format!("overview error: {message}").into())
+                            }
+                        }
+                    }
+                }
+                Response::ClearLogs(result) => {
+                    if let Some(w) = ui.upgrade() {
+                        match result {
+                            Ok(msg) => {
+                                w.set_status_text(msg.into());
+                                send_request(Request::LoadLogs);
+                            }
+                            Err(message) => {
+                                w.set_status_text(format!("clear failed: {message}").into())
+                            }
+                        }
+                    }
+                }
+                Response::OpenLogFolder(result) => {
+                    if let Some(w) = ui.upgrade() {
+                        match result {
+                            Ok(msg) => w.set_status_text(msg.into()),
+                            Err(message) => {
+                                w.set_status_text(format!("open folder failed: {message}").into())
+                            }
                         }
                     }
                 }
@@ -875,9 +972,37 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 },
                 Response::Logs(result) => match result {
                     Ok((app_log, error_log)) => {
+                        LOGS_APP_RAW.with(|s| *s.borrow_mut() = app_log.clone());
+                        LOGS_ERROR_RAW.with(|s| *s.borrow_mut() = error_log.clone());
                         if let Some(w) = ui.upgrade() {
-                            w.set_app_log_text(app_log.into());
-                            w.set_error_log_text(error_log.into());
+                            // Apply current search filter if any
+                            let search = w.get_logs_search().to_string().to_lowercase();
+                            let filter = |text: &str| -> String {
+                                if search.is_empty() {
+                                    text.to_string()
+                                } else {
+                                    text.lines()
+                                        .filter(|l| l.to_lowercase().contains(&search))
+                                        .collect::<Vec<_>>()
+                                        .join("\n")
+                                }
+                            };
+                            let app_filtered = filter(&app_log);
+                            let err_filtered = filter(&error_log);
+                            // Store filtered view; keep raw for re-filtering
+                            w.set_app_log_text(app_filtered.clone().into());
+                            w.set_error_log_text(err_filtered.clone().into());
+                            let shown = if w.get_logs_tab() == "app" {
+                                &app_filtered
+                            } else {
+                                &err_filtered
+                            };
+                            let count = if search.is_empty() {
+                                "".to_string()
+                            } else {
+                                format!("{} matching line(s)", shown.lines().count())
+                            };
+                            w.set_logs_status(count.into());
                             w.set_status_text("logs loaded".into());
                         }
                     }
@@ -1516,7 +1641,13 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     {
         let ui = main.as_weak();
         main.on_doctor_requested(move || {
-            enqueue(Request::RunDoctor, &ui, "running doctor…");
+            enqueue(Request::RunFullDoctor, &ui, "running doctor…");
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_overview_requested(move || {
+            enqueue(Request::RefreshOverview, &ui, "refreshing overview…");
         });
     }
     {
@@ -1580,6 +1711,9 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             }
             if page == "best-laps" {
                 send_request(Request::ListBestLaps);
+            }
+            if page == "diagnostics" {
+                send_request(Request::RefreshOverview);
             }
         });
     }
@@ -1702,6 +1836,72 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             enqueue(Request::LoadLogs, &ui, "reloading logs…");
         });
     }
+    {
+        let ui = main.as_weak();
+        main.on_logs_clear_requested(move |which| {
+            // Confirm via native dialog like Python QMessageBox
+            let title = format!("Clear {} log?", which);
+            let body = format!("Clear {} log file? This cannot be undone.", which);
+            let confirm = rfd::MessageDialog::new()
+                .set_title(title)
+                .set_description(body)
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .set_level(rfd::MessageLevel::Warning)
+                .show();
+            if confirm == rfd::MessageDialogResult::Yes {
+                enqueue(
+                    Request::ClearLogs {
+                        which: which.to_string(),
+                    },
+                    &ui,
+                    "clearing log…",
+                );
+            }
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_logs_open_folder(move || {
+            enqueue(Request::OpenLogFolder, &ui, "opening log folder…");
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_logs_search_changed(move |query| {
+            let q = query.to_string().to_lowercase();
+            let (app_raw, err_raw) = (
+                LOGS_APP_RAW.with(|s| s.borrow().clone()),
+                LOGS_ERROR_RAW.with(|s| s.borrow().clone()),
+            );
+            if let Some(w) = ui.upgrade() {
+                let filter = |text: &str| -> String {
+                    if q.is_empty() {
+                        text.to_string()
+                    } else {
+                        text.lines()
+                            .filter(|l| l.to_lowercase().contains(&q))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    }
+                };
+                let app_f = filter(&app_raw);
+                let err_f = filter(&err_raw);
+                w.set_app_log_text(app_f.clone().into());
+                w.set_error_log_text(err_f.clone().into());
+                let shown = if w.get_logs_tab() == "app" {
+                    &app_f
+                } else {
+                    &err_f
+                };
+                let cnt = if q.is_empty() {
+                    "".to_string()
+                } else {
+                    format!("{} matching line(s)", shown.lines().count())
+                };
+                w.set_logs_status(cnt.into());
+            }
+        });
+    }
 
     // ── Live extraction runner (own thread, cooperative cancel) ──────────
     {
@@ -1802,7 +2002,9 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         if let Some(w) = ui.upgrade() {
                             w.set_run_running(false);
                             w.set_run_paused(false);
-                            w.set_run_percent(100.0);
+                            if !cancelled {
+                                w.set_run_percent(100.0);
+                            }
                         }
                         // Refresh derived views after a run.
                         send_request(Request::RefreshInventory {

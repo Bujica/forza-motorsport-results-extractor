@@ -83,6 +83,7 @@ pub enum Request {
     },
     ListBestLaps,
     RunDoctor,
+    RunFullDoctor,
     RunRebuild,
     /// Dry-run planning through the worker (live runs use the dedicated
     /// extraction runner thread instead).
@@ -132,6 +133,12 @@ pub enum Request {
     },
     // ── Logs ─────────────────────────────────────────────────────────
     LoadLogs,
+    ClearLogs {
+        which: String,
+    },
+    OpenLogFolder,
+    // ── Overview ─────────────────────────────────────────────────────
+    RefreshOverview,
     // ── Best Laps export/import ────────────────────────────────────────
     ImportExternalRecords {
         path: String,
@@ -226,6 +233,9 @@ pub enum Response {
     ImageDebugCases(Result<Vec<forza_db::image_debug::ImageDebugCase>, String>),
     ImageDebugDetail(Result<Option<forza_db::image_debug::ImageDebugDetail>, String>),
     Logs(Result<(String, String), String>),
+    ClearLogs(Result<String, String>),
+    OpenLogFolder(Result<String, String>),
+    Overview(Result<forza_app::OverviewSnapshot, String>),
     Settings(Result<SettingsOutcome, String>),
     ImportDone(Result<forza_app::services::external_import::ExternalImportResult, String>),
 }
@@ -342,6 +352,9 @@ pub fn handle_request(
             forza_db::doctor::doctor_on_path(&ctx.database_file)
                 .map(forza_app::DoctorSummary::from_report)
                 .map_err(|e| e.to_string()),
+        ),
+        Request::RunFullDoctor => Response::Doctor(
+            forza_app::run_full_doctor_on_path(&ctx.database_file).map_err(|e| e.to_string()),
         ),
         Request::RunRebuild => Response::Rebuild((|| {
             let gamertag = ctx.gamertag();
@@ -501,6 +514,35 @@ pub fn handle_request(
             let app_log = read_log_file(&cfg.log_file);
             let error_log = read_log_file(&errors_log_path(&cfg.log_file));
             Ok((app_log, error_log))
+        })()),
+        Request::ClearLogs { which } => Response::ClearLogs((|| {
+            let cfg = ctx.cfg.lock().map_err(|e| e.to_string())?.clone();
+            let target = if which == "errors" {
+                errors_log_path(&cfg.log_file)
+            } else {
+                cfg.log_file.clone()
+            };
+            // Truncate file (create parent if needed)
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(&target, "").map_err(|e| e.to_string())?;
+            Ok(format!("cleared {}", target.display()))
+        })()),
+        Request::OpenLogFolder => Response::OpenLogFolder((|| {
+            let cfg = ctx.cfg.lock().map_err(|e| e.to_string())?.clone();
+            let folder = cfg
+                .log_file
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf();
+            opener::open(&folder).map_err(|e| e.to_string())?;
+            Ok(format!("opened {}", folder.display()))
+        })()),
+        Request::RefreshOverview => Response::Overview((|| {
+            let cfg = ctx.cfg.lock().map_err(|e| e.to_string())?.clone();
+            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            Ok(forza_app::build_overview_snapshot(&conn, &cfg))
         })()),
         Request::ImportExternalRecords { path } => Response::ImportDone((|| {
             let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;

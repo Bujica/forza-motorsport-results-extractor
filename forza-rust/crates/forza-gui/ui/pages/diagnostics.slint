@@ -1,16 +1,55 @@
-// Diagnostics page: DB doctor report and derived-state rebuild.
-// (Overview / Image Debug / DB Doctor tabs arrive with the Diagnostics phase.)
+// Diagnostics page: DB doctor full battery + Overview (LM Studio + fast DB report).
+// Parity with Python DbDoctorView + DeveloperOverviewView.
 
-import { Button } from "std-widgets.slint";
+import { Button, ListView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { Card, EmptyState } from "../components/common.slint";
+import { Card, Badge, EmptyState } from "../components/common.slint";
+import { DoctorCheckItem } from "../models.slint";
 
 export component DiagnosticsPage inherits Rectangle {
     background: transparent;
 
     in property <string> doctor-report;
+    in property <string> doctor-overall: "PASS";
+    in property <string> doctor-summary: "Not checked";
+    in property <[DoctorCheckItem]> doctor-checks;
+    in-out property <string> diagnostics-tab: "overview";
+
+    // Overview snapshot (LM Studio + DB)
+    in property <string> overview-lm-level: "info";
+    in property <string> overview-lm-message: "Not checked";
+    in property <string> overview-endpoint: "—";
+    in property <string> overview-model: "—";
+    in property <string> overview-loaded-instance: "—";
+    in property <string> overview-configured-load: "—";
+    in property <string> overview-configured-request: "—";
+    in property <string> overview-configured-image: "—";
+    in property <string> overview-runtime-policy: "—";
+    in property <string> overview-loaded-runtime: "—";
+    in property <string> overview-capabilities: "—";
+    in property <string> overview-model-info: "—";
+    in property <string> overview-warnings: "—";
+    in property <string> overview-db-status: "Not checked";
+    in property <string> overview-schema: "—";
+    in property <string> overview-inventory: "—";
+    in property <string> overview-review: "—";
+
     callback doctor-requested();
     callback rebuild-requested();
+    callback overview-requested();
+
+    function badge-bg(level: string) -> color {
+        return level == "FAIL" ? #481818 : level == "WARN" ? #4a3a12 : #183a24;
+    }
+    function badge-fg(level: string) -> color {
+        return level == "FAIL" ? #ffb4b4 : level == "WARN" ? #ffdf8a : #a8e8b0;
+    }
+    function row-bg(result: string) -> color {
+        return result == "FAIL" ? #fde8e7 : result == "WARN" ? #fdf3d7 : #e2f5e9;
+    }
+    function row-fg(result: string) -> color {
+        return result == "FAIL" ? #b3261e : result == "WARN" ? #8a6116 : #1d7a45;
+    }
 
     VerticalLayout {
         spacing: 8px;
@@ -19,23 +58,124 @@ export component DiagnosticsPage inherits Rectangle {
             height: 32px;
             spacing: 8px;
             Text { text: "Diagnostics"; color: Theme.text; font-weight: 700; min-width: 90px; vertical-alignment: center; }
-            Button { text: "Run DB Doctor"; clicked => { root.doctor-requested(); } }
+            Button { text: "Refresh Overview"; clicked => { root.overview-requested(); } }
+            Button { text: "Run DB Doctor (63 checks)"; clicked => { root.doctor-requested(); } }
             Button { text: "Rebuild derived state"; clicked => { root.rebuild-requested(); } }
             Rectangle { horizontal-stretch: 1; }
         }
 
-        Card {
-            vertical-stretch: 1;
-            if root.doctor-report == "": EmptyState {
-                text: "Run DB Doctor to check the relational database integrity.";
+        // Tab bar
+        HorizontalLayout {
+            height: 30px;
+            spacing: 4px;
+            for tab in [
+                { key: "overview", label: "Overview" },
+                { key: "doctor", label: "DB Doctor" },
+            ]: Rectangle {
+                border-radius: 4px;
+                background: root.diagnostics-tab == tab.key ? Theme.accent : Theme.header-bg;
+                min-width: 120px;
+                TouchArea {
+                    clicked => { root.diagnostics-tab = tab.key; }
+                    Text {
+                        text: tab.label;
+                        color: root.diagnostics-tab == tab.key ? #ffffff : Theme.text-muted;
+                        font-size: Theme.font-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        width: parent.width;
+                    }
+                }
             }
-            if root.doctor-report != "": Text {
-                x: 12px; y: 10px;
-                width: parent.width - 24px;
-                text: root.doctor-report;
-                color: Theme.text-muted;
-                wrap: word-wrap;
-                font-size: Theme.font-sm;
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        if root.diagnostics-tab == "overview": Card {
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                // Summary badges row
+                HorizontalLayout {
+                    spacing: 8px;
+                    height: 22px;
+                    Text { text: "LM Studio"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; min-width: 70px; }
+                    Badge { label: root.overview-lm-level; bg: root.badge-bg(root.overview-lm-level); fg: root.badge-fg(root.overview-lm-level); }
+                    Text { text: root.overview-lm-message; color: Theme.text; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    height: 22px;
+                    Text { text: "Database"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; min-width: 70px; }
+                    Badge { label: root.overview-db-status == "ok" ? "PASS" : root.overview-db-status; bg: root.overview-db-status == "ok" ? #183a24 : #4a3a12; fg: root.overview-db-status == "ok" ? #a8e8b0 : #ffdf8a; }
+                    Text { text: root.overview-schema + " · " + root.overview-inventory + " · " + root.overview-review; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                }
+                Rectangle { height: 1px; background: Theme.divider; }
+                // Detail grid (two columns label/value)
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Endpoint: " + root.overview-endpoint; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
+                    Text { text: "Configured model: " + root.overview-model; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
+                    Text { text: "Loaded instance: " + root.overview-loaded-instance; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
+                    Text { text: "Configured load: " + root.overview-configured-load; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
+                    Text { text: "Configured request: " + root.overview-configured-request; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
+                    Text { text: "Image request: " + root.overview-configured-image; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
+                    Text { text: "Runtime policy: " + root.overview-runtime-policy; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
+                    Text { text: "Loaded runtime: " + root.overview-loaded-runtime; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
+                    Text { text: "Capabilities: " + root.overview-capabilities; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
+                    Text { text: "Model info: " + root.overview-model-info; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
+                    Text { text: "Warnings: " + root.overview-warnings; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
+                }
+            }
+        }
+
+        if root.diagnostics-tab == "doctor": VerticalLayout {
+            spacing: 6px;
+            Card {
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 8px;
+                    height: 36px;
+                    Text { text: "Database Doctor"; color: Theme.text; font-weight: 700; vertical-alignment: center; }
+                    Badge { label: root.doctor-overall; bg: root.badge-bg(root.doctor-overall); fg: root.badge-fg(root.doctor-overall); }
+                    Text { text: root.doctor-summary; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                }
+            }
+            Card {
+                vertical-stretch: 1;
+                clip: true;
+                if root.doctor-checks.length == 0: EmptyState { text: "Run DB Doctor to check the relational database integrity (63 checks)."; }
+                if root.doctor-checks.length > 0: VerticalLayout {
+                    padding: 4px;
+                    spacing: 0;
+                    // Header
+                    Rectangle {
+                        height: 26px;
+                        background: Theme.header-bg;
+                        border-radius: 4px;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            Text { text: "Result"; min-width: 60px; horizontal-stretch: 0.6; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
+                            Text { text: "Count"; min-width: 50px; horizontal-stretch: 0.5; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
+                            Text { text: "Check"; min-width: 180px; horizontal-stretch: 1.4; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
+                            Text { text: "Description"; horizontal-stretch: 2.5; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
+                        }
+                    }
+                    ListView {
+                        vertical-stretch: 1;
+                        for chk in root.doctor-checks: Rectangle {
+                            height: 26px;
+                            background: root.row-bg(chk.result);
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                Text { text: chk.result; min-width: 60px; horizontal-stretch: 0.6; vertical-alignment: center; color: root.row-fg(chk.result); font-size: Theme.font-sm; font-weight: 700; }
+                                Text { text: chk.count; min-width: 50px; horizontal-stretch: 0.5; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; }
+                                Text { text: chk.check; min-width: 180px; horizontal-stretch: 1.4; vertical-alignment: center; color: Theme.text; font-size: Theme.font-sm; overflow: elide; }
+                                Text { text: chk.description; horizontal-stretch: 2.5; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; overflow: elide; }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
