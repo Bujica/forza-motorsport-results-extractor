@@ -129,6 +129,10 @@ pub enum Request {
     },
     // ── Logs ─────────────────────────────────────────────────────────
     LoadLogs,
+    // ── Best Laps export/import ────────────────────────────────────────
+    ImportExternalRecords {
+        path: String,
+    },
 }
 
 /// Dynamic combo options for the review filter bar.
@@ -220,6 +224,7 @@ pub enum Response {
     ImageDebugDetail(Result<Option<forza_db::image_debug::ImageDebugDetail>, String>),
     Logs(Result<(String, String), String>),
     Settings(Result<SettingsOutcome, String>),
+    ImportDone(Result<forza_app::services::external_import::ExternalImportResult, String>),
 }
 
 /// Pure handler (no channels) so tests can exercise it headlessly.
@@ -467,6 +472,10 @@ pub fn handle_request(
             let app_log = read_log_file(&cfg.log_file);
             let error_log = read_log_file(&errors_log_path(&cfg.log_file));
             Ok((app_log, error_log))
+        })()),
+        Request::ImportExternalRecords { path } => Response::ImportDone((|| {
+            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            forza_app::services::external_import::import_to_db(&conn, Path::new(path))
         })()),
     }
 }

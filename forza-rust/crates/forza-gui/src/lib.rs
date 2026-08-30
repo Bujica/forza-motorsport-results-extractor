@@ -816,6 +816,19 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         }
                     }
                 },
+                Response::ImportDone(result) => match result {
+                    Ok(info) => {
+                        if let Some(w) = ui.upgrade() {
+                            w.set_status_text(info.message().into());
+                        }
+                        send_request(Request::ListBestLaps);
+                    }
+                    Err(message) => {
+                        if let Some(w) = ui.upgrade() {
+                            w.set_status_text(format!("import failed: {message}").into());
+                        }
+                    }
+                },
             });
         });
     }
@@ -1232,33 +1245,171 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     {
         let ui = main.as_weak();
         main.on_bestlaps_export_csv(move || {
+            let Some(dest) = rfd::FileDialog::new()
+                .set_title("Export best laps")
+                .add_filter("CSV", &["csv"])
+                .set_file_name("best_laps.csv")
+                .save_file()
+            else {
+                return;
+            };
+            let rows = BESTLAP_ALL.with(|all| {
+                let filter = BESTLAP_FILTER.with(|f| f.borrow().clone());
+                let gamertag = GAMERTAG.with(|s| s.borrow().clone().to_lowercase());
+                forza_app::apply_filters(&all.borrow(), &filter, &gamertag, None)
+            });
+            if rows.is_empty() {
+                if let Some(w) = ui.upgrade() {
+                    w.set_status_text("No best laps to export.".into());
+                }
+                return;
+            }
+            let export_rows = forza_app::to_export_rows(&rows);
+            let result = forza_output::export_csv(&export_rows, &dest);
             if let Some(w) = ui.upgrade() {
-                set_status(&w, "Export CSV lands in D3");
+                match result {
+                    Ok(n) => w.set_status_text(
+                        format!("Best laps exported: {n} row(s) · {}", dest.display()).into(),
+                    ),
+                    Err(e) => w.set_status_text(format!("Export failed: {e}").into()),
+                }
             }
         });
     }
     {
         let ui = main.as_weak();
         main.on_bestlaps_generate_pdf(move || {
-            if let Some(w) = ui.upgrade() {
-                set_status(&w, "Generate PDF lands in D3");
+            let rows = BESTLAP_ALL.with(|all| {
+                let filter = BESTLAP_FILTER.with(|f| f.borrow().clone());
+                let gamertag = GAMERTAG.with(|s| s.borrow().clone().to_lowercase());
+                forza_app::apply_filters(&all.borrow(), &filter, &gamertag, None)
+            });
+            if rows.is_empty() {
+                if let Some(w) = ui.upgrade() {
+                    w.set_status_text("No filtered best laps to generate PDF.".into());
+                }
+                return;
+            }
+            let config_path = CONFIG_PATH.with(|p| p.borrow().clone());
+            let (cfg, _) = match forza_config::load_config(&config_path, false) {
+                Ok(v) => v,
+                Err(e) => {
+                    if let Some(w) = ui.upgrade() {
+                        w.set_status_text(format!("Config load failed: {}", e.message).into());
+                    }
+                    return;
+                }
+            };
+            // Track order from embedded reference data (matches Python's reference catalog).
+            let track_order: Vec<String> = forza_domain::reference_data::embedded_reference_data()
+                .tracks
+                .into_iter()
+                .collect();
+            let internal = rows
+                .iter()
+                .filter(|r| !r.is_external)
+                .cloned()
+                .collect::<Vec<_>>();
+            let external = rows
+                .iter()
+                .filter(|r| r.is_external)
+                .cloned()
+                .collect::<Vec<_>>();
+            let internal_export = forza_app::to_export_rows(&internal);
+            let external_records = external
+                .iter()
+                .map(|r| forza_output::PdfExternalRecord {
+                    track: r.track.clone(),
+                    race_class: r.race_class.clone(),
+                    driver: r.driver.clone(),
+                    car: r.car.clone(),
+                    best_lap: forza_domain::lap::strip_dirty_symbol(&r.best_lap),
+                    best_lap_ms: r.best_lap_ms,
+                })
+                .collect::<Vec<_>>();
+            let options = forza_output::PdfRenderOptions {
+                show_dirty_symbol: cfg.pdf.show_dirty_lap_symbol,
+                dirty_symbol: cfg.pdf.dirty_lap_symbol.clone(),
+            };
+            let plan = forza_output::build_pdf_plan_ext(
+                &internal_export,
+                &cfg.gamertag,
+                &track_order,
+                &external_records,
+                options,
+            );
+            let pdf_path = config_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(&cfg.pdf_file);
+            match forza_output::render_pdf(&plan, &pdf_path) {
+                Ok(_) => {
+                    if let Some(w) = ui.upgrade() {
+                        w.set_status_text(
+                            format!(
+                                "Filtered PDF generated: {} row(s) · {}",
+                                rows.len(),
+                                pdf_path.display()
+                            )
+                            .into(),
+                        );
+                    }
+                    let _ = opener::open(&pdf_path);
+                }
+                Err(e) => {
+                    if let Some(w) = ui.upgrade() {
+                        w.set_status_text(format!("PDF generation failed: {e}").into());
+                    }
+                }
             }
         });
     }
     {
         let ui = main.as_weak();
         main.on_bestlaps_open_pdf(move || {
+            let config_path = CONFIG_PATH.with(|p| p.borrow().clone());
+            let (cfg, _) = match forza_config::load_config(&config_path, false) {
+                Ok(v) => v,
+                Err(e) => {
+                    if let Some(w) = ui.upgrade() {
+                        w.set_status_text(format!("Config load failed: {}", e.message).into());
+                    }
+                    return;
+                }
+            };
+            let pdf_path = config_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(&cfg.pdf_file);
+            if !pdf_path.exists() {
+                if let Some(w) = ui.upgrade() {
+                    w.set_status_text(format!("PDF not found: {}", pdf_path.display()).into());
+                }
+                return;
+            }
+            let _ = opener::open(&pdf_path);
             if let Some(w) = ui.upgrade() {
-                set_status(&w, "Open last PDF lands in D3");
+                w.set_status_text(format!("Opened PDF: {}", pdf_path.display()).into());
             }
         });
     }
     {
         let ui = main.as_weak();
         main.on_bestlaps_import(move || {
-            if let Some(w) = ui.upgrade() {
-                set_status(&w, "Import spreadsheet lands in D3");
-            }
+            let Some(path) = rfd::FileDialog::new()
+                .set_title("Import external records")
+                .add_filter("Spreadsheets", &["xlsx", "csv"])
+                .pick_file()
+            else {
+                return;
+            };
+            enqueue(
+                Request::ImportExternalRecords {
+                    path: path.to_string_lossy().to_string(),
+                },
+                &ui,
+                "importing external records…",
+            );
         });
     }
     {
