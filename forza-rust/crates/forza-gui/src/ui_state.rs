@@ -28,7 +28,7 @@ thread_local! {
     pub(crate) static BESTLAP_ALL: RefCell<Vec<forza_app::BestLapRow>> = const { RefCell::new(Vec::new()) };
     pub(crate) static BESTLAP_FILTER: RefCell<forza_app::BestLapFilter> =
         const { RefCell::new(forza_app::BestLapFilter { track: None, race_class: None, weather: None, driver: None, car: None, dirty: String::new(), source: String::new(), only_mine: false }) };
-    pub(crate) static BESTLAP_SORT: RefCell<(usize, bool)> = const { RefCell::new((2, true)) };
+    pub(crate) static BESTLAP_SORT: RefCell<(usize, bool)> = const { RefCell::new((99, true)) };
     pub(crate) static GAMERTAG: RefCell<String> = const { RefCell::new(String::new()) };
     pub(crate) static RUN_LOG: RefCell<Option<Rc<VecModel<slint::SharedString>>>> = const { RefCell::new(None) };
     pub(crate) static RUN_CONTROL: RefCell<Option<forza_app::RunControl>> = const { RefCell::new(None) };

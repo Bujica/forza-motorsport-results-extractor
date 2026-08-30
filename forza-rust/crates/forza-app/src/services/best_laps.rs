@@ -29,6 +29,7 @@ pub struct BestLapRow {
     pub source_type: String,
     pub source_label: String,
     pub is_external: bool,
+    pub mine: bool,
 }
 
 impl LapRowLike for BestLapRow {
@@ -150,6 +151,7 @@ fn row_from_export(row: forza_db::repositories::ExportFlatRow) -> BestLapRow {
         source_type: "internal".to_string(),
         source_label: source_file,
         is_external: false,
+        mine: row.mine,
     }
 }
 
@@ -173,6 +175,7 @@ fn row_from_external(rec: ExternalLapRecord) -> BestLapRow {
         source_type: "external".to_string(),
         source_label: rec.source.clone(),
         is_external: true,
+        mine: false,
     }
 }
 
@@ -185,10 +188,10 @@ pub fn list_best_laps(conn: &Connection, gamertag_lower: &str) -> Result<Vec<Bes
     let external = forza_db::repositories::external_records::list_active_external_records(conn)
         .map_err(|e| e.to_string())?;
     rows.extend(external.into_iter().map(row_from_external));
-    // Python sorts via ordered_lap_key across all rows (track canonical -> class -> weather -> time -> driver -> car).
-    // Track canonical order is not available without config; for now alphabetical with domain helper (empty order map).
-    // Keep same order as Python's BestLapsController uses ordered_lap_key with empty {} then grouped; preserve time ordering within track/class buckets.
-    let order_map = track_order_map(&[]);
+    // Python ordered_lap_key: track canonical -> class -> weather -> time -> driver -> car.
+    // Canonical track order comes from embedded reference data (same list used for PDF ordering).
+    let tracks = forza_domain::reference_data::embedded_reference_data().tracks;
+    let order_map = track_order_map(&tracks);
     rows.sort_by_key(|a| ordered_lap_key(a, &order_map));
     Ok(rows)
 }
@@ -489,6 +492,7 @@ mod tests {
             },
             source_label: "file.png".to_string(),
             is_external: external,
+            mine: false,
         }
     }
 
@@ -529,5 +533,49 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(apply_filters(&rows, &f2, "", None).len(), 1);
+    }
+
+    #[test]
+    fn ordering_is_track_canonical_then_class_then_time() {
+        // Canonical track order: Brands Hatch before Spa, class E before A, time within class.
+        // Use two tracks from embedded data to verify canonical ordering, not alphabetical.
+        let tracks = forza_domain::reference_data::embedded_reference_data().tracks;
+        let map = forza_domain::ordering::track_order_map(&tracks);
+        let a = row(
+            "Circuit de Spa-Francorchamps Full Circuit",
+            "A",
+            "Driver",
+            "Car",
+            100_000,
+            false,
+            false,
+        );
+        let b = row(
+            "Brands Hatch Grand Prix Circuit",
+            "A",
+            "Driver",
+            "Car",
+            90_000,
+            false,
+            false,
+        );
+        // Brands Hatch is earlier in canonical list than Spa, so b should sort before a even though a is slower
+        // but same class -> track decides.
+        let key_a = forza_domain::ordering::ordered_lap_key(&a, &map);
+        let key_b = forza_domain::ordering::ordered_lap_key(&b, &map);
+        assert!(key_b < key_a);
+        // Class order: E (1) before A (5) regardless of time
+        let e = row("T", "E", "D", "C", 120_000, false, false);
+        let a2 = row("T", "A", "D", "C", 90_000, false, false);
+        let key_e = forza_domain::ordering::ordered_lap_key(&e, &map);
+        let key_a2 = forza_domain::ordering::ordered_lap_key(&a2, &map);
+        assert!(key_e < key_a2);
+        // Within same track/class, time decides
+        let fast = row("T", "A", "D", "C", 80_000, false, false);
+        let slow = row("T", "A", "D", "C", 90_000, false, false);
+        assert!(
+            forza_domain::ordering::ordered_lap_key(&fast, &map)
+                < forza_domain::ordering::ordered_lap_key(&slow, &map)
+        );
     }
 }

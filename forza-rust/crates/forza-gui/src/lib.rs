@@ -160,25 +160,31 @@ fn apply_bestlaps_filters(ui: &MainWindow) {
         BESTLAP_SORT.with(|s| *s.borrow()),
     );
     let mut filtered = forza_app::apply_filters(&all_rows, &filter, &gamertag_lower, None);
-    // Sort: 0 driver, 1 car, 2 best_lap_ms, 3 weather; fall back to domain ordering for track/class.
-    filtered.sort_by(|a, b| {
-        let ord = match sort.0 {
-            0 => a.driver.to_lowercase().cmp(&b.driver.to_lowercase()),
-            1 => a.car.to_lowercase().cmp(&b.car.to_lowercase()),
-            2 => a.best_lap_ms.cmp(&b.best_lap_ms),
-            3 => a.weather.to_lowercase().cmp(&b.weather.to_lowercase()),
-            _ => std::cmp::Ordering::Equal,
-        };
-        let ord = if ord == std::cmp::Ordering::Equal {
-            // Tie-breaker: track/class ordering via domain key
-            let map = std::collections::HashMap::new();
-            forza_domain::ordering::ordered_lap_key(a, &map)
-                .cmp(&forza_domain::ordering::ordered_lap_key(b, &map))
-        } else {
-            ord
-        };
-        if sort.1 { ord } else { ord.reverse() }
-    });
+    // Domain ordering (Python): track canonical -> class -> weather -> time -> driver -> car
+    // Header sort overrides it only when user explicitly clicks a column; default (99) keeps domain order.
+    let track_order = forza_domain::reference_data::embedded_reference_data().tracks;
+    let order_map = forza_domain::ordering::track_order_map(&track_order);
+    if sort.0 <= 3 {
+        filtered.sort_by(|a, b| {
+            let ord = match sort.0 {
+                0 => a.driver.to_lowercase().cmp(&b.driver.to_lowercase()),
+                1 => a.car.to_lowercase().cmp(&b.car.to_lowercase()),
+                2 => a.best_lap_ms.cmp(&b.best_lap_ms),
+                3 => a.weather.to_lowercase().cmp(&b.weather.to_lowercase()),
+                _ => std::cmp::Ordering::Equal,
+            };
+            let ord = if ord == std::cmp::Ordering::Equal {
+                forza_domain::ordering::ordered_lap_key(a, &order_map)
+                    .cmp(&forza_domain::ordering::ordered_lap_key(b, &order_map))
+            } else {
+                ord
+            };
+            if sort.1 { ord } else { ord.reverse() }
+        });
+    } else {
+        // Default: preserve Python's ordered_lap_key ordering (all_rows already sorted, but re-sort to guarantee stability after filters).
+        filtered.sort_by_key(|a| forza_domain::ordering::ordered_lap_key(a, &order_map));
+    }
     let summary = forza_app::summary(&filtered, filter.only_mine);
     ui.set_best_laps_summary(forza_app::summary_text(&summary, filter.only_mine).into());
     ui.set_best_laps_sort_column(sort.0 as i32);
