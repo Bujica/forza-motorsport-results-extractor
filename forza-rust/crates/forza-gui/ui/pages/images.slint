@@ -197,9 +197,9 @@ export component ImagesPage inherits Rectangle {
                                     HorizontalLayout {
                                         padding-left: 8px;
                                         spacing: 4px;
-                                        Text { text: item.name; color: Theme.text; horizontal-stretch: 3; overflow: elide; vertical-alignment: center; }
+                                        Text { text: item.name; color: Theme.text; horizontal-stretch: 3; min-width: 200px; overflow: elide; vertical-alignment: center; }
                                         Text { text: item.race-date; color: Theme.text-muted; min-width: 84px; vertical-alignment: center; overflow: elide; }
-                                        Text { text: item.semantic; color: Theme.text-muted; horizontal-stretch: 3; overflow: elide; vertical-alignment: center; }
+                                        Text { text: item.semantic; color: Theme.text-muted; horizontal-stretch: 3; min-width: 200px; overflow: elide; vertical-alignment: center; }
                                         Text { text: item.file-status; min-width: 68px; vertical-alignment: center;
                                                color: item.file-status == "available" ? Theme.ok : Theme.danger; }
                                         Text { text: item.duplicate; min-width: 74px; vertical-alignment: center;
@@ -246,7 +246,7 @@ export component ImagesPage inherits Rectangle {
                 Card {
                     vertical-stretch: 1;
                     Text { x: 10px; y: 8px; width: parent.width - 20px;
-                           text: root.detail-lines; color: Theme.text-muted; wrap: word-wrap; font-size: Theme.font-md; }
+                           text: root.detail-lines; color: Theme.text-muted; wrap: word-wrap; font-size: Theme.font-lg; }
                 }
                 if root.confirm-delete: HorizontalLayout {
                     spacing: 6px;
