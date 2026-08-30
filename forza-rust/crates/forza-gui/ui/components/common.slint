@@ -1,6 +1,6 @@
 // Shared visual components used by every page.
 
-import { ComboBox } from "std-widgets.slint";
+import { Button, ComboBox } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 
 // White content card with the standard padding and radius.
@@ -93,5 +93,50 @@ export component FilterCombo inherits HorizontalLayout {
         model: root.model-value;
         current-index <=> root.current-index;
         selected(value) => { root.selected(value); }
+    }
+}
+
+// Batch action bar: selection count + 5 action buttons, all disabled when count=0.
+export component BatchActionBar inherits HorizontalLayout {
+    in property <int> selected-count;
+    callback process-selected();
+    callback rename();
+    callback export();
+    callback rescan-selected();
+    callback delete();
+    
+    spacing: 8px;
+    alignment: start;
+    
+    Text {
+        text: root.selected-count + " selected";
+        color: Theme.text-muted;
+        font-size: Theme.font-sm;
+    }
+    Rectangle { width: 100%; horizontal-stretch: 1; }
+    Button {
+        text: "Process selected";
+        enabled: root.selected-count > 0;
+        clicked => { root.process-selected(); }
+    }
+    Button {
+        text: "Rename";
+        enabled: root.selected-count > 0;
+        clicked => { root.rename(); }
+    }
+    Button {
+        text: "Export";
+        enabled: root.selected-count > 0;
+        clicked => { root.export(); }
+    }
+    Button {
+        text: "Rescan selected";
+        enabled: root.selected-count > 0;
+        clicked => { root.rescan-selected(); }
+    }
+    Button {
+        text: "Delete";
+        enabled: root.selected-count > 0;
+        clicked => { root.delete(); }
     }
 }

@@ -6,7 +6,7 @@
 import { Button, ComboBox, ListView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { ImageItem } from "../models.slint";
-import { Card, EmptyState } from "../components/common.slint";
+import { Card, EmptyState, FilterCombo, BatchActionBar } from "../components/common.slint";
 
 // Sortable column header cell; sort-state: 0 none, 1 asc, 2 desc.
 component HeaderCell inherits TouchArea {
@@ -100,19 +100,25 @@ export component ImagesPage inherits Rectangle {
             height: 32px;
             spacing: 8px;
             Text { text: "Images"; color: Theme.text; font-weight: 700; min-width: 52px; vertical-alignment: center; }
-            ComboBox { min-width: 105px; model: ["all", "available", "missing"];
-                current-index: 0; selected => { root.image-file-filter = self.current-value; root.fire-refresh(); } }
-            ComboBox { min-width: 125px; model: ["all", "pending", "contributing", "non_contributing"];
-                current-index: 0; selected => { root.image-best-filter = self.current-value; root.fire-refresh(); } }
-            ComboBox { min-width: 100px; model: ["all", "duplicate"];
-                current-index: 0; selected => { root.image-inventory-filter = self.current-value; root.fire-refresh(); } }
-            ComboBox { min-width: 140px; horizontal-stretch: 2; model: root.image-tracks;
-                current-index: 0; selected => { root.image-track-filter = self.current-value; root.fire-refresh(); } }
-            ComboBox { min-width: 140px; horizontal-stretch: 2; model: root.image-runs;
-                current-index: 0; selected => { root.image-run-filter = self.current-value; root.fire-refresh(); } }
-            ComboBox { min-width: 120px; model: ["all", "unprocessed", "processing", "processed_ok",
+            FilterCombo { min-width: 105px; label: "File";
+                model-value: ["all", "available", "missing"];
+                current-index: 0; selected(value) => { root.image-file-filter = value; root.fire-refresh(); } }
+            FilterCombo { min-width: 125px; label: "Best";
+                model-value: ["all", "pending", "contributing", "non_contributing"];
+                current-index: 0; selected(value) => { root.image-best-filter = value; root.fire-refresh(); } }
+            FilterCombo { min-width: 100px; label: "Inventory";
+                model-value: ["all", "duplicate"];
+                current-index: 0; selected(value) => { root.image-inventory-filter = value; root.fire-refresh(); } }
+            FilterCombo { min-width: 140px; horizontal-stretch: 2; label: "Track";
+                model-value: root.image-tracks;
+                current-index: 0; selected(value) => { root.image-track-filter = value; root.fire-refresh(); } }
+            FilterCombo { min-width: 140px; horizontal-stretch: 2; label: "Run";
+                model-value: root.image-runs;
+                current-index: 0; selected(value) => { root.image-run-filter = value; root.fire-refresh(); } }
+            FilterCombo { min-width: 120px; label: "Process";
+                model-value: ["all", "unprocessed", "processing", "processed_ok",
                         "processed_error", "cancelled", "skipped"];
-                current-index: 0; selected => { root.image-process-filter = self.current-value; root.fire-refresh(); } }
+                current-index: 0; selected(value) => { root.image-process-filter = value; root.fire-refresh(); } }
             Button { text: "Refresh"; clicked => { root.fire-refresh(); } }
             Button { text: "Scan folder"; clicked => { root.scan-folder(); } }
             Text { text: "Selected: " + root.selected-image-count; color: Theme.text-muted; vertical-alignment: center; }
@@ -253,36 +259,13 @@ export component ImagesPage inherits Rectangle {
                     enabled: root.selected-index >= 0;
                     clicked => { root.open-image-detail(root.selected-index); }
                 }
-                HorizontalLayout {
-                    spacing: 4px;
-                    Button {
-                        text: "Process";
-                        enabled: root.selected-image-count > 0 && !root.run-running;
-                        clicked => { root.process-selected(); }
-                    }
-                    Button {
-                        text: "Rename";
-                        enabled: root.selected-image-count > 0 && !root.run-running;
-                        clicked => { root.rename-selected(); }
-                    }
-                }
-                HorizontalLayout {
-                    spacing: 4px;
-                    Button {
-                        text: "Export";
-                        enabled: root.selected-image-count > 0;
-                        clicked => { root.export-selected(); }
-                    }
-                    Button {
-                        text: "Rescan";
-                        enabled: root.selected-image-count > 0;
-                        clicked => { root.rescan-selected(); }
-                    }
-                    Button {
-                        text: "Delete";
-                        enabled: root.selected-image-count > 0 && !root.run-running;
-                        clicked => { root.confirm-delete = true; }
-                    }
+                BatchActionBar {
+                    selected-count: root.selected-image-count;
+                    process-selected() => { root.process-selected(); }
+                    rename() => { root.rename-selected(); }
+                    export() => { root.export-selected(); }
+                    rescan-selected() => { root.rescan-selected(); }
+                    delete() => { root.confirm-delete = true; }
                 }
             }
         }
