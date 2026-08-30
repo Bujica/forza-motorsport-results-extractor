@@ -10,6 +10,8 @@ pub mod review_queue;
 pub mod run_control;
 pub mod settings;
 
+use std::net::ToSocketAddrs;
+
 use rusqlite::Connection;
 
 pub use extraction_replay::{ReplayOutcome, replay_recorded_response};
@@ -201,16 +203,27 @@ pub struct FastDbReport {
     pub warnings: i64,
 }
 
-pub fn fast_db_report(database_file: &std::path::Path) -> FastDbReport {
-    let schema_state = forza_db::migration::schema_status(database_file)
-        .map(|s| match s {
-            forza_db::migration::SchemaStatus::Empty => "empty".to_string(),
-            forza_db::migration::SchemaStatus::Current => "current".to_string(),
-            forza_db::migration::SchemaStatus::Incompatible { found } => {
-                format!("incompatible({found})")
-            }
-        })
-        .unwrap_or_else(|_| "error".to_string());
+pub fn fast_db_report_from_conn(conn: &rusqlite::Connection) -> FastDbReport {
+    // Derive schema_state from the open connection (avoids reopen & path issues)
+    let schema_state = {
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap_or(0);
+        if count == 0 {
+            "empty".to_string()
+        } else if version == forza_db::migration::SCHEMA_VERSION {
+            "current".to_string()
+        } else {
+            format!("incompatible({version})")
+        }
+    };
     if schema_state != "current" {
         return FastDbReport {
             schema_state,
@@ -219,17 +232,6 @@ pub fn fast_db_report(database_file: &std::path::Path) -> FastDbReport {
             warnings: 0,
         };
     }
-    let conn = match forza_db::open_connection(database_file) {
-        Ok(c) => c,
-        Err(_) => {
-            return FastDbReport {
-                schema_state,
-                ok: false,
-                errors: 1,
-                warnings: 0,
-            };
-        }
-    };
     let quick: String = conn
         .query_row("PRAGMA quick_check", [], |r| r.get(0))
         .unwrap_or_else(|_| "error".to_string());
@@ -260,6 +262,29 @@ pub fn fast_db_report(database_file: &std::path::Path) -> FastDbReport {
         ok: errors == 0,
         errors,
         warnings: 0,
+    }
+}
+
+pub fn fast_db_report(database_file: &std::path::Path) -> FastDbReport {
+    match forza_db::open_connection(database_file) {
+        Ok(conn) => fast_db_report_from_conn(&conn),
+        Err(_) => {
+            let schema_state = forza_db::migration::schema_status(database_file)
+                .map(|s| match s {
+                    forza_db::migration::SchemaStatus::Empty => "empty".to_string(),
+                    forza_db::migration::SchemaStatus::Current => "current".to_string(),
+                    forza_db::migration::SchemaStatus::Incompatible { found } => {
+                        format!("incompatible({found})")
+                    }
+                })
+                .unwrap_or_else(|_| "error".to_string());
+            FastDbReport {
+                schema_state,
+                ok: false,
+                errors: 1,
+                warnings: 0,
+            }
+        }
     }
 }
 
@@ -304,64 +329,107 @@ fn api_base(url: &str) -> String {
 }
 
 fn lm_ping_blocking(url: &str) -> (bool, String, String) {
+    // Manual TCP ping to avoid blocking the Tokio runtime with reqwest::blocking.
+    // Parses the URL's host/port and performs a 1s HTTP GET to /api/v1/models.
     let endpoint = format!("{}/models", api_base(url));
-    let client = match reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(1))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            return (
-                false,
-                "error".to_string(),
-                format!("client build failed: {e}"),
-            );
-        }
+    // Extract host/port from endpoint
+    let host_port = endpoint
+        .strip_prefix("http://")
+        .or_else(|| endpoint.strip_prefix("https://"))
+        .unwrap_or(&endpoint)
+        .split('/')
+        .next()
+        .unwrap_or("");
+    let (host, port) = if let Some((h, p)) = host_port.split_once(':') {
+        (h, p.parse::<u16>().unwrap_or(80))
+    } else {
+        (host_port, 80)
     };
-    match client.get(&endpoint).send() {
-        Ok(resp) if resp.status().is_success() => {
-            let text = resp.text().unwrap_or_default();
-            // Try to count models
-            let count = serde_json::from_str::<serde_json::Value>(&text)
-                .ok()
-                .map(|v| match &v {
-                    serde_json::Value::Array(a) => a.len(),
-                    serde_json::Value::Object(m) => m
-                        .get("data")
-                        .and_then(|d| d.as_array())
-                        .map(|a| a.len())
-                        .unwrap_or_else(|| {
-                            m.get("models")
-                                .and_then(|d| d.as_array())
-                                .map(|a| a.len())
-                                .unwrap_or(0)
-                        }),
-                    _ => 0,
-                })
-                .unwrap_or(0);
-            (
-                true,
-                "ok".to_string(),
-                format!("{} model(s) available", count),
-            )
-        }
-        Ok(resp) => (
+    if host.is_empty() {
+        return (
             false,
             "error".to_string(),
-            format!("HTTP {}", resp.status()),
-        ),
-        Err(e) => (false, "error".to_string(), format!("unreachable: {e}")),
+            "invalid LM Studio URL".to_string(),
+        );
     }
+    let addr_str = format!("{host}:{port}");
+    let addrs: Vec<std::net::SocketAddr> = match addr_str.to_socket_addrs() {
+        Ok(v) => v.collect(),
+        Err(e) => return (false, "error".to_string(), format!("dns failed: {e}")),
+    };
+    let Some(addr) = addrs.into_iter().next() else {
+        return (false, "error".to_string(), "no address".to_string());
+    };
+    let mut stream =
+        match std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(1)) {
+            Ok(s) => s,
+            Err(e) => return (false, "error".to_string(), format!("unreachable: {e}")),
+        };
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(1)));
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(1)));
+    let path = endpoint
+        .splitn(4, '/')
+        .nth(3)
+        .map(|p| format!("/{p}"))
+        .unwrap_or_else(|| "/api/v1/models".to_string());
+    let req = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+    if std::io::Write::write_all(&mut stream, req.as_bytes()).is_err() {
+        return (false, "error".to_string(), "write failed".to_string());
+    }
+    let mut resp = String::new();
+    let mut buf = [0u8; 4096];
+    loop {
+        match std::io::Read::read(&mut stream, &mut buf) {
+            Ok(0) => break,
+            Ok(n) => resp.push_str(&String::from_utf8_lossy(&buf[..n])),
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                break;
+            }
+            Err(_) => break,
+        }
+        if resp.len() > 8192 {
+            break;
+        }
+    }
+    let status_ok = resp.starts_with("HTTP/1.1 200") || resp.starts_with("HTTP/1.0 200");
+    if !status_ok {
+        let status_line = resp.lines().next().unwrap_or("no response");
+        return (false, "error".to_string(), format!("HTTP {status_line}"));
+    }
+    // Try to count models from JSON body (after blank line)
+    let body = resp.split("\r\n\r\n").nth(1).unwrap_or("");
+    let count = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .map(|v| match &v {
+            serde_json::Value::Array(a) => a.len(),
+            serde_json::Value::Object(m) => m
+                .get("data")
+                .and_then(|d| d.as_array())
+                .map(|a| a.len())
+                .unwrap_or_else(|| {
+                    m.get("models")
+                        .and_then(|d| d.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0)
+                }),
+            _ => 0,
+        })
+        .unwrap_or(0);
+    (
+        true,
+        "ok".to_string(),
+        format!("{} model(s) available", count),
+    )
 }
 
 pub fn build_overview_snapshot(
     conn: &rusqlite::Connection,
     cfg: &forza_config::AppConfig,
 ) -> OverviewSnapshot {
-    let fast = {
-        let path = &cfg.database_file;
-        fast_db_report(path)
-    };
+    let fast = fast_db_report_from_conn(conn);
     let lm_endpoint = cfg.llm.url.clone();
     let lm_model = cfg.llm.model.clone();
     let (lm_ok, lm_level, lm_message) = lm_ping_blocking(&cfg.llm.url);

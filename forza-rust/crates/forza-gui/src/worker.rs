@@ -843,9 +843,10 @@ fn read_log_file(path: &Path) -> String {
     }
 }
 
-/// Spawn the long-lived worker thread running a current-thread Tokio runtime.
-/// `on_response` runs on the worker thread and must marshal results onto the
-/// UI loop itself.
+/// Spawn the long-lived worker thread. Each request is handled on its own
+/// short-lived thread so a heavy `RunFullDoctor` (63 checks + file I/O) does
+/// not block `LoadImageDetail` / `LoadImageDebugDetail` — parity with Python's
+/// per-controller QThread workers.
 pub fn spawn_thread<F>(
     rx: mpsc::Receiver<Request>,
     ctx: WorkerContext,
@@ -854,22 +855,29 @@ pub fn spawn_thread<F>(
 where
     F: Fn(Response) + Send + 'static,
 {
+    use std::sync::{Arc, Mutex};
+    let ctx = Arc::new(ctx);
+    let service = Arc::new(ImageInventoryService::new(ctx.database_file.clone()));
+    let on_response = Arc::new(Mutex::new(on_response));
     std::thread::Builder::new()
         .name("forza-gui-worker".into())
         .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("tokio runtime");
-            let service = ImageInventoryService::new(ctx.database_file.clone());
-            runtime.block_on(async move {
-                while let Ok(request) = rx.recv() {
-                    // rusqlite is synchronous; queries here are fast reads.
-                    // Move to spawn_blocking when heavier work arrives.
-                    let response = handle_request(&ctx, &service, &request);
-                    on_response(response);
-                }
-            });
+            while let Ok(request) = rx.recv() {
+                let ctx = Arc::clone(&ctx);
+                let service = Arc::clone(&service);
+                let on_response = Arc::clone(&on_response);
+                // Handle each request concurrently; response marshals back via
+                // `slint::invoke_from_event_loop` inside `on_response`.
+                std::thread::Builder::new()
+                    .name("forza-gui-worker-job".into())
+                    .spawn(move || {
+                        let response = handle_request(&ctx, &service, &request);
+                        if let Ok(f) = on_response.lock() {
+                            f(response);
+                        }
+                    })
+                    .expect("job thread");
+            }
         })
         .expect("worker thread")
 }

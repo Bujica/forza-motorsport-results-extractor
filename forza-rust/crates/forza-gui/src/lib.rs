@@ -382,14 +382,83 @@ fn open_image_detail_at(ui: &slint::Weak<MainWindow>, index: i32) {
 
 /// Launch the GUI. Blocks until the window closes.
 pub fn run(config_path: &Path) -> anyhow::Result<()> {
-    let (cfg, warnings) = forza_config::load_config(config_path, false)?;
+    let (mut cfg, warnings) = forza_config::load_config(config_path, false)?;
     for warning in warnings {
         eprintln!("config warning: {warning}");
     }
     forza_config::validate_config(&cfg)
         .map_err(|errors| anyhow::anyhow!("configuration invalid: {}", errors.join("; ")))?;
 
-    let db_path: PathBuf = cfg.database_file.clone();
+    // Robust DB path: `load_config` already resolves relative to the ini file,
+    // but when the GUI is launched from `target/debug` the ini there points to
+    // `target/debug/data/forza.sqlite3` (4.9 MB) while the Python CLI uses
+    // `data/forza.sqlite3` at the workspace root (15 MB, 693 images). Try
+    // workspace candidates so both front-ends share the same DB.
+    let mut db_path: PathBuf = cfg.database_file.clone();
+    if !db_path.exists() {
+        let candidates: Vec<PathBuf> = {
+            let mut v = Vec::new();
+            // Relative to cwd
+            v.push(PathBuf::from("data/forza.sqlite3"));
+            v.push(PathBuf::from("../data/forza.sqlite3"));
+            v.push(PathBuf::from("../../data/forza.sqlite3"));
+            // Relative to ini file
+            if let Some(dir) = config_path.parent() {
+                v.push(dir.join("data/forza.sqlite3"));
+                v.push(dir.join("../data/forza.sqlite3"));
+                v.push(dir.join("../../data/forza.sqlite3"));
+            }
+            // Walk up from exe location
+            if let Ok(exe) = std::env::current_exe() {
+                let mut cur = exe.parent().map(Path::to_path_buf).unwrap_or_default();
+                for _ in 0..5 {
+                    v.push(cur.join("data/forza.sqlite3"));
+                    v.push(cur.join("../data/forza.sqlite3"));
+                    if let Some(p) = cur.parent() {
+                        cur = p.to_path_buf();
+                    } else {
+                        break;
+                    }
+                }
+            }
+            v
+        };
+        for cand in candidates {
+            if cand.exists() {
+                db_path = cand;
+                cfg.database_file = db_path.clone();
+                break;
+            }
+        }
+    } else {
+        // Even if the configured path exists, prefer the workspace DB when the
+        // configured one is the tiny `target/debug/data` copy and the workspace
+        // one is larger (Python parity). This keeps the GUI and CLI in sync.
+        let workspace_cand = PathBuf::from("data/forza.sqlite3");
+        // Only switch if the workspace DB exists and is larger
+        if workspace_cand.exists()
+            && db_path
+                .canonicalize()
+                .ok()
+                .and_then(|p| {
+                    p.parent().map(|d| {
+                        d.ends_with("target/debug/data") || d.ends_with("target\\debug\\data")
+                    })
+                })
+                .unwrap_or(false)
+        {
+            if let Ok(ws_meta) = std::fs::metadata(&workspace_cand) {
+                if let Ok(cur_meta) = std::fs::metadata(&db_path) {
+                    if ws_meta.len() > cur_meta.len() {
+                        db_path = workspace_cand
+                            .canonicalize()
+                            .unwrap_or(workspace_cand.clone());
+                        cfg.database_file = db_path.clone();
+                    }
+                }
+            }
+        }
+    }
     if !db_path.exists() {
         return Err(anyhow::anyhow!(
             "database {} does not exist; run `forza maintenance db-upgrade` first",
@@ -736,7 +805,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                                     .into_iter()
                                     .map(|c| DoctorCheckItem {
                                         result: c.result.into(),
-                                        count: c.count as i32,
+                                        count: c.count.to_string().into(),
                                         check: c.key.into(),
                                         description: c.detail.into(),
                                     })
