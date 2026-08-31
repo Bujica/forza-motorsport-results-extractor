@@ -266,8 +266,8 @@ fn apply_bestlaps_filters(ui: &MainWindow) {
             time: r.best_lap.clone().into(),
             weather: r.weather.clone().into(),
             temp: r
-                .temp_c
-                .map(|v| format!("{v:.0}°C"))
+                .temp_f
+                .map(|v| format!("{v:.0}°F"))
                 .unwrap_or_default()
                 .into(),
             source: if r.is_external {
@@ -332,24 +332,46 @@ fn apply_review_detail(ui: &MainWindow) {
                 .temp_f
                 .map(|t| format!("{t:.1} °F"))
                 .unwrap_or_else(|| "-".to_string());
+            let decision = match (&c.decision_field, &c.corrected_value) {
+                (Some(d), Some(cv)) if !d.is_empty() => {
+                    let before = c.model_value.as_deref().unwrap_or("?");
+                    format!("{d}: {before} -> {cv}")
+                }
+                _ => "—".to_string(),
+            };
+            let current_driver = c
+                .driver
+                .clone()
+                .unwrap_or_default();
+            let current_car = c
+                .car
+                .clone()
+                .unwrap_or_default();
+            let current_lap = c
+                .best_lap
+                .clone()
+                .unwrap_or_default();
             ui.set_review_detail_lines(
                 format!(
-                    "Case: {}\nOutcome: {}\nReason: {}\nTrigger: {}\nModel value: {}\nCorrected value: {}\nDecision: {}\nError: {}\nFile: {}\nCurrent track: {}\nCurrent class: {}\nCurrent weather: {}\nTemp: {}\nCurrent driver: {}\nCurrent lap: {}",
+                    "Case: {}\nStable ID: {}\nOutcome: {}\nReason: {}\nTrigger: {}\nModel value: {}\nCorrected value: {}\nDecision: {}\nError: {}\nResolution: {}\nFile: {}\nCurrent track: {}\nCurrent class: {}\nCurrent weather: {}\nTemp: {}\nCurrent driver: {}\nCurrent car: {}\nCurrent lap: {}",
                     c.case_number,
+                    c.image_file_id.clone().unwrap_or_default(),
                     c.outcome.clone().unwrap_or_default(),
                     c.reason,
                     c.trigger.clone().unwrap_or_default(),
                     c.model_value.clone().unwrap_or_default(),
                     c.corrected_value.clone().unwrap_or_default(),
-                    c.decision_field.clone().unwrap_or_default(),
+                    decision,
                     c.error_type.clone().unwrap_or_default(),
+                    c.resolution_note.clone().unwrap_or_default(),
                     c.source_file.clone().unwrap_or_default(),
                     c.track.clone().unwrap_or_default(),
                     c.race_class.clone().unwrap_or_default(),
                     c.weather.clone().unwrap_or_default(),
                     temp,
-                    c.driver.clone().unwrap_or_default(),
-                    c.best_lap.clone().unwrap_or_default(),
+                    current_driver,
+                    current_car,
+                    current_lap,
                 )
                 .into(),
             );
@@ -1325,6 +1347,14 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             RUN_SELECTED_IDS.with(|slot| *slot.borrow_mut() = Some(selected));
             if let Some(w) = ui.upgrade() {
                 w.invoke_start_run(false, w.get_force_checked(), w.get_retry_checked());
+            }
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_select_in_images(move || {
+            if let Some(w) = ui.upgrade() {
+                w.set_page("images".into());
             }
         });
     }

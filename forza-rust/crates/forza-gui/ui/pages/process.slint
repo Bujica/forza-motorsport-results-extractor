@@ -21,6 +21,7 @@ export component ProcessPage inherits Rectangle {
     in-out property <bool> retry-checked;
 
     callback start-run(bool, bool, bool);
+    callback select-in-images();
     callback cancel-run();
     callback toggle-pause();
 
@@ -60,6 +61,11 @@ export component ProcessPage inherits Rectangle {
                         text: root.run-running ? "Running…" : "Run All";
                         enabled: !root.run-running;
                         clicked => { root.start-run(root.dry-run-checked, root.force-checked, root.retry-checked); }
+                    }
+                    Button {
+                        text: "Select in Images";
+                        enabled: !root.run-running;
+                        clicked => { root.select-in-images(); }
                     }
                     Button {
                         text: root.run-paused ? "Resume" : "Pause";

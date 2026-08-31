@@ -63,6 +63,8 @@ export component ImagesPage inherits Rectangle {
     in property <int> sort-column;
     in property <bool> sort-ascending;
     in-out property <bool> confirm-delete;
+    // Scan status label text (bound from MainWindow).
+    in-out property <string> scan-status;
 
     callback refresh-requested(string, string, string, string, string, string);
     callback scan-folder();
@@ -79,6 +81,7 @@ export component ImagesPage inherits Rectangle {
     callback delete-selected();
     callback sort-changed(int);
     callback open-image-detail(int);
+    callback select-in-images();
 
     function fire-refresh() {
         root.confirm-delete = false;
@@ -100,12 +103,16 @@ export component ImagesPage inherits Rectangle {
             height: 32px;
             spacing: 8px;
             Text { text: "Images"; color: Theme.text; font-weight: 700; min-width: 52px; vertical-alignment: center; }
-            FilterCombo { min-width: 105px; label: "File";
-                model-value: ["all", "available", "missing"];
-                current-index: 0; selected(value) => { root.image-file-filter = value; root.fire-refresh(); } }
             FilterCombo { min-width: 125px; label: "Best";
                 model-value: ["all", "pending", "contributing", "non_contributing"];
                 current-index: 0; selected(value) => { root.image-best-filter = value; root.fire-refresh(); } }
+            FilterCombo { min-width: 105px; label: "File";
+                model-value: ["all", "available", "missing"];
+                current-index: 0; selected(value) => { root.image-file-filter = value; root.fire-refresh(); } }
+            FilterCombo { min-width: 120px; label: "Process";
+                model-value: ["all", "unprocessed", "processing", "processed_ok",
+                        "processed_error", "cancelled", "skipped"];
+                current-index: 0; selected(value) => { root.image-process-filter = value; root.fire-refresh(); } }
             FilterCombo { min-width: 100px; label: "Inventory";
                 model-value: ["all", "duplicate"];
                 current-index: 0; selected(value) => { root.image-inventory-filter = value; root.fire-refresh(); } }
@@ -115,14 +122,19 @@ export component ImagesPage inherits Rectangle {
             FilterCombo { min-width: 140px; horizontal-stretch: 2; label: "Run";
                 model-value: root.image-runs;
                 current-index: 0; selected(value) => { root.image-run-filter = value; root.fire-refresh(); } }
-            FilterCombo { min-width: 120px; label: "Process";
-                model-value: ["all", "unprocessed", "processing", "processed_ok",
-                        "processed_error", "cancelled", "skipped"];
-                current-index: 0; selected(value) => { root.image-process-filter = value; root.fire-refresh(); } }
-            Button { text: "Refresh"; clicked => { root.fire-refresh(); } }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: root.scan-status; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
             Button { text: "Scan folder"; clicked => { root.scan-folder(); } }
-            Text { text: "Selected: " + root.selected-image-count; color: Theme.text-muted; vertical-alignment: center; }
-            Button { text: "Clear selection"; enabled: root.selected-image-count > 0; clicked => { root.clear-selection(); } }
+        }
+
+        // Batch action bar (standalone between filter bar and table+sidepanel)
+        BatchActionBar {
+            selected-count: root.selected-image-count;
+            process-selected() => { root.process-selected(); }
+            rename() => { root.rename-selected(); }
+            export() => { root.export-selected(); }
+            rescan-selected() => { root.rescan-selected(); }
+            delete() => { root.confirm-delete = true; }
         }
 
         HorizontalLayout {
@@ -227,7 +239,7 @@ export component ImagesPage inherits Rectangle {
                 spacing: 6px;
                 Text { text: root.detail-title; color: Theme.text; font-weight: 700; }
                 Card {
-                    height: 190px;
+                    height: 260px;
                     clip: true;
                     if root.detail-has-preview: Image {
                         width: parent.width;
@@ -246,7 +258,7 @@ export component ImagesPage inherits Rectangle {
                 Card {
                     vertical-stretch: 1;
                     Text { x: 10px; y: 8px; width: parent.width - 20px;
-                           text: root.detail-lines; color: Theme.text-muted; wrap: word-wrap; font-size: Theme.font-lg; }
+                           text: root.detail-lines; color: Theme.text-muted; wrap: word-wrap; font-size: Theme.font-sm; }
                 }
                 if root.confirm-delete: HorizontalLayout {
                     spacing: 6px;
@@ -255,17 +267,9 @@ export component ImagesPage inherits Rectangle {
                     Button { text: "Cancel"; clicked => { root.confirm-delete = false; } }
                 }
                 Button {
-                    text: "Details…";
+                    text: "Image details";
                     enabled: root.selected-index >= 0;
                     clicked => { root.open-image-detail(root.selected-index); }
-                }
-                BatchActionBar {
-                    selected-count: root.selected-image-count;
-                    process-selected() => { root.process-selected(); }
-                    rename() => { root.rename-selected(); }
-                    export() => { root.export-selected(); }
-                    rescan-selected() => { root.rescan-selected(); }
-                    delete() => { root.confirm-delete = true; }
                 }
             }
         }

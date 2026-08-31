@@ -16,6 +16,7 @@ pub struct ReviewCaseEntry {
     pub status: String,
     pub outcome: Option<String>,
     pub driver: Option<String>,
+    pub car: Option<String>,
     pub track: Option<String>,
     pub race_class: Option<String>,
     pub weather: Option<String>,
@@ -29,6 +30,7 @@ pub struct ReviewCaseEntry {
     pub image_file_id: Option<String>,
     pub run_id: Option<String>,
     pub source_file: Option<String>,
+    pub resolution_note: Option<String>,
 }
 
 /// Filters for the review listing; `None`/empty/"all" values pass through.
@@ -87,11 +89,11 @@ pub fn list_review_cases(
 
     let sql = format!(
         "SELECT case_number, reason, COALESCE(\"trigger\",''), status,
-                COALESCE(outcome,''), COALESCE(driver,''), COALESCE(track,''),
+                COALESCE(outcome,''), COALESCE(driver,''), COALESCE(car,''), COALESCE(track,''),
                 COALESCE(race_class,''), COALESCE(weather,''), COALESCE(best_lap,''),
                 temp_f, COALESCE(model_value,''), corrected_value,
                 COALESCE(decision_field,''), COALESCE(error_type,''), lap_index,
-                image_file_id, run_id, COALESCE(source_file,'')
+                image_file_id, run_id, COALESCE(source_file,''), COALESCE(resolution_note,'')
          FROM review_cases
          WHERE {}
          ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, case_number",
@@ -109,19 +111,21 @@ pub fn list_review_cases(
                 status: row.get(3)?,
                 outcome: Some(row.get(4)?),
                 driver: Some(row.get(5)?),
-                track: Some(row.get(6)?),
-                race_class: Some(row.get(7)?),
-                weather: Some(row.get(8)?),
-                best_lap: Some(row.get(9)?),
-                temp_f: row.get(10)?,
-                model_value: Some(row.get(11)?),
-                corrected_value: row.get(12)?,
-                decision_field: Some(row.get(13)?),
-                error_type: Some(row.get(14)?),
-                lap_index: row.get(15)?,
-                image_file_id: row.get(16)?,
-                run_id: row.get(17)?,
-                source_file: Some(row.get(18)?),
+                car: Some(row.get(6)?),
+                track: Some(row.get(7)?),
+                race_class: Some(row.get(8)?),
+                weather: Some(row.get(9)?),
+                best_lap: Some(row.get(10)?),
+                temp_f: row.get(11)?,
+                model_value: Some(row.get(12)?),
+                corrected_value: row.get(13)?,
+                decision_field: Some(row.get(14)?),
+                error_type: Some(row.get(15)?),
+                lap_index: row.get(16)?,
+                image_file_id: row.get(17)?,
+                run_id: row.get(18)?,
+                source_file: Some(row.get(19)?),
+                resolution_note: Some(row.get(20)?),
             })
         })
         .map_err(|e| e.to_string())?;

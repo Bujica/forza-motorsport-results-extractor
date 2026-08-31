@@ -9,6 +9,7 @@ import { ImagesPage } from "pages/images.slint";
 import { ProcessPage } from "pages/process.slint";
 import { ReviewPage } from "pages/review.slint";
 import { BestLapsPage } from "pages/bestlaps.slint";
+import { RecordsPage } from "pages/records.slint";
 import { DiagnosticsPage } from "pages/diagnostics.slint";
 import { ImageDebugPage } from "pages/image_debug.slint";
 import { LogsPage } from "pages/logs.slint";
@@ -54,6 +55,7 @@ export component MainWindow inherits Window {
     callback bestlaps-generate-pdf();
     callback bestlaps-open-pdf();
     callback bestlaps-import();
+    callback records-refresh-requested();
     callback doctor-requested();
     callback rebuild-requested();
     callback overview-requested();
@@ -81,6 +83,7 @@ export component MainWindow inherits Window {
     callback logs-search-changed(string);
     callback about-requested();
     callback copy-diagnostics-requested();
+    callback select-in-images();
 
     in property <[ImageItem]> images;
     in property <[ReviewItem]> reviews;
@@ -117,6 +120,8 @@ export component MainWindow inherits Window {
     in property <[string]> best-laps-laps: ["all", "clean", "dirty"];
     in property <int> best-laps-sort-column: 99;
     in property <bool> best-laps-sort-ascending: true;
+    in property <string> records-status;
+    in property <bool> records-loading: false;
     in property <string> selection-summary;
     in property <int> sort-column;
     in property <bool> sort-ascending;
@@ -236,7 +241,7 @@ export component MainWindow inherits Window {
 
         // ── Sidebar ──
         Rectangle {
-            width: 190px;
+            width: 238px;
             background: Theme.sidebar-bg;
 
             VerticalLayout {
@@ -244,7 +249,7 @@ export component MainWindow inherits Window {
             spacing: 4px;
 
             Text { text: "FM Results"; color: Theme.sidebar-text; font-weight: 800; font-size: Theme.font-lg; }
-            Text { text: root.context-gamertag; color: Theme.sidebar-muted; font-size: Theme.font-sm; }
+            Text { text: "v" + root.app-version; color: Theme.sidebar-muted; font-size: Theme.font-xs; }
             Rectangle { height: 8px; }
 
             for entry in [
@@ -252,10 +257,8 @@ export component MainWindow inherits Window {
                 { key: "process", label: "Process" },
                 { key: "review", label: "Review" },
                 { key: "best-laps", label: "Best Laps" },
+                { key: "records", label: "Records" },
                 { key: "diagnostics", label: "Diagnostics" },
-                { key: "image-debug", label: "Image Debug" },
-                { key: "logs", label: "Logs" },
-                { key: "performance", label: "Performance" },
                 { key: "settings", label: "Settings" },
             ]: TouchArea {
                 height: 34px;
@@ -269,8 +272,9 @@ export component MainWindow inherits Window {
                     Text {
                         x: 10px;
                         text: entry.label;
-                        color: root.page == entry.key ? Theme.text : Theme.sidebar-muted;
+                        color: root.page == entry.key ? Theme.accent : Theme.sidebar-muted;
                         vertical-alignment: center;
+                        font-weight: root.page == entry.key ? 700 : 400;
                     }
                 }
             }
@@ -344,6 +348,7 @@ export component MainWindow inherits Window {
                 rescan-selected() => { root.rescan-selected(); }
                 delete-selected() => { root.delete-selected(); }
                 sort-changed(c) => { root.sort-changed(c); }
+                select-in-images() => { root.select-in-images(); }
                 open-image-detail(i) => { root.open-image-detail(i); }
             }
 
@@ -417,6 +422,13 @@ export component MainWindow inherits Window {
                 generate-pdf-requested() => { root.bestlaps-generate-pdf(); }
                 open-pdf-requested() => { root.bestlaps-open-pdf(); }
                 import-requested() => { root.bestlaps-import(); }
+            }
+
+            // ══ Records page ══
+            if root.page == "records": RecordsPage {
+                records-status: root.records-status;
+                records-loading: root.records-loading;
+                refresh-requested() => { root.records-refresh-requested(); }
             }
 
             // ══ Diagnostics page ══

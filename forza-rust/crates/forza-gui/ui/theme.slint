@@ -5,28 +5,28 @@
 
 export global Theme {
     // ── Surfaces ──
-    out property <color> bg: #f5f7fa;            // window background
-    out property <color> card: #ffffff;          // content card
-    out property <color> card-alt: #f8f9fa;      // alternating rows
+    out property <color> bg: #f3f6fa;            // window background (Python APP_BG)
+    out property <color> card: #ffffff;          // content card (Python SURFACE)
+    out property <color> card-alt: #f8f9fa;      // alternating rows (Python SURFACE_ALT)
     out property <color> header-bg: #eaecf0;     // table header strip
-    out property <color> border: #d8dee6;        // hairline borders
+    out property <color> border: #d0d7de;        // hairline borders (Python BORDER)
     out property <color> divider: #e4e8ee;
 
-    // ── Sidebar (kept dark for contrast with the light workspace) ──
+    // ── Sidebar ──
     out property <color> sidebar-bg: #ffffff;
-    out property <color> sidebar-text: #1f2933;
-    out property <color> sidebar-muted: #5f6b7a;
-    out property <color> sidebar-active: #eaecf0;
+    out property <color> sidebar-text: #1f2328;
+    out property <color> sidebar-muted: #57606a;
+    out property <color> sidebar-active: #eaf4ff;
 
     // ── Text (dark on light surfaces) ──
-    out property <color> text: #1f2933;          // primary
-    out property <color> text-muted: #5f6b7a;    // secondary
+    out property <color> text: #1f2328;          // primary (Python TEXT)
+    out property <color> text-muted: #57606a;    // secondary (Python MUTED)
     out property <color> text-faint: #8a94a3;    // tertiary/hints
     out property <color> text-on-dark: #e8ecef;
 
     // ── Accents & status ──
     out property <color> accent: #0f6cbd;
-    out property <color> accent-soft: #eaf3fc;
+    out property <color> accent-soft: #eaf4ff;   // (Python ACCENT_SOFT)
     out property <color> ok: #1d7a45;
     out property <color> ok-soft: #e2f5e9;
     out property <color> warn: #8a6116;
@@ -51,7 +51,7 @@ export global Theme {
 
     // ── Spacing & metrics ──
     out property <length> radius: 12px;
-    out property <length> row-h: 30px;
+    out property <length> row-h: 38px;       // (Python ROW_HEIGHT)
     out property <length> row-h-tall: 46px;
     out property <length> card-pad: 14px;
 }
