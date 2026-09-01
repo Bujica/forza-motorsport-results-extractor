@@ -96,7 +96,7 @@ export component SettingsPage inherits Rectangle {
                             vertical-alignment: center;
                         }
                     }
-                    // Editable row
+                    // Editable row — stabilized editor width + centered status
                     Rectangle {
                         height: Theme.row-h;
                         background: row.status == "pending" ? Theme.warn-soft : transparent;
@@ -104,29 +104,54 @@ export component SettingsPage inherits Rectangle {
                             padding-left: 10px;
                             padding-right: 10px;
                             spacing: 8px;
-                            Text { text: row.name; color: Theme.text; width: 220px; vertical-alignment: center; overflow: elide; }
-                            if row.editor == "bool": ComboBox {
-                                width: 110px;
-                                model: ["True", "False"];
-                                current-index: row.value == "True" ? 0 : 1;
-                                selected => { root.setting-edited(row.key, self.current-value); }
-                            }
-                            if row.editor != "bool": LineEdit {
+                            Text { text: row.name; color: Theme.text; width: 220px; vertical-alignment: center; overflow: elide; font-size: Theme.font-md; }
+                            Rectangle {
                                 horizontal-stretch: 1;
-                                text: row.value;
-                                input-type: row.editor == "int" ? InputType.number :
-                                            row.editor == "float" ? InputType.decimal : InputType.text;
-                                accepted(value) => { root.setting-edited(row.key, value); }
+                                clip: true;
+                                if row.editor == "bool": ComboBox {
+                                    x: 0; width: parent.width;
+                                    height: parent.height;
+                                    model: ["True", "False"];
+                                    current-index: row.value == "True" ? 0 : 1;
+                                    selected => { root.setting-edited(row.key, self.current-value); }
+                                }
+                                if row.editor != "bool": LineEdit {
+                                    x: 0; width: parent.width;
+                                    height: parent.height;
+                                    text: row.value;
+                                    input-type: row.editor == "int" ? InputType.number :
+                                                row.editor == "float" ? InputType.decimal : InputType.text;
+                                    accepted(value) => { root.setting-edited(row.key, value); }
+                                }
                             }
-                            Text {
-                                text: row.status;
+                            Rectangle {
                                 width: 70px;
-                                vertical-alignment: center;
-                                font-size: Theme.font-sm;
-                                color: row.status == "pending" ? Theme.warn :
-                                       row.status == "ok" ? Theme.ok :
-                                       row.status == "invalid" ? Theme.danger : Theme.text-faint;
+                                height: parent.height;
+                                Text {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text: row.status;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    font-size: Theme.font-sm;
+                                    color: row.status == "pending" ? Theme.warn :
+                                           row.status == "ok" ? Theme.ok :
+                                           row.status == "invalid" ? Theme.danger : Theme.text-faint;
+                                }
+                                // vertical grid line parity
+                                Rectangle {
+                                    x: parent.width - 1px;
+                                    width: 1px;
+                                    height: parent.height;
+                                    background: Theme.border;
+                                }
                             }
+                        }
+                        Rectangle { // row divider (QTableView grid parity)
+                            y: parent.height - 1px;
+                            height: 1px;
+                            width: parent.width;
+                            background: Theme.divider;
                         }
                     }
                 }

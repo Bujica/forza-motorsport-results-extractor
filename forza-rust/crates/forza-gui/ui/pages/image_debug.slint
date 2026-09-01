@@ -4,7 +4,7 @@
 import { Button, ComboBox, ListView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { DebugCaseItem, DebugResultComboItem } from "../models.slint";
-import { Card, EmptyState } from "../components/common.slint";
+import { Card, EmptyState, TableHeaderCell, TableCell, SplitterV } from "../components/common.slint";
 
 export component ImageDebugPage inherits Rectangle {
     background: transparent;
@@ -38,6 +38,10 @@ export component ImageDebugPage inherits Rectangle {
     in property <[string]> debug-model-options: ["all"];
     in property <[string]> debug-prompt-options: ["all"];
     in property <[string]> debug-run-options: ["all"];
+
+    // Interactive column widths — Python: Image 280 Interactive, resto Fixed
+    in-out property <length> col-image-w: 280px;
+    in-out property <length> table-h: 300px;
 
     callback debug-refresh-requested();
     callback debug-filter-changed(string, string, string, string, string);
@@ -80,45 +84,44 @@ export component ImageDebugPage inherits Rectangle {
                 spacing: 8px;
                 height: 30px;
                 Text { text: "Status"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
-                ComboBox { model: root.debug-status-options; current-value: root.debug-status-filter; min-width: 90px; selected(v) => { root.debug-status-filter = v; root.emit-filter(); } }
+                ComboBox { model: root.debug-status-options; current-value: root.debug-status-filter; min-width: 105px; selected(v) => { root.debug-status-filter = v; root.emit-filter(); } }
                 Text { text: "Backend"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
-                ComboBox { model: root.debug-backend-options; current-value: root.debug-backend-filter; min-width: 90px; selected(v) => { root.debug-backend-filter = v; root.emit-filter(); } }
+                ComboBox { model: root.debug-backend-options; current-value: root.debug-backend-filter; min-width: 105px; selected(v) => { root.debug-backend-filter = v; root.emit-filter(); } }
                 Text { text: "Model"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
-                ComboBox { model: root.debug-model-options; current-value: root.debug-model-filter; min-width: 110px; selected(v) => { root.debug-model-filter = v; root.emit-filter(); } }
+                ComboBox { model: root.debug-model-options; current-value: root.debug-model-filter; min-width: 130px; selected(v) => { root.debug-model-filter = v; root.emit-filter(); } }
                 Text { text: "Prompt"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
-                ComboBox { model: root.debug-prompt-options; current-value: root.debug-prompt-filter; min-width: 110px; selected(v) => { root.debug-prompt-filter = v; root.emit-filter(); } }
+                ComboBox { model: root.debug-prompt-options; current-value: root.debug-prompt-filter; min-width: 130px; selected(v) => { root.debug-prompt-filter = v; root.emit-filter(); } }
                 Text { text: "Run"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
-                ComboBox { model: root.debug-run-options; current-value: root.debug-run-filter; min-width: 110px; selected(v) => { root.debug-run-filter = v; root.emit-filter(); } }
+                ComboBox { model: root.debug-run-options; current-value: root.debug-run-filter; min-width: 130px; selected(v) => { root.debug-run-filter = v; root.emit-filter(); } }
                 Rectangle { horizontal-stretch: 1; }
             }
         }
 
-        // Cases table — 11 columns (Python widths)
+        // Cases table — 11 columns (Python widths) with vertical splitter
         Card {
-            height: 300px;
+            height: root.table-h;
             clip: true;
             VerticalLayout {
                 padding: 4px;
                 spacing: 4px;
-                // Header
+                // Header — Python Interactive(0) + Fixed(1-10)
                 Rectangle {
                     height: 26px;
                     background: Theme.header-bg;
                     border-radius: 4px;
+                    clip: true;
                     HorizontalLayout {
-                        padding-left: 8px;
-                        spacing: 4px;
-                        Text { text: "Image"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 280px; horizontal-stretch: 2.2; overflow: elide; vertical-alignment: center; }
-                        Text { text: "Race Date"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 95px; vertical-alignment: center; }
-                        Text { text: "File"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 85px; vertical-alignment: center; }
-                        Text { text: "Process"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 85px; vertical-alignment: center; }
-                        Text { text: "Best"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 100px; vertical-alignment: center; }
-                        Text { text: "Latest"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 100px; vertical-alignment: center; }
-                        Text { text: "Run"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 90px; overflow: elide; vertical-alignment: center; }
-                        Text { text: "Model"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 85px; overflow: elide; vertical-alignment: center; }
-                        Text { text: "Att"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 65px; vertical-alignment: center; }
-                        Text { text: "Laps"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 55px; vertical-alignment: center; }
-                        Text { text: "Rev"; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; min-width: 60px; vertical-alignment: center; }
+                        TableHeaderCell { label: "Image"; width-pref <=> root.col-image-w; resizable: true; }
+                        TableHeaderCell { label: "Race Date"; width-pref: 110px; }
+                        TableHeaderCell { label: "File"; width-pref: 100px; }
+                        TableHeaderCell { label: "Process"; width-pref: 105px; }
+                        TableHeaderCell { label: "Best"; width-pref: 110px; }
+                        TableHeaderCell { label: "Latest"; width-pref: 110px; }
+                        TableHeaderCell { label: "Run"; width-pref: 100px; }
+                        TableHeaderCell { label: "Model"; width-pref: 95px; }
+                        TableHeaderCell { label: "Att"; width-pref: 65px; }
+                        TableHeaderCell { label: "Laps"; width-pref: 60px; }
+                                TableHeaderCell { label: "Rev"; width-pref: 65px; flexible: true; resizable: true; }
                     }
                 }
                 dcv := ListView {
@@ -134,19 +137,17 @@ export component ImageDebugPage inherits Rectangle {
                             border-radius: 4px;
                             background: root.debug-selected-image-id == item.image-file-id ? Theme.selection-bg : transparent;
                             HorizontalLayout {
-                                padding-left: 8px;
-                                spacing: 4px;
-                                Text { text: item.image-name; color: Theme.text; min-width: 280px; horizontal-stretch: 2.2; overflow: elide; vertical-alignment: center; font-size: Theme.font-sm; }
-                                Text { text: item.race-date; color: Theme.text-muted; min-width: 95px; vertical-alignment: center; font-size: Theme.font-sm; overflow: elide; }
-                                Text { text: item.file-status; color: Theme.text-muted; min-width: 85px; vertical-alignment: center; font-size: Theme.font-sm; }
-                                Text { text: item.processing; color: item.processing == "processed_ok" ? Theme.ok : item.processing == "processed_error" ? Theme.danger : Theme.text-muted; min-width: 85px; vertical-alignment: center; font-size: Theme.font-sm; }
-                                Text { text: item.best-lap; color: Theme.text-muted; min-width: 100px; vertical-alignment: center; font-size: Theme.font-sm; }
-                                Text { text: item.latest-status; color: item.latest-status == "ok" ? Theme.ok : item.latest-status == "error" ? Theme.danger : Theme.text-muted; min-width: 100px; vertical-alignment: center; font-size: Theme.font-sm; }
-                                Text { text: item.run-id; color: Theme.text-muted; min-width: 90px; overflow: elide; vertical-alignment: center; font-size: Theme.font-sm; }
-                                Text { text: item.model; color: Theme.text-muted; min-width: 85px; overflow: elide; vertical-alignment: center; font-size: Theme.font-sm; }
-                                Text { text: item.attempts; color: Theme.text-faint; min-width: 65px; vertical-alignment: center; font-size: Theme.font-sm; }
-                                Text { text: item.laps; color: Theme.text-faint; min-width: 55px; vertical-alignment: center; font-size: Theme.font-sm; }
-                                Text { text: item.reviews; color: Theme.text-faint; min-width: 60px; vertical-alignment: center; font-size: Theme.font-sm; }
+                                TableCell { text: item.image-name; width-pref: root.col-image-w; text-color: Theme.text; }
+                                TableCell { text: item.race-date; width-pref: 110px; text-color: Theme.text-muted; }
+                                TableCell { text: item.file-status; width-pref: 100px; text-color: Theme.text-muted; }
+                                TableCell { text: item.processing; width-pref: 105px; text-color: item.processing == "processed_ok" ? Theme.ok : item.processing == "processed_error" ? Theme.danger : Theme.text-muted; }
+                                TableCell { text: item.best-lap; width-pref: 110px; text-color: Theme.text-muted; }
+                                TableCell { text: item.latest-status; width-pref: 110px; text-color: item.latest-status == "ok" ? Theme.ok : item.latest-status == "error" ? Theme.danger : Theme.text-muted; }
+                                TableCell { text: item.run-id; width-pref: 100px; text-color: Theme.text-muted; }
+                                TableCell { text: item.model; width-pref: 95px; text-color: Theme.text-muted; }
+                                TableCell { text: item.attempts; width-pref: 65px; text-color: Theme.text-faint; }
+                                TableCell { text: item.laps; width-pref: 60px; text-color: Theme.text-faint; }
+                                TableCell { text: item.reviews; width-pref: 65px; flexible: true; text-color: Theme.text-faint; grid-line: false; }
                             }
                         }
                     }
@@ -155,6 +156,12 @@ export component ImageDebugPage inherits Rectangle {
             if root.debug-cases.length == 0: EmptyState {
                 text: "No debug cases. Refresh to load the latest extraction cases.";
             }
+        }
+
+        SplitterV {
+            split <=> root.table-h;
+            min-split: 150px;
+            max-split: parent.height - 250px;
         }
 
         // Detail header

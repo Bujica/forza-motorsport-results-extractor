@@ -1868,6 +1868,8 @@ dependencies = [
  "opener",
  "rfd",
  "rusqlite",
+ "serde",
+ "serde_json",
  "slint",
  "slint-build",
  "tempfile",

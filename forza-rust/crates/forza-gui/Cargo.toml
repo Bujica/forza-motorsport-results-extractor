@@ -15,6 +15,8 @@ path = "src/main.rs"
 
 [dependencies]
 rfd = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 slint = "1"
 tokio = { version = "1", features = ["rt", "sync", "time"] }
 anyhow = "1"

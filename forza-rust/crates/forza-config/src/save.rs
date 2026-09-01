@@ -115,6 +115,9 @@ fn apply_field(cfg: &mut AppConfig, field: &str, value: &str) -> Result<(), Stri
     if let Some(key) = field.strip_prefix("pdf.") {
         return apply_pdf(cfg, key, value);
     }
+    if let Some(key) = field.strip_prefix("ui.") {
+        return apply_ui(cfg, key, value);
+    }
     if field == "prompt.active" {
         cfg.prompt.active = value.to_string();
         return Ok(());
@@ -194,6 +197,15 @@ fn apply_pdf(cfg: &mut AppConfig, key: &str, value: &str) -> Result<(), String> 
         "dirty_lap_symbol" => cfg.pdf.dirty_lap_symbol = value.to_string(),
         "show_dirty_lap_symbol" => cfg.pdf.show_dirty_lap_symbol = parse_bool(value)?,
         other => return Err(format!("Unknown PDF field: {other}")),
+    }
+    Ok(())
+}
+
+fn apply_ui(cfg: &mut AppConfig, key: &str, value: &str) -> Result<(), String> {
+    match key {
+        "font_scale" => cfg.ui.font_scale = parse_float(value)?,
+        "min_font_px" => cfg.ui.min_font_px = parse_int(value)?,
+        other => return Err(format!("Unknown ui field: {other}")),
     }
     Ok(())
 }
@@ -365,6 +377,9 @@ fn write_candidate(config_path: &Path, cfg: &AppConfig) -> Result<(), String> {
     );
 
     doc.set("prompt", "active", &cfg.prompt.active);
+
+    doc.set("ui", "font_scale", &py_float(cfg.ui.font_scale));
+    doc.set("ui", "min_font_px", &cfg.ui.min_font_px.to_string());
 
     if let Some(parent) = config_path.parent()
         && !parent.as_os_str().is_empty()

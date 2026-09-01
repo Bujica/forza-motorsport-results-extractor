@@ -82,6 +82,14 @@ pub struct PromptConfig {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct UiConfig {
+    /// Global font scale factor (e.g. 1.0 = 100%, 1.25 = QuadHD comfort)
+    pub font_scale: f64,
+    /// Absolute minimum font size in px, clamps the scaled xs/sm/md values
+    pub min_font_px: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct AppConfig {
     pub input_dir: PathBuf,
     pub pdf_file: PathBuf,
@@ -94,6 +102,7 @@ pub struct AppConfig {
     pub validation: ValidationConfig,
     pub pdf: PdfConfig,
     pub prompt: PromptConfig,
+    pub ui: UiConfig,
 }
 
 const LM_DEFAULT_URL: &str = "http://127.0.0.1:1234/api/v1/chat";
@@ -330,6 +339,9 @@ pub fn load_config(path: &Path, strict: bool) -> Result<(AppConfig, Warnings), C
 
     let active = loader.string("prompt", "active", prompts::DEFAULT_PROMPT_ID);
 
+    let font_scale = loader.float("ui", "font_scale", 1.0);
+    let min_font_px = loader.int("ui", "min_font_px", 13);
+
     if let Some(err) = loader.first_error.take() {
         return Err(err);
     }
@@ -374,6 +386,10 @@ pub fn load_config(path: &Path, strict: bool) -> Result<(AppConfig, Warnings), C
             show_dirty_lap_symbol,
         },
         prompt: PromptConfig { active },
+        ui: UiConfig {
+            font_scale,
+            min_font_px,
+        },
     };
 
     Ok((app, warnings))
@@ -458,6 +474,18 @@ pub fn validate_config(cfg: &AppConfig) -> Result<(), Vec<String>> {
         errors.push(format!(
             "[validation] temp_min_f ({}) must be less than temp_max_f ({})",
             cfg.validation.temp_min_f, cfg.validation.temp_max_f
+        ));
+    }
+    if !(0.5..=2.5).contains(&cfg.ui.font_scale) {
+        errors.push(format!(
+            "[ui] font_scale={} is out of range [0.5, 2.5]",
+            cfg.ui.font_scale
+        ));
+    }
+    if !(8..=24).contains(&cfg.ui.min_font_px) {
+        errors.push(format!(
+            "[ui] min_font_px={} is out of range [8, 24]",
+            cfg.ui.min_font_px
         ));
     }
 

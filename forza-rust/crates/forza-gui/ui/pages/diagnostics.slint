@@ -1,10 +1,11 @@
 // Diagnostics page: DB doctor full battery + Overview (LM Studio + fast DB report).
 // Parity with Python DbDoctorView + DeveloperOverviewView.
 
-import { Button, ListView } from "std-widgets.slint";
+import { Button, ComboBox, LineEdit, ListView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { Card, Badge, EmptyState } from "../components/common.slint";
-import { DoctorCheckItem } from "../models.slint";
+import { Card, Badge, EmptyState, TableHeaderCell, TableCell } from "../components/common.slint";
+import { DoctorCheckItem, DebugCaseItem, DebugResultComboItem } from "../models.slint";
+import { ImageDebugPage } from "image_debug.slint";
 
 export component DiagnosticsPage inherits Rectangle {
     background: transparent;
@@ -34,9 +35,57 @@ export component DiagnosticsPage inherits Rectangle {
     in property <string> overview-inventory: "—";
     in property <string> overview-review: "—";
 
+    // Image Debug (embedded — full ImageDebugPage parity, not simplified table)
+    in property <[DebugCaseItem]> debug-cases;
+    in property <[DebugResultComboItem]> debug-results;
+    in property <[string]> debug-result-labels;
+    in property <string> debug-title;
+    in property <string> debug-selected-image-id;
+    in property <string> debug-selected-result-id;
+    in-out property <string> debug-tab: "overview";
+    in property <string> debug-overview-text;
+    in property <string> debug-metadata-text;
+    in property <string> debug-results-text;
+    in property <string> debug-attempts-text;
+    in property <string> debug-response-text;
+    in property <string> debug-parsed-text;
+    in property <string> debug-laps-reviews-text;
+    in property <string> debug-artifacts-text;
+    in property <string> debug-runtime-text;
+    in property <string> debug-timeline-text;
+    in-out property <string> debug-status-filter: "all";
+    in-out property <string> debug-backend-filter: "all";
+    in-out property <string> debug-model-filter: "all";
+    in-out property <string> debug-prompt-filter: "all";
+    in-out property <string> debug-run-filter: "all";
+    in property <[string]> debug-status-options: ["all", "ok", "error", "pending", "running", "cancelled"];
+    in property <[string]> debug-backend-options: ["all"];
+    in property <[string]> debug-model-options: ["all"];
+    in property <[string]> debug-prompt-options: ["all"];
+    in property <[string]> debug-run-options: ["all"];
+    in-out property <length> col-image-w: 280px;
+    in-out property <length> debug-table-h: 300px;
+    in property <string> logs-status;
+
+    // Logs (embedded)
+    in property <string> app-log-text;
+    in property <string> error-log-text;
+    in-out property <string> logs-tab: "app";
+    in-out property <string> logs-search: "";
+
     callback doctor-requested();
     callback rebuild-requested();
     callback overview-requested();
+    callback debug-refresh-requested();
+    callback debug-filter-changed(string, string, string, string, string);
+    callback debug-case-selected(int);
+    callback debug-result-selected(string);
+    callback debug-open-image-detail();
+    callback logs-reload-requested();
+    callback logs-clear-requested(string);
+    callback logs-open-folder();
+    callback logs-search-changed(string);
+    callback page-change-requested(string);
 
     function badge-bg(level: string) -> color {
         return level == "FAIL" ? #481818 : level == "WARN" ? #4a3a12 : #183a24;
@@ -64,17 +113,19 @@ export component DiagnosticsPage inherits Rectangle {
             Rectangle { horizontal-stretch: 1; }
         }
 
-        // Tab bar
+        // Tab bar — 4 tabs parity Python (overview / Image Debug / DB Doctor / Logs)
         HorizontalLayout {
             height: 30px;
             spacing: 4px;
             for tab in [
                 { key: "overview", label: "Overview" },
+                { key: "debug", label: "Image Debug" },
                 { key: "doctor", label: "DB Doctor" },
+                { key: "logs", label: "Logs" },
             ]: Rectangle {
                 border-radius: 4px;
                 background: root.diagnostics-tab == tab.key ? Theme.accent : Theme.header-bg;
-                min-width: 120px;
+                min-width: 110px;
                 TouchArea {
                     clicked => { root.diagnostics-tab = tab.key; }
                     Text {
@@ -129,6 +180,42 @@ export component DiagnosticsPage inherits Rectangle {
             }
         }
 
+        if root.diagnostics-tab == "debug": ImageDebugPage {
+            debug-cases: root.debug-cases;
+            debug-results: root.debug-results;
+            debug-result-labels: root.debug-result-labels;
+            debug-title: root.debug-title;
+            debug-selected-image-id: root.debug-selected-image-id;
+            debug-selected-result-id: root.debug-selected-result-id;
+            debug-tab <=> root.debug-tab;
+            debug-overview-text: root.debug-overview-text;
+            debug-metadata-text: root.debug-metadata-text;
+            debug-results-text: root.debug-results-text;
+            debug-attempts-text: root.debug-attempts-text;
+            debug-response-text: root.debug-response-text;
+            debug-parsed-text: root.debug-parsed-text;
+            debug-laps-reviews-text: root.debug-laps-reviews-text;
+            debug-artifacts-text: root.debug-artifacts-text;
+            debug-runtime-text: root.debug-runtime-text;
+            debug-timeline-text: root.debug-timeline-text;
+            debug-status-filter <=> root.debug-status-filter;
+            debug-backend-filter <=> root.debug-backend-filter;
+            debug-model-filter <=> root.debug-model-filter;
+            debug-prompt-filter <=> root.debug-prompt-filter;
+            debug-run-filter <=> root.debug-run-filter;
+            debug-status-options: root.debug-status-options;
+            debug-backend-options: root.debug-backend-options;
+            debug-model-options: root.debug-model-options;
+            debug-prompt-options: root.debug-prompt-options;
+            debug-run-options: root.debug-run-options;
+            table-h <=> root.debug-table-h;
+            debug-refresh-requested() => { root.debug-refresh-requested(); }
+            debug-filter-changed(s,b,m,p,r) => { root.debug-filter-changed(s,b,m,p,r); }
+            debug-case-selected(i) => { root.debug-case-selected(i); }
+            debug-result-selected(id) => { root.debug-result-selected(id); }
+            debug-open-image-detail() => { root.debug-open-image-detail(); }
+        }
+
         if root.diagnostics-tab == "doctor": VerticalLayout {
             spacing: 6px;
             Card {
@@ -148,17 +235,17 @@ export component DiagnosticsPage inherits Rectangle {
                 if root.doctor-checks.length > 0: VerticalLayout {
                     padding: 4px;
                     spacing: 0;
-                    // Header
+                    // Header — Python 80/65/200 + ResizeToContents (≈ Stretch)
                     Rectangle {
                         height: 26px;
                         background: Theme.header-bg;
                         border-radius: 4px;
+                        clip: true;
                         HorizontalLayout {
-                            padding-left: 8px;
-                            Text { text: "Result"; min-width: 60px; horizontal-stretch: 0.6; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
-                            Text { text: "Count"; min-width: 50px; horizontal-stretch: 0.5; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
-                            Text { text: "Check"; min-width: 180px; horizontal-stretch: 1.4; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
-                            Text { text: "Description"; horizontal-stretch: 2.5; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 700; }
+                            TableHeaderCell { label: "Result"; width-pref: 80px; }
+                            TableHeaderCell { label: "Count"; width-pref: 65px; }
+                            TableHeaderCell { label: "Check"; width-pref: 200px; }
+                            TableHeaderCell { label: "Description"; width-pref: 220px; flexible: true; resizable: true; }
                         }
                     }
                     ListView {
@@ -167,14 +254,47 @@ export component DiagnosticsPage inherits Rectangle {
                             height: 26px;
                             background: root.row-bg(chk.result);
                             HorizontalLayout {
-                                padding-left: 8px;
-                                Text { text: chk.result; min-width: 60px; horizontal-stretch: 0.6; vertical-alignment: center; color: root.row-fg(chk.result); font-size: Theme.font-sm; font-weight: 700; }
-                                Text { text: chk.count; min-width: 50px; horizontal-stretch: 0.5; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; }
-                                Text { text: chk.check; min-width: 180px; horizontal-stretch: 1.4; vertical-alignment: center; color: Theme.text; font-size: Theme.font-sm; overflow: elide; }
-                                Text { text: chk.description; horizontal-stretch: 2.5; vertical-alignment: center; color: Theme.text-muted; font-size: Theme.font-sm; overflow: elide; }
+                                TableCell { text: chk.result; width-pref: 80px; bold: true; text-color: root.row-fg(chk.result); }
+                                TableCell { text: chk.count; width-pref: 65px; text-color: Theme.text-muted; }
+                                TableCell { text: chk.check; width-pref: 200px; }
+                                TableCell { text: chk.description; width-pref: 220px; flexible: true; text-color: Theme.text-muted; grid-line: false; }
                             }
                         }
                     }
+                }
+            }
+        }
+
+        if root.diagnostics-tab == "logs": VerticalLayout {
+            spacing: 6px;
+            HorizontalLayout {
+                height: 30px;
+                spacing: 8px;
+                Text { text: "Technical Logs"; color: Theme.text; font-weight: 700; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                Button { text: "Reload"; clicked => { root.logs-reload-requested(); } }
+                Button { text: "Clear"; clicked => { root.logs-clear-requested(root.logs-tab); } }
+                Button { text: "Open folder"; clicked => { root.logs-open-folder(); } }
+            }
+            HorizontalLayout {
+                height: 28px;
+                spacing: 8px;
+                ComboBox { model: ["app","errors"]; current-value: root.logs-tab; min-width: 130px; height: 28px; selected(v) => { root.logs-tab = v; } }
+                LineEdit { placeholder-text: "Search…"; text <=> root.logs-search; horizontal-stretch: 1; edited(v) => { root.logs-search-changed(v); } }
+                Text { text: root.logs-status; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                Button { text: "Open full page"; clicked => { root.page-change-requested("logs"); } }
+            }
+            Card {
+                vertical-stretch: 1;
+                clip: true;
+                Text {
+                    x: 10px; y: 8px;
+                    width: parent.width - 20px;
+                    height: parent.height - 16px;
+                    text: root.logs-tab == "app" ? root.app-log-text : root.error-log-text;
+                    color: Theme.text-muted;
+                    font-size: Theme.font-sm;
+                    wrap: word-wrap;
                 }
             }
         }

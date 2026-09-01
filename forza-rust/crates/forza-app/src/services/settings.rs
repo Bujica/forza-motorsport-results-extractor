@@ -35,6 +35,7 @@ pub struct SettingsSnapshot {
 pub const GROUP_PATHS: &str = "Paths";
 pub const GROUP_LLM: &str = "Backend / Model / Prompt";
 pub const GROUP_RUNTIME: &str = "Runtime / Image / PDF / Validation";
+pub const GROUP_UI: &str = "UI";
 
 const OK_MESSAGE: &str = "Configuration is valid for execution.";
 
@@ -53,6 +54,7 @@ pub fn settings_snapshot(
     rows.extend(path_rows(cfg));
     rows.extend(llm_rows(cfg));
     rows.extend(runtime_rows(cfg));
+    rows.extend(ui_rows(cfg));
     for row in &mut rows {
         if let Some(value) = pending.get(&row.key) {
             row.value = value.clone();
@@ -299,6 +301,31 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
     ]
 }
 
+fn ui_rows(cfg: &AppConfig) -> Vec<SettingRow> {
+    vec![
+        SettingRow {
+            options: float_options("0.5", "2.5", "0.05"),
+            ..row(
+                "ui.font_scale",
+                "font_scale",
+                py_float(cfg.ui.font_scale),
+                "float",
+                GROUP_UI,
+            )
+        },
+        SettingRow {
+            options: int_options(8, 24, 1),
+            ..row(
+                "ui.min_font_px",
+                "min_font_px",
+                cfg.ui.min_font_px.to_string(),
+                "int",
+                GROUP_UI,
+            )
+        },
+    ]
+}
+
 fn runtime_rows(cfg: &AppConfig) -> Vec<SettingRow> {
     vec![
         row(
@@ -467,6 +494,8 @@ mod tests {
                 "validation.temp_max_f",
                 "pdf.dirty_lap_symbol",
                 "pdf.show_dirty_lap_symbol",
+                "ui.font_scale",
+                "ui.min_font_px",
             ]
         );
         assert!(snapshot.validation_ok);

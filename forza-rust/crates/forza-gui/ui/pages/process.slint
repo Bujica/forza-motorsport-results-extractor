@@ -2,7 +2,7 @@
 
 import { Button, CheckBox, ListView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { Card, EmptyState } from "../components/common.slint";
+import { Card, EmptyState, SplitterV } from "../components/common.slint";
 
 export component ProcessPage inherits Rectangle {
     background: transparent;
@@ -19,6 +19,7 @@ export component ProcessPage inherits Rectangle {
     in-out property <bool> dry-run-checked;
     in-out property <bool> force-checked;
     in-out property <bool> retry-checked;
+    in-out property <length> progress-h: 90px;
 
     callback start-run(bool, bool, bool);
     callback select-in-images();
@@ -81,8 +82,9 @@ export component ProcessPage inherits Rectangle {
             }
         }
 
-        // Progress card
+        // Progress card — compact (was equal to log), now 90px + resizable
         Card {
+            height: root.progress-h;
             HorizontalLayout {
                 padding: 10px;
                 spacing: 10px;
@@ -110,6 +112,12 @@ export component ProcessPage inherits Rectangle {
                     }
                 }
             }
+        }
+
+        SplitterV {
+            split <=> root.progress-h;
+            min-split: 60px;
+            max-split: parent.height - 200px;
         }
 
         // Event Log card

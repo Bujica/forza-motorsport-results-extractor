@@ -3,7 +3,7 @@
 import { Button, ListView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { DetailAttemptItem, DetailLapItem, DetailResultItem, DetailReviewItem } from "../models.slint";
-import { Card, EmptyState } from "../components/common.slint";
+import { Card, EmptyState, TableHeaderCell, TableCell, SplitterH } from "../components/common.slint";
 
 export component ImageDetailPage inherits Rectangle {
     background: transparent;
@@ -22,6 +22,7 @@ export component ImageDetailPage inherits Rectangle {
     in property <[DetailResultItem]> detail-results;
     in property <[DetailAttemptItem]> detail-attempts;
 
+    in-out property <length> preview-split: 460px;
     callback detail-tab-changed(string);
     callback detail-prev();
     callback detail-next();
@@ -47,12 +48,12 @@ export component ImageDetailPage inherits Rectangle {
         }
 
         HorizontalLayout {
-            spacing: 8px;
+            spacing: 0px;
             vertical-stretch: 1;
 
-            // Preview card
+            // Preview card — resizable via vertical splitter (user request)
             VerticalLayout {
-                width: 460px;
+                width: root.preview-split;
                 spacing: 6px;
                 Text { text: "Preview"; color: Theme.text; font-weight: 700; }
                 Card {
@@ -73,6 +74,12 @@ export component ImageDetailPage inherits Rectangle {
                     }
                 }
                 Text { text: root.detail-path; color: Theme.text-faint; font-size: Theme.font-xs; overflow: elide; }
+            }
+
+            SplitterH {
+                split <=> root.preview-split;
+                min-split: 260px;
+                max-split: parent.width - 420px;
             }
 
             // Tabs + content
@@ -122,28 +129,41 @@ export component ImageDetailPage inherits Rectangle {
                         font-size: Theme.font-md;
                     }
 
-                    // Laps tab
-                    if root.detail-tab == "laps": Rectangle {
+                    // Laps tab — header + rows aligned (common.slint TableCell parity)
+                    if root.detail-tab == "laps": VerticalLayout {
                         x: 4px; y: 4px;
                         width: parent.width - 8px;
                         height: parent.height - 8px;
+                        spacing: 4px;
+                        Rectangle {
+                            height: 26px;
+                            background: Theme.header-bg;
+                            border-radius: 4px;
+                            clip: true;
+                            HorizontalLayout {
+                                TableHeaderCell { label: "#"; width-pref: 36px; }
+                                TableHeaderCell { label: "Track"; width-pref: 180px; }
+                                TableHeaderCell { label: "Class"; width-pref: 70px; }
+                                TableHeaderCell { label: "Driver"; width-pref: 140px; }
+                                TableHeaderCell { label: "Car"; width-pref: 150px; }
+                                TableHeaderCell { label: "Best Lap"; width-pref: 110px; }
+                                TableHeaderCell { label: "Flags"; width-pref: 60px; flexible: true; resizable: true; }
+                            }
+                        }
                         dl := ListView {
-                            width: parent.width;
-                            height: parent.height;
+                            vertical-stretch: 1;
                             for lap[index] in root.detail-laps: Rectangle {
                                 height: 28px;
                                 width: dl.width;
                                 background: lap.best ? Theme.row-mine : (lap.dirty ? Theme.row-dirty : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent));
                                 HorizontalLayout {
-                                    padding-left: 10px;
-                                    spacing: 6px;
-                                    Text { text: lap.index; color: Theme.text-faint; width: 36px; vertical-alignment: center; }
-                                    Text { text: lap.track; color: Theme.text; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
-                                    Text { text: lap.class; color: Theme.text-muted; width: 54px; vertical-alignment: center; }
-                                    Text { text: lap.driver; color: lap.best ? Theme.warn : Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                    Text { text: lap.car; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                    Text { text: lap.time; color: lap.dirty ? Theme.danger : Theme.ok; width: 110px; vertical-alignment: center; }
-                                    Text { text: lap.flags; color: Theme.text-muted; width: 60px; vertical-alignment: center; }
+                                    TableCell { text: lap.index; width-pref: 36px; }
+                                    TableCell { text: lap.track; width-pref: 180px; }
+                                    TableCell { text: lap.class; width-pref: 70px; }
+                                    TableCell { text: lap.driver; width-pref: 140px; text-color: lap.best ? Theme.warn : Theme.text-muted; }
+                                    TableCell { text: lap.car; width-pref: 150px; }
+                                    TableCell { text: lap.time; width-pref: 110px; text-color: lap.dirty ? Theme.danger : Theme.ok; }
+                                    TableCell { text: lap.flags; width-pref: 60px; flexible: true; grid-line: false; }
                                 }
                             }
                         }
@@ -151,25 +171,37 @@ export component ImageDetailPage inherits Rectangle {
                     }
 
                     // Review cases tab
-                    if root.detail-tab == "reviews": Rectangle {
+                    if root.detail-tab == "reviews": VerticalLayout {
                         x: 4px; y: 4px;
                         width: parent.width - 8px;
                         height: parent.height - 8px;
+                        spacing: 4px;
+                        Rectangle {
+                            height: 26px;
+                            background: Theme.header-bg;
+                            border-radius: 4px;
+                            clip: true;
+                            HorizontalLayout {
+                                TableHeaderCell { label: "#"; width-pref: 48px; }
+                                TableHeaderCell { label: "Reason"; width-pref: 105px; }
+                                TableHeaderCell { label: "Driver"; width-pref: 140px; }
+                                TableHeaderCell { label: "Track"; width-pref: 150px; }
+                                TableHeaderCell { label: "Model"; width-pref: 150px; }
+                                TableHeaderCell { label: "Status"; width-pref: 90px; flexible: true; resizable: true; }
+                            }
+                        }
                         drl := ListView {
-                            width: parent.width;
-                            height: parent.height;
+                            vertical-stretch: 1;
                             for case in root.detail-reviews: Rectangle {
                                 height: Theme.row-h;
                                 width: drl.width;
                                 HorizontalLayout {
-                                    padding-left: 10px;
-                                    spacing: 6px;
-                                    Text { text: "#" + case.number; color: Theme.text-faint; width: 48px; vertical-alignment: center; }
-                                    Text { text: case.reason; color: Theme.warn; width: 105px; vertical-alignment: center; }
-                                    Text { text: case.driver; color: Theme.text; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                    Text { text: case.track; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                    Text { text: case.model-value; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                    Text { text: case.status; color: Theme.text-muted; width: 90px; vertical-alignment: center; }
+                                    TableCell { text: "#" + case.number; width-pref: 48px; }
+                                    TableCell { text: case.reason; width-pref: 105px; text-color: Theme.warn; }
+                                    TableCell { text: case.driver; width-pref: 140px; }
+                                    TableCell { text: case.track; width-pref: 150px; }
+                                    TableCell { text: case.model-value; width-pref: 150px; }
+                                    TableCell { text: case.status; width-pref: 90px; flexible: true; grid-line: false; }
                                 }
                             }
                         }
@@ -177,26 +209,39 @@ export component ImageDetailPage inherits Rectangle {
                     }
 
                     // Extractions tab
-                    if root.detail-tab == "extractions": Rectangle {
+                    if root.detail-tab == "extractions": VerticalLayout {
                         x: 4px; y: 4px;
                         width: parent.width - 8px;
                         height: parent.height - 8px;
+                        spacing: 4px;
+                        Rectangle {
+                            height: 26px;
+                            background: Theme.header-bg;
+                            border-radius: 4px;
+                            clip: true;
+                            HorizontalLayout {
+                                TableHeaderCell { label: "Status"; width-pref: 80px; }
+                                TableHeaderCell { label: "Run"; width-pref: 130px; }
+                                TableHeaderCell { label: "Model"; width-pref: 150px; }
+                                TableHeaderCell { label: "Attempts"; width-pref: 90px; }
+                                TableHeaderCell { label: "Duration"; width-pref: 100px; }
+                                TableHeaderCell { label: "Tokens"; width-pref: 110px; }
+                                TableHeaderCell { label: "Created"; width-pref: 150px; flexible: true; }
+                            }
+                        }
                         derl := ListView {
-                            width: parent.width;
-                            height: parent.height;
+                            vertical-stretch: 1;
                             for result in root.detail-results: Rectangle {
                                 height: Theme.row-h;
                                 width: derl.width;
                                 HorizontalLayout {
-                                    padding-left: 10px;
-                                    spacing: 6px;
-                                    Text { text: result.status; color: result.status == "ok" ? Theme.ok : Theme.danger; width: 80px; vertical-alignment: center; }
-                                    Text { text: result.run; color: Theme.text-faint; width: 130px; vertical-alignment: center; overflow: elide; }
-                                    Text { text: result.model; color: Theme.text; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
-                                    Text { text: result.attempts + " attempt(s)"; color: Theme.text-muted; width: 90px; vertical-alignment: center; }
-                                    Text { text: result.duration; color: Theme.text-muted; width: 100px; vertical-alignment: center; }
-                                    Text { text: result.tokens; color: Theme.text-muted; width: 110px; vertical-alignment: center; }
-                                    Text { text: result.created; color: Theme.text-faint; width: 150px; vertical-alignment: center; overflow: elide; }
+                                    TableCell { text: result.status; width-pref: 80px; text-color: result.status == "ok" ? Theme.ok : Theme.danger; }
+                                    TableCell { text: result.run; width-pref: 130px; }
+                                    TableCell { text: result.model; width-pref: 150px; }
+                                    TableCell { text: result.attempts + " attempt(s)"; width-pref: 90px; }
+                                    TableCell { text: result.duration; width-pref: 100px; }
+                                    TableCell { text: result.tokens; width-pref: 110px; }
+                                    TableCell { text: result.created; width-pref: 150px; flexible: true; grid-line: false; }
                                 }
                             }
                         }
@@ -204,27 +249,41 @@ export component ImageDetailPage inherits Rectangle {
                     }
 
                     // Attempts tab
-                    if root.detail-tab == "attempts": Rectangle {
+                    if root.detail-tab == "attempts": VerticalLayout {
                         x: 4px; y: 4px;
                         width: parent.width - 8px;
                         height: parent.height - 8px;
+                        spacing: 4px;
+                        Rectangle {
+                            height: 26px;
+                            background: Theme.header-bg;
+                            border-radius: 4px;
+                            clip: true;
+                            HorizontalLayout {
+                                TableHeaderCell { label: "#"; width-pref: 30px; }
+                                TableHeaderCell { label: "Reason"; width-pref: 90px; }
+                                TableHeaderCell { label: "Status"; width-pref: 74px; }
+                                TableHeaderCell { label: "Model"; width-pref: 90px; }
+                                TableHeaderCell { label: "Rejected"; width-pref: 140px; }
+                                TableHeaderCell { label: "Duration"; width-pref: 90px; }
+                                TableHeaderCell { label: "TPS"; width-pref: 90px; }
+                                TableHeaderCell { label: "Created"; width-pref: 150px; flexible: true; }
+                            }
+                        }
                         dal := ListView {
-                            width: parent.width;
-                            height: parent.height;
+                            vertical-stretch: 1;
                             for attempt in root.detail-attempts: Rectangle {
                                 height: Theme.row-h;
                                 width: dal.width;
                                 HorizontalLayout {
-                                    padding-left: 10px;
-                                    spacing: 6px;
-                                    Text { text: attempt.number; color: Theme.text-faint; width: 30px; vertical-alignment: center; }
-                                    Text { text: attempt.reason; color: Theme.warn; width: 90px; vertical-alignment: center; overflow: elide; }
-                                    Text { text: attempt.status; color: attempt.accepted ? Theme.ok : Theme.danger; width: 74px; vertical-alignment: center; }
-                                    Text { text: attempt.model; color: Theme.text-muted; width: 90px; vertical-alignment: center; overflow: elide; }
-                                    Text { text: attempt.rejected; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                    Text { text: attempt.duration; color: Theme.text-muted; width: 90px; vertical-alignment: center; }
-                                    Text { text: attempt.tps; color: Theme.text-muted; width: 90px; vertical-alignment: center; }
-                                    Text { text: attempt.created; color: Theme.text-faint; width: 150px; vertical-alignment: center; overflow: elide; }
+                                    TableCell { text: attempt.number; width-pref: 30px; }
+                                    TableCell { text: attempt.reason; width-pref: 90px; text-color: Theme.warn; }
+                                    TableCell { text: attempt.status; width-pref: 74px; text-color: attempt.accepted ? Theme.ok : Theme.danger; }
+                                    TableCell { text: attempt.model; width-pref: 90px; }
+                                    TableCell { text: attempt.rejected; width-pref: 140px; }
+                                    TableCell { text: attempt.duration; width-pref: 90px; }
+                                    TableCell { text: attempt.tps; width-pref: 90px; }
+                                    TableCell { text: attempt.created; width-pref: 150px; flexible: true; grid-line: false; }
                                 }
                             }
                         }

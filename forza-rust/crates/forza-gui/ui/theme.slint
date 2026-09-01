@@ -11,6 +11,7 @@ export global Theme {
     out property <color> header-bg: #eaecf0;     // table header strip
     out property <color> border: #d0d7de;        // hairline borders (Python BORDER)
     out property <color> divider: #e4e8ee;
+    out property <color> grid-line: #e7eaee;     // vertical column separators (Qt table grid)
 
     // ── Sidebar ──
     out property <color> sidebar-bg: #ffffff;
@@ -43,11 +44,21 @@ export global Theme {
     out property <color> row-external: #ddeefa;
 
     // ── Typography ──
-    out property <length> font-xs: 9px;
-    out property <length> font-sm: 11px;
-    out property <length> font-md: 12px;
-    out property <length> font-lg: 15px;
-    out property <length> font-xl: 17px;
+    // Scalable: base * ui-scale, clamped to min-font-px for QuadHD.
+    // ui-scale is driven from [ui] font_scale (1.0 default, 1.25 QuadHD comfort)
+    // and min-font-px from [ui] min_font_px (12 default).
+    in-out property <float> ui-scale: 1.0;
+    in-out property <int> ui-min-px: 12;
+    out property <length> _base-xs: 10px;
+    out property <length> _base-sm: 12px;
+    out property <length> _base-md: 13px;
+    out property <length> _min-px: 1px * root.ui-min-px;
+    out property <length> font-xs: Math.max(root._min-px * 0.92, root._base-xs * root.ui-scale);
+    out property <length> font-sm: Math.max(root._min-px, root._base-sm * root.ui-scale);
+    out property <length> font-md: Math.max(root._min-px + 1px, root._base-md * root.ui-scale);
+    out property <length> font-lg: Math.max(14px, 15px * root.ui-scale);
+    out property <length> font-title: Math.max(16px, 18px * root.ui-scale);
+    out property <length> font-xl: Math.max(15px, 17px * root.ui-scale);
 
     // ── Spacing & metrics ──
     out property <length> radius: 12px;

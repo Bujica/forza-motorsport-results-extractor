@@ -43,42 +43,98 @@ export component EmptyState inherits Text {
     wrap: word-wrap;
 }
 
-// One sortable column header cell: label + optional direction arrow.
+// Right-edge drag handle that resizes the owning header cell (Qt Interactive).
+// A double-click snaps the column back to its default width.
+component ColResizeEdge inherits TouchArea {
+    in-out property <length> target-width;
+    in property <length> min-w: 44px;
+    in property <length> max-w: 16777215px;
+    in property <length> default-width: 90px;
+    property <length> grab-offset: 3px;
+    width: 9px;
+    height: 100%;
+    mouse-cursor: MouseCursor.col-resize;
+    pointer-event(ev) => {
+        if ev.kind == PointerEventKind.down {
+            grab-offset = self.mouse-x;
+        }
+    }
+    moved => {
+        target-width = Math.clamp(target-width + (self.mouse-x - grab-offset),
+            min-w, max-w);
+    }
+    double-clicked => {
+        target-width = default-width;
+    }
+    Rectangle { // affordance exactly over the 1px grid line
+        x: parent.width - 1px;
+        width: 1px;
+        height: parent.height;
+        background: parent.pressed || parent.has-hover ? Theme.accent : Theme.border;
+    }
+}
+
+// One sortable column header cell: label + direction arrow. Uses the same
+// width contract as TableCell (col-min-width exact width, flexible absorbs
+// remaining space) so header and body columns line up. The arrow is pinned
+// to the cell's right edge so it never shifts the label. With resizable:true
+// (Qt Interactive) the user can drag the right edge; bind col-min-width with
+// <=> to a shared page property so body cells follow.
 export component SortHeaderCell inherits TouchArea {
     in property <string> label;
-    in property <length> col-min-width: 60px;
+    in-out property <length> col-min-width: 60px;
+    in property <bool> flexible: false;
+    in property <bool> resizable: false;
     in property <int> sort-state; // 0 none, 1 asc, 2 desc
     callback sort-clicked();
     min-width: root.col-min-width;
+    max-width: root.flexible ? 16777215px : root.col-min-width;
+    horizontal-stretch: root.flexible ? 1 : 0;
     height: 26px;
     clicked => { root.sort-clicked(); }
-    HorizontalLayout {
-        padding-left: 6px;
-        padding-right: 6px;
-        spacing: 4px;
-        alignment: start;
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: root.has-hover ? Theme.header-bg : transparent;
+        clip: true;
         Text {
+            x: 8px;
+            width: parent.width - 22px;
             text: root.label;
-            color: Theme.text-muted;
+            color: root.sort-state > 0 ? Theme.accent : Theme.text-muted;
             font-size: Theme.font-sm;
             font-weight: 700;
             vertical-alignment: center;
             overflow: elide;
         }
-        Text {
-            text: root.sort-state == 1 ? "▲" : root.sort-state == 2 ? "▼" : "";
+        if root.sort-state > 0: Text {
+            x: parent.width - 14px;
+            width: 12px;
+            text: root.sort-state == 1 ? "▲" : "▼";
             color: Theme.accent;
             font-size: Theme.font-xs;
             vertical-alignment: center;
+        }
+        Rectangle { // column grid line
+            x: parent.width - 1px;
+            width: 1px;
+            height: parent.height;
+            background: Theme.border;
+        }
+        if root.resizable: ColResizeEdge {
+            x: parent.width - self.width;
+            target-width <=> root.col-min-width;
         }
     }
 }
 
 // Standard filter-bar combo label + value pair.
+// combo-min-w allows per-filter resize-to-contents (Track 200 vs Class 70).
 export component FilterCombo inherits HorizontalLayout {
     in property <string> label;
     in property <[string]> model-value;
     in-out property <int> current-index;
+    in property <length> combo-min-w: 110px;
     callback selected(string);
     spacing: 4px;
     alignment: start;
@@ -89,7 +145,7 @@ export component FilterCombo inherits HorizontalLayout {
         vertical-alignment: center;
     }
     ComboBox {
-        min-width: 110px;
+        min-width: root.combo-min-w;
         model: root.model-value;
         current-index <=> root.current-index;
         selected(value) => { root.selected(value); }
@@ -150,5 +206,170 @@ export component BatchActionBar inherits HorizontalLayout {
         height: 28px;
         enabled: root.selected-count > 0;
         clicked => { root.delete(); }
+    }
+}
+
+// Body-row text cell carrying the column grid line on its right edge.
+export component GridText inherits Rectangle {
+    in property <string> text;
+    in property <color> text-color: Theme.text;
+    in property <length> font-size: Theme.font-md;
+    height: Theme.row-h;
+    clip: true;
+    Text {
+        width: parent.width;
+        height: parent.height;
+        vertical-alignment: center;
+        overflow: elide;
+        text: root.text;
+        color: root.text-color;
+        font-size: root.font-size;
+    }
+    Rectangle {
+        x: parent.width - 1px;
+        width: 1px;
+        height: parent.height;
+        background: Theme.border;
+    }
+}
+
+// ── Splitters (QSplitter parity) ────────────────────────────────────────────
+// Drag handle between two panes. The caller positions panes and binds `split`
+// (width of the left pane / height of the top pane); the handle only tracks
+// the drag delta incrementally, so it never needs global pointer coordinates.
+
+export component SplitterH inherits Rectangle {
+    in-out property <length> split;              // width of the left pane
+    in property <length> min-split: 160px;
+    in property <length> max-split: 100000px;
+    property <length> grab-offset: 3px;
+    width: 6px;
+    background: ta.has-hover ? Theme.accent-soft : transparent;
+    ta := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: MouseCursor.col-resize;
+        pointer-event(ev) => {
+            if ev.kind == PointerEventKind.down {
+                root.grab-offset = self.mouse-x;
+            }
+        }
+        moved => {
+            root.split = Math.clamp(self.mouse-x - root.grab-offset + root.split,
+                root.min-split, root.max-split);
+        }
+    }
+    Rectangle { // divider line
+        x: (parent.width - 1px) / 2;
+        width: 1px;
+        height: parent.height;
+        background: ta.pressed || ta.has-hover ? Theme.accent : Theme.divider;
+    }
+}
+
+export component SplitterV inherits Rectangle {
+    in-out property <length> split;              // height of the top pane
+    in property <length> min-split: 80px;
+    in property <length> max-split: 100000px;
+    property <length> grab-offset: 3px;
+    height: 6px;
+    background: ta.has-hover ? Theme.accent-soft : transparent;
+    ta := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: MouseCursor.row-resize;
+        pointer-event(ev) => {
+            if ev.kind == PointerEventKind.down {
+                root.grab-offset = self.mouse-y;
+            }
+        }
+        moved => {
+            root.split = Math.clamp(self.mouse-y - root.grab-offset + root.split,
+                root.min-split, root.max-split);
+        }
+    }
+    Rectangle { // divider line
+        y: (parent.height - 1px) / 2;
+        height: 1px;
+        width: parent.width;
+        background: ta.pressed || ta.has-hover ? Theme.accent : Theme.divider;
+    }
+}
+
+// ── Table cells with column grid (Qt QTableView parity) ────────────────────
+// Header and body must use the SAME width-pref/flexible values so columns
+// line up. Every cell draws a 1px right border (Qt table grid line).
+// Qt section resize modes: Fixed = default; Interactive = resizable:true on
+// the header cell (drag the right edge, width flows to body cells via the
+// page's shared in-out properties); Stretch = flexible:true. Qt's
+// ResizeToContents has no Slint equivalent (no text measurement in the DSL);
+// flexible columns are the approximation.
+
+export component TableCell inherits Rectangle {
+    in property <string> text;
+    in property <color> text-color: Theme.text;
+    in property <bool> bold: false;
+    in property <length> width-pref: 90px;   // exact width unless flexible
+    in property <bool> flexible: false;      // absorb remaining table width
+    in property <TextHorizontalAlignment> align: TextHorizontalAlignment.left;
+    in property <length> font-size: Theme.font-md;
+    in property <bool> grid-line: true;
+    min-width: root.width-pref;
+    max-width: root.flexible ? 16777215px : root.width-pref;
+    horizontal-stretch: root.flexible ? 1 : 0;
+    clip: true;
+    Text {
+        x: 8px;
+        width: parent.width - 14px;
+        text: root.text;
+        color: root.text-color;
+        font-size: root.font-size;
+        font-weight: root.bold ? 700 : 400;
+        horizontal-alignment: root.align;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    if root.grid-line: Rectangle {
+        x: parent.width - 1px;
+        width: 1px;
+        height: parent.height;
+        background: Theme.border;
+    }
+}
+
+// Non-sortable header cell (same geometry rules as TableCell). With
+// resizable:true the user can drag the right edge; bind width-pref with <=> to
+// a shared page property so body cells follow.
+export component TableHeaderCell inherits Rectangle {
+    in property <string> label;
+    in-out property <length> width-pref: 90px;
+    in property <bool> flexible: false;
+    in property <bool> resizable: false;
+    in property <TextHorizontalAlignment> align: TextHorizontalAlignment.left;
+    min-width: root.width-pref;
+    max-width: root.flexible ? 16777215px : root.width-pref;
+    horizontal-stretch: root.flexible ? 1 : 0;
+    height: 26px;
+    clip: true;
+    Text {
+        x: 8px;
+        width: parent.width - 14px;
+        text: root.label;
+        color: Theme.text-muted;
+        font-size: Theme.font-sm;
+        font-weight: 700;
+        horizontal-alignment: root.align;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    Rectangle {
+        x: parent.width - 1px;
+        width: 1px;
+        height: parent.height;
+        background: Theme.border;
+    }
+    if root.resizable: ColResizeEdge {
+        x: parent.width - self.width;
+        target-width <=> root.width-pref;
     }
 }

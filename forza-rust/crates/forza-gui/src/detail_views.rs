@@ -248,6 +248,9 @@ pub(crate) fn apply_settings(
             w.set_settings_message(outcome.message.clone().into());
             set_status(&w, &outcome.message);
         }
+        // Apply UI font scaling live (QuadHD comfort) from saved config
+        w.set_ui_scale(outcome.config.ui.font_scale as f32);
+        w.set_ui_min_px(outcome.config.ui.min_font_px as i32);
         if outcome.gamertag_recomputed {
             GAMERTAG.with(|slot| *slot.borrow_mut() = outcome.config.gamertag.clone());
             w.set_context_gamertag(outcome.config.gamertag.clone().into());
@@ -271,6 +274,9 @@ pub(crate) fn apply_settings(
     });
     if let Some(w) = ui.upgrade() {
         w.set_best_laps_gamertag(outcome.config.gamertag.clone().into());
+        // Also ensure theme updated even if gamertag not recomputed (font change only)
+        w.set_ui_scale(outcome.config.ui.font_scale as f32);
+        w.set_ui_min_px(outcome.config.ui.min_font_px as i32);
     }
     GAMERTAG.with(|slot| *slot.borrow_mut() = outcome.config.gamertag.clone());
 }

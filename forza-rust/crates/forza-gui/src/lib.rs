@@ -7,6 +7,7 @@
 //! cache) lives in UI-thread locals and is never shared across threads.
 
 pub mod detail_views;
+pub mod ui_persist;
 pub mod ui_state;
 pub mod worker;
 
@@ -489,6 +490,46 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     }
 
     let main = MainWindow::new()?;
+    // Apply UI font scaling from config (QuadHD comfort) via MainWindow -> Theme binding.
+    main.set_ui_scale(cfg.ui.font_scale as f32);
+    main.set_ui_min_px(cfg.ui.min_font_px as i32);
+    // Restore persisted window geometry and splitter/column sizes
+    if let Some(persisted) = ui_persist::load(config_path) {
+        if let (Some(w), Some(h)) = (persisted.window.width, persisted.window.height) {
+            main.window().set_size(slint::LogicalSize::new(w, h));
+        }
+        if let (Some(x), Some(y)) = (persisted.window.x, persisted.window.y) {
+            main.window().set_position(slint::LogicalPosition::new(x as f32, y as f32));
+        }
+        if let Some(v) = persisted.splits.images_table_split {
+            main.set_images_table_split(v);
+        }
+        if let Some(v) = persisted.splits.images_preview_h {
+            main.set_images_preview_h(v);
+        }
+        if let Some(v) = persisted.splits.review_main_split {
+            main.set_review_main_split(v);
+        }
+        if let Some(v) = persisted.splits.review_preview_h {
+            main.set_review_preview_h(v);
+        }
+        if let Some(v) = persisted.splits.detail_preview_split {
+            main.set_detail_preview_split(v);
+        }
+        if let Some(v) = persisted.splits.debug_table_h {
+            main.set_debug_table_h(v);
+        }
+        if let Some(v) = persisted.splits.process_progress_h {
+            main.set_process_progress_h(v);
+        }
+        // Column widths are persisted as lengths; apply if present
+        for (key, val) in persisted.columns {
+            match key.as_str() {
+                "images.name" => main.set_images_table_split(val), // fallback, actual col bindings not yet at MainWindow for per-col; kept for future
+                _ => {}
+            }
+        }
+    }
     main.set_app_version(forza_app::APP_VERSION.into());
     let inventory_model = Rc::new(VecModel::<ImageItem>::from(Vec::new()));
     main.set_images(ModelRc::from(inventory_model.clone()));
@@ -1813,6 +1854,11 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             }
             if page == "diagnostics" {
                 send_request(Request::RefreshOverview);
+                // Preload Image Debug cases so the embedded Diagnostics → Image Debug tab
+                // (which replaced the standalone image-debug page) is populated without a manual Refresh.
+                send_request(Request::ListImageDebugCases {
+                    filter: forza_app::ImageDebugFilter::default(),
+                });
             }
         });
     }
@@ -1897,7 +1943,8 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
         let ui = main.as_weak();
         main.on_open_image_debug(move |image_file_id| {
             if let Some(w) = ui.upgrade() {
-                w.set_page("image-debug".into());
+                w.set_page("diagnostics".into());
+                w.set_diagnostics_tab("debug".into());
             }
             enqueue(
                 Request::LoadImageDebugDetail {
@@ -1906,6 +1953,14 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 },
                 &ui,
                 "opening image debug…",
+            );
+            // Also ensure the debug cases list is loaded when navigating via detail link
+            enqueue(
+                Request::ListImageDebugCases {
+                    filter: forza_app::ImageDebugFilter::default(),
+                },
+                &ui,
+                "loading debug cases…",
             );
         });
     }
@@ -2260,6 +2315,39 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
         .map(|c| c.to_string().into())
         .collect();
         set_review_class_model(&main, classes);
+    }
+
+    // Persist window geometry and splitter state on close
+    {
+        let cfg_path = config_path.to_path_buf();
+        let weak = main.as_weak();
+        main.window().on_close_requested(move || {
+            if let Some(w) = weak.upgrade() {
+                let size = w.window().size();
+                let pos = w.window().position();
+                // size/position are PhysicalSize/PhysicalPosition; convert to logical via scale factor 1 for now
+                let state = ui_persist::UiPersist {
+                    window: ui_persist::WindowState {
+                        width: Some(size.width as f32),
+                        height: Some(size.height as f32),
+                        x: Some(pos.x),
+                        y: Some(pos.y),
+                    },
+                    splits: ui_persist::SplitState {
+                        images_table_split: Some(w.get_images_table_split()),
+                        images_preview_h: Some(w.get_images_preview_h()),
+                        review_main_split: Some(w.get_review_main_split()),
+                        review_preview_h: Some(w.get_review_preview_h()),
+                        detail_preview_split: Some(w.get_detail_preview_split()),
+                        debug_table_h: Some(w.get_debug_table_h()),
+                        process_progress_h: Some(w.get_process_progress_h()),
+                    },
+                    columns: std::collections::HashMap::new(),
+                };
+                let _ = ui_persist::save(&cfg_path, &state);
+            }
+            slint::CloseRequestResponse::HideWindow
+        });
     }
 
     // Initial load.

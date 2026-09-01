@@ -232,6 +232,19 @@ export component MainWindow inherits Window {
     in-out property <bool> dry-run-checked: false;
     in-out property <bool> force-checked: false;
     in-out property <bool> retry-checked: false;
+    in-out property <float> ui-scale: 1.0;
+    in-out property <int> ui-min-px: 13;
+    // Persisted layout state (window + splitters)
+    in-out property <length> images-table-split: 780px;
+    in-out property <length> images-preview-h: 300px;
+    in-out property <length> review-main-split: 760px;
+    in-out property <length> review-preview-h: 280px;
+    in-out property <length> detail-preview-split: 460px;
+    in-out property <length> debug-table-h: 300px;
+    in-out property <length> process-progress-h: 90px;
+
+    changed ui-scale => { Theme.ui-scale = root.ui-scale; }
+    changed ui-min-px => { Theme.ui-min-px = root.ui-min-px; }
 
     function nav-color(target: string) -> color {
         return root.page == target ? Theme.sidebar-active : transparent;
@@ -334,6 +347,8 @@ export component MainWindow inherits Window {
                 detail-lines: root.detail-lines;
                 detail-preview: root.detail-preview;
                 detail-has-preview: root.detail-has-preview;
+                table-split <=> root.images-table-split;
+                preview-h <=> root.images-preview-h;
                 refresh-requested(a, b, c, d, e, f) => { root.refresh-requested(a, b, c, d, e, f); }
                 scan-folder() => { root.scan-folder(); }
                 selection-changed(i) => { root.selection-changed(i); }
@@ -366,6 +381,7 @@ export component MainWindow inherits Window {
                 dry-run-checked <=> root.dry-run-checked;
                 force-checked <=> root.force-checked;
                 retry-checked <=> root.retry-checked;
+                progress-h <=> root.process-progress-h;
                 start-run(dry, force, retry) => { root.start-run(dry, force, retry); }
                 cancel-run() => { root.cancel-run(); }
                 toggle-pause() => { root.toggle-pause(); }
@@ -390,6 +406,8 @@ export component MainWindow inherits Window {
                 review-suggestions: root.review-suggestions;
                 review-preview: root.review-preview;
                 review-has-preview: root.review-has-preview;
+                main-split <=> root.review-main-split;
+                preview-h <=> root.review-preview-h;
                 review-filter-changed(status, reason, outcome, run) => { root.review-filter-changed(status, reason, outcome, run); }
                 review-selected(i) => { root.review-selected(i); }
                 review-apply(n, f, v) => { root.review-apply(n, f, v); }
@@ -431,7 +449,7 @@ export component MainWindow inherits Window {
                 refresh-requested() => { root.records-refresh-requested(); }
             }
 
-            // ══ Diagnostics page ══
+            // ══ Diagnostics page ══ (4 tabs parity Python: overview / Image Debug / DB Doctor / Logs)
             if root.page == "diagnostics": DiagnosticsPage {
                 doctor-report: root.doctor-report;
                 doctor-overall: root.doctor-overall;
@@ -455,13 +473,6 @@ export component MainWindow inherits Window {
                 overview-schema: root.overview-schema;
                 overview-inventory: root.overview-inventory;
                 overview-review: root.overview-review;
-                doctor-requested() => { root.doctor-requested(); }
-                rebuild-requested() => { root.rebuild-requested(); }
-                overview-requested() => { root.overview-requested(); }
-            }
-
-            // ══ Image Debug page ══
-            if root.page == "image-debug": ImageDebugPage {
                 debug-cases: root.debug-cases;
                 debug-results: root.debug-results;
                 debug-result-labels: root.debug-result-labels;
@@ -489,14 +500,28 @@ export component MainWindow inherits Window {
                 debug-model-options: root.debug-model-options;
                 debug-prompt-options: root.debug-prompt-options;
                 debug-run-options: root.debug-run-options;
+                debug-table-h <=> root.debug-table-h;
+                app-log-text: root.app-log-text;
+                error-log-text: root.error-log-text;
+                logs-tab <=> root.logs-tab;
+                logs-search <=> root.logs-search;
+                logs-status: root.logs-status;
+                doctor-requested() => { root.doctor-requested(); }
+                rebuild-requested() => { root.rebuild-requested(); }
+                overview-requested() => { root.overview-requested(); }
                 debug-refresh-requested() => { root.debug-refresh-requested(); }
-                debug-filter-changed(s, b, m, p, r) => { root.debug-filter-changed(s, b, m, p, r); }
                 debug-case-selected(i) => { root.debug-case-selected(i); }
                 debug-result-selected(id) => { root.debug-result-selected(id); }
                 debug-open-image-detail() => { root.debug-open-image-detail(); }
+                debug-filter-changed(s,b,m,p,r) => { root.debug-filter-changed(s,b,m,p,r); }
+                logs-reload-requested() => { root.logs-reload-requested(); }
+                logs-clear-requested(which) => { root.logs-clear-requested(which); }
+                logs-open-folder() => { root.logs-open-folder(); }
+                logs-search-changed(text) => { root.logs-search-changed(text); }
+                page-change-requested(page) => { root.page = page; root.page-changed(page); }
             }
 
-            // ══ Logs page ══
+            // Logs page (kept for backward route, but primary access is Diagnostics → Logs tab)
             if root.page == "logs": LogsPage {
                 app-log-text: root.app-log-text;
                 error-log-text: root.error-log-text;
@@ -527,6 +552,7 @@ export component MainWindow inherits Window {
                 detail-reviews: root.detail-reviews;
                 detail-results: root.detail-results;
                 detail-attempts: root.detail-attempts;
+                preview-split <=> root.detail-preview-split;
                 detail-tab-changed(t) => { root.detail-tab-changed(t); }
                 detail-prev() => { root.detail-prev(); }
                 detail-next() => { root.detail-next(); }

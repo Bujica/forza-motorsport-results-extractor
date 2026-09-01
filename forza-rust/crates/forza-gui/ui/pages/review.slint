@@ -4,7 +4,7 @@
 import { Button, ComboBox, LineEdit, ListView, TextEdit } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { ReviewItem } from "../models.slint";
-import { Card, EmptyState } from "../components/common.slint";
+import { Card, EmptyState, SplitterH, SplitterV, TableHeaderCell, TableCell } from "../components/common.slint";
 
 export component ReviewPage inherits Rectangle {
     background: transparent;
@@ -30,6 +30,12 @@ export component ReviewPage inherits Rectangle {
     in property <string> review-suggestions;
     in property <image> review-preview;
     in property <bool> review-has-preview;
+    // Layout state (QSplitter parity): left pane width, preview height.
+    in-out property <length> main-split: 760px;
+    in-out property <length> preview-h: 280px;
+    // 13px base: Decision 195 Interactive, Driver 150 Interactive
+    in-out property <length> col-decision-w: 195px;
+    in-out property <length> col-driver-w: 150px;
 
     callback review-filter-changed(string, string, string, string);
     callback review-selected(int);
@@ -111,58 +117,87 @@ export component ReviewPage inherits Rectangle {
             Rectangle { horizontal-stretch: 1; }
         }
 
-        HorizontalLayout {
-            spacing: 8px;
+        // Preview + queue | details — draggable split (Python QSplitter 58/42).
+        Rectangle {
             vertical-stretch: 1;
 
-            // Preview (top) + case queue (bottom)
+            // ── Left: preview (top) + case queue (bottom) ──
             VerticalLayout {
-                horizontal-stretch: 3;
+                x: 0;
+                width: root.main-split;
+                height: 100%;
                 spacing: 6px;
-                Card {
+                Rectangle {
                     clip: true;
-                    vertical-stretch: 3;
-                    if root.review-has-preview: Image {
-                        width: parent.width;
-                        height: parent.height;
-                        source: root.review-preview;
-                        image-fit: contain;
+                    height: root.preview-h;
+                    Card {
+                        width: 100%;
+                        height: 100%;
+                        if root.review-has-preview: Image {
+                            width: parent.width;
+                            height: parent.height;
+                            source: root.review-preview;
+                            image-fit: contain;
+                        }
+                        if !root.review-has-preview: EmptyState {
+                            text: "Select a case to preview the image.";
+                        }
                     }
-                    if !root.review-has-preview: EmptyState {
-                        text: "Select a case to preview the image.";
-                    }
+                }
+                // Drag handle: preview ↔ case queue (Python 60/40).
+                SplitterV {
+                    split <=> root.preview-h;
+                    min-split: 120px;
+                    max-split: parent.height - 220px;
                 }
                 Card {
                     clip: true;
-                    vertical-stretch: 2;
-                    qlv := ListView {
-                        x: 4px; y: 4px;
-                        width: parent.width - 8px;
-                        height: parent.height - 8px;
-                        for case[index] in root.reviews: TouchArea {
-                            height: 34px;
-                            width: qlv.width;
-                            clicked => {
-                                root.review-selected-index = index;
-                                root.review-selected(index);
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        padding: 4px;
+                        spacing: 4px;
+                        // Column headers (Python ReviewTableModel widths).
+                        Rectangle {
+                            height: 26px;
+                            background: Theme.header-bg;
+                            border-radius: 4px;
+                            clip: true;
+                            HorizontalLayout {
+                                TableHeaderCell { label: "#"; width-pref: 48px; }
+                                TableHeaderCell { label: "Outcome"; width-pref: 100px; }
+                                TableHeaderCell { label: "Reason"; width-pref: 105px; }
+                                TableHeaderCell { label: "Trigger"; width-pref: 110px; }
+                                TableHeaderCell { label: "Decision"; width-pref <=> root.col-decision-w; resizable: true; }
+                                TableHeaderCell { label: "Driver"; width-pref <=> root.col-driver-w; resizable: true; }
+                                TableHeaderCell { label: "Lap"; width-pref: 115px; flexible: true; resizable: true; }
                             }
-                            Rectangle {
-                                x: 1px; y: 1px;
-                                width: parent.width - 2px;
-                                height: parent.height - 2px;
-                                border-radius: 4px;
-                                background: index == root.review-selected-index ? Theme.selection-bg
-                                    : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent);
-                                HorizontalLayout {
-                                    padding-left: 8px;
-                                    spacing: 6px;
-                                    Text { text: "#" + case.number; color: Theme.text-muted; min-width: 44px; vertical-alignment: center; }
-                                    Text { text: case.outcome; color: Theme.text-faint; min-width: 66px; vertical-alignment: center; }
-                                    Text { text: case.reason; color: Theme.warn; min-width: 78px; vertical-alignment: center; overflow: elide; }
-                                    Text { text: case.trigger; color: Theme.text-faint; min-width: 88px; vertical-alignment: center; overflow: elide; }
-                                    Text { text: case.decision; color: Theme.text; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; }
-                                    Text { text: case.driver; color: Theme.text-muted; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                                    Text { text: case.lap; color: case.lap-dirty ? Theme.danger : Theme.text-muted; min-width: 84px; vertical-alignment: center; overflow: elide; }
+                        }
+                        qlv := ListView {
+                            vertical-stretch: 1;
+                            for case[index] in root.reviews: TouchArea {
+                                height: Theme.row-h;
+                                width: qlv.width;
+                                clicked => {
+                                    root.review-selected-index = index;
+                                    root.review-selected(index);
+                                }
+                                Rectangle {
+                                    x: 1px; y: 1px;
+                                    width: parent.width - 2px;
+                                    height: parent.height - 2px;
+                                    border-radius: 4px;
+                                    background: index == root.review-selected-index ? Theme.selection-bg
+                                        : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent);
+                                    HorizontalLayout {
+                                        TableCell { text: "#" + case.number; width-pref: 48px; text-color: Theme.text-muted; }
+                                        TableCell { text: case.outcome; width-pref: 100px; text-color: Theme.text-faint; }
+                                        TableCell { text: case.reason; width-pref: 105px; text-color: Theme.warn; }
+                                        TableCell { text: case.trigger; width-pref: 110px; text-color: Theme.text-faint; }
+                                        TableCell { text: case.decision; width-pref: root.col-decision-w; text-color: Theme.text-muted; }
+                                        TableCell { text: case.driver; width-pref: root.col-driver-w; text-color: Theme.text-muted; }
+                                        TableCell { text: case.lap; width-pref: 115px; flexible: true;
+                                            text-color: case.lap-dirty ? Theme.danger : Theme.text-muted; grid-line: false; }
+                                    }
                                 }
                             }
                         }
@@ -171,10 +206,20 @@ export component ReviewPage inherits Rectangle {
                 }
             }
 
-            // Details + actions
+            // Drag handle: left pane ↔ details.
+            SplitterH {
+                x: root.main-split;
+                height: 100%;
+                split <=> root.main-split;
+                min-split: 480px;
+                max-split: parent.width - 320px;
+            }
+
+            // ── Right: details + actions ──
             VerticalLayout {
-                min-width: 320px;
-                width: 42%;
+                x: root.main-split + 6px;
+                width: parent.width - root.main-split - 6px;
+                height: 100%;
                 spacing: 6px;
                 FocusScope {
                     key-pressed(event) => {
@@ -213,7 +258,7 @@ export component ReviewPage inherits Rectangle {
                                 width: parent.width - 16px;
                                 height: parent.height - 12px;
                                 read-only: true;
-                                font-size: Theme.font-sm;
+                                font-size: Theme.font-md;
                                 wrap: word-wrap;
                                 text: root.review-detail-lines;
                             }
