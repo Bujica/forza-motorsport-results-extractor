@@ -43,7 +43,6 @@ export component ReviewPage inherits Rectangle {
     callback review-ignore(int);
     callback review-reopen(int);
     callback review-open-detail(int);
-    callback review-step(int);
 
     function reason-note(reason: string) -> string {
         return reason == "dirty_lap"
@@ -81,6 +80,7 @@ export component ReviewPage inherits Rectangle {
             height: 32px;
             spacing: 8px;
             Text { text: "Review"; color: Theme.text; font-weight: 700; min-width: 52px; vertical-alignment: center; }
+            Text { text: "Status:"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
             ComboBox {
                 min-width: 100px;
                 model: ["open", "resolved", "all"];
@@ -166,7 +166,7 @@ export component ReviewPage inherits Rectangle {
                                 TableHeaderCell { label: "#"; width-pref: 48px; }
                                 TableHeaderCell { label: "Outcome"; width-pref: 100px; }
                                 TableHeaderCell { label: "Reason"; width-pref: 105px; }
-                                TableHeaderCell { label: "Trigger"; width-pref: 110px; }
+                                TableHeaderCell { label: "Trigger"; width-pref: 160px; }
                                 TableHeaderCell { label: "Decision"; width-pref <=> root.col-decision-w; resizable: true; }
                                 TableHeaderCell { label: "Driver"; width-pref <=> root.col-driver-w; resizable: true; }
                                 TableHeaderCell { label: "Lap"; width-pref: 115px; flexible: true; resizable: true; }
@@ -192,7 +192,7 @@ export component ReviewPage inherits Rectangle {
                                         TableCell { text: "#" + case.number; width-pref: 48px; text-color: Theme.text-muted; }
                                         TableCell { text: case.outcome; width-pref: 100px; text-color: Theme.text-faint; }
                                         TableCell { text: case.reason; width-pref: 105px; text-color: Theme.warn; }
-                                        TableCell { text: case.trigger; width-pref: 110px; text-color: Theme.text-faint; }
+                                        TableCell { text: case.trigger; width-pref: 160px; text-color: Theme.text-faint; }
                                         TableCell { text: case.decision; width-pref: root.col-decision-w; text-color: Theme.text-muted; }
                                         TableCell { text: case.driver; width-pref: root.col-driver-w; text-color: Theme.text-muted; }
                                         TableCell { text: case.lap; width-pref: 115px; flexible: true;
@@ -202,7 +202,7 @@ export component ReviewPage inherits Rectangle {
                             }
                         }
                     }
-                    if root.reviews.length == 0: EmptyState { text: "Review queue is clear."; }
+                    if root.reviews.length == 0: EmptyState { width: parent.width - 24px; text: "Review queue is clear."; }
                 }
             }
 

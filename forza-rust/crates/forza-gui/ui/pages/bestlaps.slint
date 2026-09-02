@@ -42,6 +42,8 @@ export component BestLapsPage inherits Rectangle {
     in-out property <length> col-weather-w: 85px;
     in-out property <length> col-temp-w: 85px;
     in-out property <length> col-source-w: 140px;
+    in-out property <int> selected-best-index: -1;
+    changed best-laps => { root.selected-best-index = -1; }
 
     callback bestlaps-requested();
     callback rebuild-requested();
@@ -58,16 +60,12 @@ export component BestLapsPage inherits Rectangle {
             root.driver-filter, root.car-filter, root.lap-filter, root.source-filter, root.best-laps-only-mine);
     }
 
-    function class-color(c: string) -> color {
-        return c == "E" ? #C7368E : c == "D" ? #127F85 : c == "C" ? #BB7A00 : c == "B" ? #C54E00 : c == "A" ? #992800 : c == "TCR" ? #1E90FF : c == "S" ? #613BBF : c == "R" ? #105DAB : c == "P" ? #0C8540 : c == "X" ? #006000 : c == "Mixed" ? #555555 : #000000;
-    }
-
     VerticalLayout {
         spacing: 14px;
 
-        // ── Action card (banner + buttons) ──
+        // ── Action card (banner + buttons) — height from content: 30px
+        // buttons + 2x card padding overflowed the old fixed 48px card.
         Card {
-            height: 48px;
             HorizontalLayout {
                 padding: 14px;
                 spacing: 8px;
@@ -98,7 +96,7 @@ export component BestLapsPage inherits Rectangle {
                 Text { text: "Track"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; height: 28px; }
                 ComboBox { model: root.filter-tracks; current-value: root.track-filter; height: 28px; min-width: 260px; selected(v) => { root.track-filter = v; root.emit-filter(); } }
                 Text { text: "Class"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; height: 28px; }
-                ComboBox { model: root.filter-classes; current-value: root.class-filter; height: 28px; min-width: 70px; selected(v) => { root.class-filter = v; root.emit-filter(); } }
+                ComboBox { model: root.filter-classes; current-value: root.class-filter; height: 28px; min-width: 100px; selected(v) => { root.class-filter = v; root.emit-filter(); } }
                 Text { text: "Weather"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; height: 28px; }
                 ComboBox { model: root.filter-weathers; current-value: root.weather-filter; height: 28px; min-width: 90px; selected(v) => { root.weather-filter = v; root.emit-filter(); } }
                 Text { text: "Driver"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; height: 28px; }
@@ -127,7 +125,7 @@ export component BestLapsPage inherits Rectangle {
                         padding-left: 4px;
                         spacing: 8px;
                         Text { text: root.best-laps-summary; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; horizontal-stretch: 1; }
-                        Button { text: "Image details"; height: 28px; clicked => { root.detail-requested(""); } }
+                        Button { text: "Image details"; height: 28px; enabled: root.selected-best-index >= 0 && root.selected-best-index < root.best-laps.length && !root.best-laps[root.selected-best-index].is-group && root.best-laps[root.selected-best-index].image-file-id != ""; clicked => { root.detail-requested(root.best-laps[root.selected-best-index].image-file-id); } }
                     }
                 }
                 Card {
@@ -156,13 +154,21 @@ export component BestLapsPage inherits Rectangle {
                             for lap[index] in root.best-laps: Rectangle {
                                 height: lap.is-group ? 22px : Theme.row-h;
                                 horizontal-stretch: 1;
-                                background: lap.is-group ? root.class-color(lap.class) : (lap.mine ? Theme.row-mine : (lap.external ? Theme.row-external : (lap.dirty ? Theme.row-dirty : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent))));
+                                background: root.selected-best-index == index ? Theme.selection-bg : (lap.is-group ? Theme.class-color(lap.class) : (lap.mine ? Theme.row-mine : (lap.external ? Theme.row-external : (lap.dirty ? Theme.row-dirty : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent)))));
+                                TouchArea {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    clicked => { if !lap.is-group { root.selected-best-index = index; } }
+                                }
                                 if lap.is-group: HorizontalLayout {
                                     padding-left: 8px;
+                                    padding-right: 8px;
                                     spacing: 8px;
-                                    Text { text: lap.track + " · " + lap.class; color: #ffffff; font-weight: 700; font-size: Theme.font-md; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                                    Rectangle { horizontal-stretch: 1; }
-                                    Text { text: lap.group-count + " lap(s)"; color: #ffffff; font-size: Theme.font-sm; vertical-alignment: center; }
+                                    // Title takes all remaining width — the old
+                                    // stretch-1 spacer split it ~50/50 and forced
+                                    // premature eliding even with free space.
+                                    Text { text: lap.track + " · " + lap.class; color: Theme.text-on-dark; font-weight: 700; font-size: Theme.font-md; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                                    Text { text: lap.group-count + " lap(s)"; color: Theme.text-on-dark; font-size: Theme.font-sm; vertical-alignment: center; }
                                 }
                                 if !lap.is-group: HorizontalLayout {
                                     TableCell { text: lap.driver; width-pref: root.col-driver-w; text-color: lap.mine ? Theme.warn : Theme.text; }
@@ -176,6 +182,7 @@ export component BestLapsPage inherits Rectangle {
                         }
                     }
                     if root.best-laps.length == 0: EmptyState {
+                        width: parent.width - 24px;
                         text: "No best laps found. Run the pipeline or adjust filters.";
                     }
                 }

@@ -142,24 +142,6 @@ fn update_selection_summary(ui: &MainWindow) {
     );
 }
 
-#[allow(dead_code)]
-fn class_color(class: &str) -> &'static str {
-    match class {
-        "E" => "#C7368E",
-        "D" => "#127F85",
-        "C" => "#BB7A00",
-        "B" => "#C54E00",
-        "A" => "#992800",
-        "TCR" => "#1E90FF",
-        "S" => "#613BBF",
-        "R" => "#105DAB",
-        "P" => "#0C8540",
-        "X" => "#006000",
-        "Mixed" => "#555555",
-        _ => "#000000",
-    }
-}
-
 fn apply_bestlaps_filters(ui: &MainWindow) {
     let gamertag_lower = GAMERTAG.with(|s| s.borrow().clone().to_lowercase());
     let (all_rows, filter, sort) = (
@@ -255,6 +237,7 @@ fn apply_bestlaps_filters(ui: &MainWindow) {
                 external: false,
                 is_group: true,
                 group_count: cnt,
+                image_file_id: "".into(),
             });
             current_key = Some(key);
         }
@@ -281,6 +264,7 @@ fn apply_bestlaps_filters(ui: &MainWindow) {
             external: r.is_external,
             is_group: false,
             group_count: 0,
+            image_file_id: r.image_file_id.clone().unwrap_or_default().into(),
         });
     }
     BESTLAP_MODEL.with(|slot| {
@@ -403,6 +387,45 @@ fn open_image_detail_at(ui: &slint::Weak<MainWindow>, index: i32) {
     }
 }
 
+/// Primary display work area in physical px (0 when unknown).
+#[cfg(windows)]
+fn primary_screen_px() -> (i32, i32) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, SM_CXFULLSCREEN, SM_CYFULLSCREEN,
+    };
+    // Trivial win32 query; no invariants to uphold.
+    (
+        unsafe { GetSystemMetrics(SM_CXFULLSCREEN) },
+        unsafe { GetSystemMetrics(SM_CYFULLSCREEN) },
+    )
+}
+
+#[cfg(not(windows))]
+fn primary_screen_px() -> (i32, i32) {
+    (0, 0)
+}
+
+/// Python-parity first-launch size: min(92% work area width, 1600) x
+/// min(88% work area height, 950). Falls back to the Window's preferred
+/// size when the display metrics are unavailable or implausible.
+fn first_launch_window_size(main: &MainWindow) -> (f32, f32) {
+    let (sw, sh) = primary_screen_px();
+    if sw < 800 || sh < 600 {
+        return (1400.0, 800.0);
+    }
+    let sf = main.window().scale_factor().max(0.5);
+    let (lw, lh) = (sw as f32 / sf, sh as f32 / sf);
+    if !(900.0..=8000.0).contains(&lw) || !(600.0..=5000.0).contains(&lh) {
+        return (1400.0, 800.0);
+    }
+    ((lw * 0.92).min(1600.0), (lh * 0.88).min(950.0))
+}
+
+/// Clamp a restored splitter length into a sane band around `base`.
+fn clamp_split(value: f32, base: f32) -> f32 {
+    value.clamp(150.0, (base - 150.0).max(150.0))
+}
+
 /// Launch the GUI. Blocks until the window closes.
 pub fn run(config_path: &Path) -> anyhow::Result<()> {
     let (mut cfg, warnings) = forza_config::load_config(config_path, false)?;
@@ -493,41 +516,93 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     // Apply UI font scaling from config (QuadHD comfort) via MainWindow -> Theme binding.
     main.set_ui_scale(cfg.ui.font_scale as f32);
     main.set_ui_min_px(cfg.ui.min_font_px as i32);
-    // Restore persisted window geometry and splitter/column sizes
-    if let Some(persisted) = ui_persist::load(config_path) {
-        if let (Some(w), Some(h)) = (persisted.window.width, persisted.window.height) {
-            main.window().set_size(slint::LogicalSize::new(w, h));
-        }
-        if let (Some(x), Some(y)) = (persisted.window.x, persisted.window.y) {
-            main.window().set_position(slint::LogicalPosition::new(x as f32, y as f32));
-        }
-        if let Some(v) = persisted.splits.images_table_split {
-            main.set_images_table_split(v);
-        }
-        if let Some(v) = persisted.splits.images_preview_h {
-            main.set_images_preview_h(v);
-        }
-        if let Some(v) = persisted.splits.review_main_split {
-            main.set_review_main_split(v);
-        }
-        if let Some(v) = persisted.splits.review_preview_h {
-            main.set_review_preview_h(v);
-        }
-        if let Some(v) = persisted.splits.detail_preview_split {
-            main.set_detail_preview_split(v);
-        }
-        if let Some(v) = persisted.splits.debug_table_h {
-            main.set_debug_table_h(v);
-        }
-        if let Some(v) = persisted.splits.process_progress_h {
-            main.set_process_progress_h(v);
-        }
-        // Column widths are persisted as lengths; apply if present
-        for (key, val) in persisted.columns {
-            match key.as_str() {
-                "images.name" => main.set_images_table_split(val), // fallback, actual col bindings not yet at MainWindow for per-col; kept for future
-                _ => {}
+    // Restore persisted window geometry and splitter/column sizes. Values are
+    // stored in logical px (already divided by the scale factor at save time)
+    // and splitter lengths as ratios of the window box, so a layout saved on
+    // one display still lands proportionally on another.
+    let persisted = ui_persist::load(config_path);
+    let (base_w, base_h) = match &persisted {
+        Some(p) if p.window.width.is_some() && p.window.height.is_some() => {
+            let w = p.window.width.unwrap_or(1400.0);
+            let h = p.window.height.unwrap_or(800.0);
+            let (sw, sh) = primary_screen_px();
+            let sf = main.window().scale_factor().max(0.5);
+            let max_w = if sw > 0 { sw as f32 / sf } else { w };
+            let max_h = if sh > 0 { sh as f32 / sf } else { h };
+            let cw = w.clamp(1240.0, max_w.max(1240.0));
+            let ch = h.clamp(680.0, max_h.max(680.0));
+            main.window().set_size(slint::LogicalSize::new(cw, ch));
+            if let (Some(x), Some(y)) = (p.window.x, p.window.y) {
+                main.window().set_position(slint::LogicalPosition::new(x as f32, y as f32));
             }
+            if p.window.maximized.unwrap_or(false) {
+                main.window().set_maximized(true);
+            }
+            (cw, ch)
+        }
+        _ => {
+            let (fw, fh) = first_launch_window_size(&main);
+            main.window().set_size(slint::LogicalSize::new(fw, fh));
+            (fw, fh)
+        }
+    };
+    if let Some(persisted) = persisted {
+        let ratio = |v: Option<f32>| v.filter(|r| (0.05..=0.95).contains(r));
+        if let Some(r) = ratio(persisted.splits.images_table_split_ratio) {
+            main.set_images_table_split(clamp_split(r * base_w, base_w));
+        }
+        if let Some(r) = ratio(persisted.splits.images_preview_h_ratio) {
+            main.set_images_preview_h(clamp_split(r * base_h, base_h));
+        }
+        if let Some(r) = ratio(persisted.splits.review_main_split_ratio) {
+            main.set_review_main_split(clamp_split(r * base_w, base_w));
+        }
+        if let Some(r) = ratio(persisted.splits.review_preview_h_ratio) {
+            main.set_review_preview_h(clamp_split(r * base_h, base_h));
+        }
+        if let Some(r) = ratio(persisted.splits.detail_preview_split_ratio) {
+            main.set_detail_preview_split(clamp_split(r * base_w, base_w));
+        }
+        if let Some(r) = ratio(persisted.splits.debug_table_h_ratio) {
+            main.set_debug_table_h(clamp_split(r * base_h, base_h));
+        }
+        if let Some(r) = ratio(persisted.splits.process_progress_h_ratio) {
+            main.set_process_progress_h(clamp_split(r * base_h, base_h));
+        }
+        // Column widths are persisted as logical lengths keyed per column.
+        let col = |k: &str| {
+            persisted
+                .columns
+                .get(k)
+                .copied()
+                .map(|v| v.clamp(44.0, 2000.0))
+        };
+        if let Some(v) = col("images.name") {
+            main.set_images_col_name_w(v);
+        }
+        if let Some(v) = col("images.semantic") {
+            main.set_images_col_semantic_w(v);
+        }
+        if let Some(v) = col("images.best") {
+            main.set_images_col_best_w(v);
+        }
+        if let Some(v) = col("review.decision") {
+            main.set_review_col_decision_w(v);
+        }
+        if let Some(v) = col("review.driver") {
+            main.set_review_col_driver_w(v);
+        }
+        if let Some(v) = col("bestlaps.driver") {
+            main.set_bestlaps_col_driver_w(v);
+        }
+        if let Some(v) = col("bestlaps.car") {
+            main.set_bestlaps_col_car_w(v);
+        }
+        if let Some(v) = col("bestlaps.source") {
+            main.set_bestlaps_col_source_w(v);
+        }
+        if let Some(v) = col("debug.image") {
+            main.set_debug_col_image_w(v);
         }
     }
     main.set_app_version(forza_app::APP_VERSION.into());
@@ -625,6 +700,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                                 update_image_selection(&w);
                                 update_selection_summary(&w);
                                 w.set_selected_index(-1);
+                                w.set_scan_status("".into());
                                 w.set_status_text(
                                     format!("{count} image(s) [{filter_label}]").into(),
                                 );
@@ -746,11 +822,17 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                                 w.set_review_reasons(options_model(&options.reasons));
                                 w.set_review_outcomes(options_model(&options.outcomes));
                                 w.set_review_runs(options_model(&options.runs));
-                                w.set_review_selected_index(if entries.is_empty() {
+                                // Auto-advance: keep current index if still valid, else clamp to 0; -1 if empty (F5)
+                                let cur = REVIEW_INDEX.with(|s| *s.borrow());
+                                let next_idx = if entries.is_empty() {
                                     -1
+                                } else if cur >= 0 && (cur as usize) < entries.len() {
+                                    cur as i32
                                 } else {
                                     0
-                                });
+                                };
+                                w.set_review_selected_index(next_idx);
+                                REVIEW_INDEX.with(|s| *s.borrow_mut() = next_idx as isize);
                                 apply_review_detail(&w);
                                 w.set_status_text(
                                     format!("{} review case(s) [{}]", entries.len(), filter.bucket)
@@ -813,13 +895,19 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         });
                     }
                     if ok {
-                        // Refresh reviews + best laps after any decision.
-                        send_request(Request::ListReviews {
-                            filter: ReviewQueueFilter {
-                                bucket: "open".into(),
-                                ..Default::default()
-                            },
+                        // Auto-advance within filtered queue (F5): reload with current filter, preserve index
+                        let filter = REVIEW_FILTER.with(|s| s.borrow().clone());
+                        // Advance index to next case before reload (same index now points to next after removal)
+                        REVIEW_INDEX.with(|s| {
+                            let cur = *s.borrow();
+                            let len = REVIEW_CASES_CACHE.with(|c| c.borrow().len());
+                            if len > 0 && cur >= 0 && (cur as usize) < len {
+                                // keep same index (next case shifts into place)
+                            } else if cur >= len as isize {
+                                *s.borrow_mut() = (len as isize - 1).max(0);
+                            }
                         });
+                        send_request(Request::ListReviews { filter });
                         send_request(Request::ListBestLaps);
                     }
                 }
@@ -1320,6 +1408,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
         main.on_scan_folder(move || {
             if let Some(w) = ui.upgrade() {
                 set_status(&w, "Syncing input folder...");
+                w.set_scan_status("Syncing input folder...".into());
             }
             let filter = current_inventory_filter();
             INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(true));
@@ -1775,6 +1864,26 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 },
                 &ui,
                 "importing external records…",
+            );
+        });
+    }
+    {
+        let ui = main.as_weak();
+        main.on_bestlaps_detail_requested(move |image_file_id| {
+            if image_file_id.is_empty() {
+                return;
+            }
+            if let Some(w) = ui.upgrade() {
+                w.set_page("image-detail".into());
+                w.set_detail_loaded(false);
+                set_status(&w, "loading image detail…");
+            }
+            enqueue(
+                Request::LoadImageDetail {
+                    image_id: image_file_id.to_string(),
+                },
+                &ui,
+                "loading image detail…",
             );
         });
     }
@@ -2323,26 +2432,45 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
         let weak = main.as_weak();
         main.window().on_close_requested(move || {
             if let Some(w) = weak.upgrade() {
+                let sf = w.window().scale_factor().max(0.5);
+                // size/position come back in physical px; store logical so the
+                // saved state survives DPI changes between sessions.
                 let size = w.window().size();
                 let pos = w.window().position();
-                // size/position are PhysicalSize/PhysicalPosition; convert to logical via scale factor 1 for now
+                let lw = size.width as f32 / sf;
+                let lh = size.height as f32 / sf;
+                let ratio_h = |v: f32| (v / lw).clamp(0.05, 0.95);
+                let ratio_v = |v: f32| (v / lh).clamp(0.05, 0.95);
                 let state = ui_persist::UiPersist {
                     window: ui_persist::WindowState {
-                        width: Some(size.width as f32),
-                        height: Some(size.height as f32),
-                        x: Some(pos.x),
-                        y: Some(pos.y),
+                        width: Some(lw),
+                        height: Some(lh),
+                        x: Some((pos.x as f32 / sf).round() as i32),
+                        y: Some((pos.y as f32 / sf).round() as i32),
+                        maximized: Some(w.window().is_maximized()),
                     },
                     splits: ui_persist::SplitState {
-                        images_table_split: Some(w.get_images_table_split()),
-                        images_preview_h: Some(w.get_images_preview_h()),
-                        review_main_split: Some(w.get_review_main_split()),
-                        review_preview_h: Some(w.get_review_preview_h()),
-                        detail_preview_split: Some(w.get_detail_preview_split()),
-                        debug_table_h: Some(w.get_debug_table_h()),
-                        process_progress_h: Some(w.get_process_progress_h()),
+                        images_table_split_ratio: Some(ratio_h(w.get_images_table_split())),
+                        images_preview_h_ratio: Some(ratio_v(w.get_images_preview_h())),
+                        review_main_split_ratio: Some(ratio_h(w.get_review_main_split())),
+                        review_preview_h_ratio: Some(ratio_v(w.get_review_preview_h())),
+                        detail_preview_split_ratio: Some(ratio_h(w.get_detail_preview_split())),
+                        debug_table_h_ratio: Some(ratio_v(w.get_debug_table_h())),
+                        process_progress_h_ratio: Some(ratio_v(w.get_process_progress_h())),
                     },
-                    columns: std::collections::HashMap::new(),
+                    columns: {
+                        let mut cols = std::collections::HashMap::new();
+                        cols.insert("images.name".to_string(), w.get_images_col_name_w());
+                        cols.insert("images.semantic".to_string(), w.get_images_col_semantic_w());
+                        cols.insert("images.best".to_string(), w.get_images_col_best_w());
+                        cols.insert("review.decision".to_string(), w.get_review_col_decision_w());
+                        cols.insert("review.driver".to_string(), w.get_review_col_driver_w());
+                        cols.insert("bestlaps.driver".to_string(), w.get_bestlaps_col_driver_w());
+                        cols.insert("bestlaps.car".to_string(), w.get_bestlaps_col_car_w());
+                        cols.insert("bestlaps.source".to_string(), w.get_bestlaps_col_source_w());
+                        cols.insert("debug.image".to_string(), w.get_debug_col_image_w());
+                        cols
+                    },
                 };
                 let _ = ui_persist::save(&cfg_path, &state);
             }

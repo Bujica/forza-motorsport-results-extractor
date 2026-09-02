@@ -90,33 +90,43 @@ export component ImagesPage inherits Rectangle {
     VerticalLayout {
         spacing: 6px;
 
-        // Filter bar — fixed to max expected (Track 260 Run 200 Process 150)
+        // Filter bar — horizontal Flickable: combos scroll when the window is
+        // narrower than their 1050px min and stretch to fill on wider displays.
         HorizontalLayout {
             height: 36px;
             spacing: 8px;
             alignment: center;
             Text { text: "Images"; color: Theme.text; font-weight: 700; min-width: 52px; vertical-alignment: center; height: 28px; }
-            FilterCombo { combo-min-w: 130px; label: "Best";
-                model-value: ["all", "pending", "contributing", "non_contributing"];
-                current-index: 0; selected(value) => { root.image-best-filter = value; root.fire-refresh(); } }
-            FilterCombo { combo-min-w: 110px; label: "File";
-                model-value: ["all", "available", "missing"];
-                current-index: 0; selected(value) => { root.image-file-filter = value; root.fire-refresh(); } }
-            FilterCombo { combo-min-w: 150px; label: "Process";
-                model-value: ["all", "unprocessed", "processing", "processed_ok",
-                        "processed_error", "cancelled", "skipped"];
-                current-index: 0; selected(value) => { root.image-process-filter = value; root.fire-refresh(); } }
-            FilterCombo { combo-min-w: 110px; label: "Inventory";
-                model-value: ["all", "duplicate"];
-                current-index: 0; selected(value) => { root.image-inventory-filter = value; root.fire-refresh(); } }
-            FilterCombo { combo-min-w: 260px; horizontal-stretch: 2; label: "Track";
-                model-value: root.image-tracks;
-                current-index: 0; selected(value) => { root.image-track-filter = value; root.fire-refresh(); } }
-            FilterCombo { combo-min-w: 200px; horizontal-stretch: 2; label: "Run";
-                model-value: root.image-runs;
-                current-index: 0; selected(value) => { root.image-run-filter = value; root.fire-refresh(); } }
-            Rectangle { horizontal-stretch: 1; }
-            Text { text: root.scan-status; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; height: 28px; }
+            Flickable {
+                height: 28px;
+                horizontal-stretch: 1;
+                viewport-width: Math.max(1050px, self.width);
+                viewport-height: 28px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    FilterCombo { combo-min-w: 130px; label: "Best";
+                        model-value: ["all", "pending", "contributing", "non_contributing"];
+                        current-index: 0; selected(value) => { root.image-best-filter = value; root.fire-refresh(); } }
+                    FilterCombo { combo-min-w: 110px; label: "File";
+                        model-value: ["all", "available", "missing"];
+                        current-index: 0; selected(value) => { root.image-file-filter = value; root.fire-refresh(); } }
+                    FilterCombo { combo-min-w: 150px; label: "Process";
+                        model-value: ["all", "unprocessed", "processing", "processed_ok",
+                                "processed_error", "cancelled", "skipped"];
+                        current-index: 0; selected(value) => { root.image-process-filter = value; root.fire-refresh(); } }
+                    FilterCombo { combo-min-w: 110px; label: "Inventory";
+                        model-value: ["all", "duplicate"];
+                        current-index: 0; selected(value) => { root.image-inventory-filter = value; root.fire-refresh(); } }
+                    FilterCombo { combo-min-w: 320px; label: "Track";
+                        model-value: root.image-tracks;
+                        current-index: 0; selected(value) => { root.image-track-filter = value; root.fire-refresh(); } }
+                    FilterCombo { combo-min-w: 200px; label: "Run";
+                        model-value: root.image-runs;
+                        current-index: 0; selected(value) => { root.image-run-filter = value; root.fire-refresh(); } }
+                }
+            }
+            Text { text: root.scan-status; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; height: 28px; overflow: elide; }
             Button { text: "Scan folder"; height: 28px; clicked => { root.scan-folder(); } }
         }
 
@@ -155,13 +165,13 @@ export component ImagesPage inherits Rectangle {
                             border-radius: 4px;
                             clip: true;
                     HorizontalLayout {
-                        SortHeaderCell { label: "Name"; col-min-width <=> root.col-name-w; resizable: true; sort-state: root.header-state(0); sort-clicked() => { root.sort-changed(0); } }
-                        SortHeaderCell { label: "Race Date"; col-min-width <=> root.col-date-w; resizable: false; sort-state: root.header-state(1); sort-clicked() => { root.sort-changed(1); } }
-                        SortHeaderCell { label: "Semantic"; col-min-width <=> root.col-semantic-w; resizable: true; sort-state: root.header-state(2); sort-clicked() => { root.sort-changed(2); } }
-                        SortHeaderCell { label: "File"; col-min-width <=> root.col-file-w; resizable: false; sort-state: root.header-state(3); sort-clicked() => { root.sort-changed(3); } }
-                        SortHeaderCell { label: "Duplicate"; col-min-width <=> root.col-dup-w; resizable: false; sort-state: root.header-state(4); sort-clicked() => { root.sort-changed(4); } }
-                        SortHeaderCell { label: "Process"; col-min-width <=> root.col-proc-w; resizable: false; sort-state: root.header-state(5); sort-clicked() => { root.sort-changed(5); } }
-                        SortHeaderCell { label: "Best laps"; col-min-width <=> root.col-best-w; flexible: true; resizable: true; sort-state: root.header-state(6); sort-clicked() => { root.sort-changed(6); } }
+                        SortHeaderCell { label: "Name"; col-min-width <=> root.col-name-w; default-width: 320px; resizable: true; sort-state: root.header-state(0); sort-clicked() => { root.sort-changed(0); } }
+                        SortHeaderCell { label: "Race Date"; col-min-width <=> root.col-date-w; default-width: 110px; resizable: false; sort-state: root.header-state(1); sort-clicked() => { root.sort-changed(1); } }
+                        SortHeaderCell { label: "Semantic"; col-min-width <=> root.col-semantic-w; default-width: 320px; resizable: true; sort-state: root.header-state(2); sort-clicked() => { root.sort-changed(2); } }
+                        SortHeaderCell { label: "File"; col-min-width <=> root.col-file-w; default-width: 100px; resizable: false; sort-state: root.header-state(3); sort-clicked() => { root.sort-changed(3); } }
+                        SortHeaderCell { label: "Duplicate"; col-min-width <=> root.col-dup-w; default-width: 105px; resizable: false; sort-state: root.header-state(4); sort-clicked() => { root.sort-changed(4); } }
+                        SortHeaderCell { label: "Process"; col-min-width <=> root.col-proc-w; default-width: 105px; resizable: false; sort-state: root.header-state(5); sort-clicked() => { root.sort-changed(5); } }
+                        SortHeaderCell { label: "Best laps"; col-min-width <=> root.col-best-w; default-width: 140px; flexible: true; resizable: true; sort-state: root.header-state(6); sort-clicked() => { root.sort-changed(6); } }
                     }
                         }
 

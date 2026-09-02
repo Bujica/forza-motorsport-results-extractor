@@ -3,7 +3,7 @@
 
 import { Button, ComboBox, LineEdit, ListView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { Card, Badge, EmptyState, TableHeaderCell, TableCell } from "../components/common.slint";
+import { Card, Badge, EmptyState, TableHeaderCell, TableCell, TabBar } from "../components/common.slint";
 import { DoctorCheckItem, DebugCaseItem, DebugResultComboItem } from "../models.slint";
 import { ImageDebugPage } from "image_debug.slint";
 
@@ -87,18 +87,8 @@ export component DiagnosticsPage inherits Rectangle {
     callback logs-search-changed(string);
     callback page-change-requested(string);
 
-    function badge-bg(level: string) -> color {
-        return level == "FAIL" ? #481818 : level == "WARN" ? #4a3a12 : #183a24;
-    }
-    function badge-fg(level: string) -> color {
-        return level == "FAIL" ? #ffb4b4 : level == "WARN" ? #ffdf8a : #a8e8b0;
-    }
-    function row-bg(result: string) -> color {
-        return result == "FAIL" ? #fde8e7 : result == "WARN" ? #fdf3d7 : #e2f5e9;
-    }
-    function row-fg(result: string) -> color {
-        return result == "FAIL" ? #b3261e : result == "WARN" ? #8a6116 : #1d7a45;
-    }
+    // Doctor/badge colors live in Theme (doctor-badge-*, doctor-row-*) —
+    // single source shared with the DB Doctor table below.
 
     VerticalLayout {
         spacing: 8px;
@@ -113,32 +103,11 @@ export component DiagnosticsPage inherits Rectangle {
             Rectangle { horizontal-stretch: 1; }
         }
 
-        // Tab bar — 4 tabs parity Python (overview / Image Debug / DB Doctor / Logs)
-        HorizontalLayout {
-            height: 30px;
-            spacing: 4px;
-            for tab in [
-                { key: "overview", label: "Overview" },
-                { key: "debug", label: "Image Debug" },
-                { key: "doctor", label: "DB Doctor" },
-                { key: "logs", label: "Logs" },
-            ]: Rectangle {
-                border-radius: 4px;
-                background: root.diagnostics-tab == tab.key ? Theme.accent : Theme.header-bg;
-                min-width: 110px;
-                TouchArea {
-                    clicked => { root.diagnostics-tab = tab.key; }
-                    Text {
-                        text: tab.label;
-                        color: root.diagnostics-tab == tab.key ? #ffffff : Theme.text-muted;
-                        font-size: Theme.font-sm;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        width: parent.width;
-                    }
-                }
-            }
-            Rectangle { horizontal-stretch: 1; }
+        // Tab bar — 4 tabs parity Python (overview / Image Debug / DB Doctor / Logs) — shared TabBar (F4)
+        TabBar {
+            tabs: [{key: "overview", label: "Overview"}, {key: "debug", label: "Image Debug"}, {key: "doctor", label: "DB Doctor"}, {key: "logs", label: "Logs"}];
+            current <=> root.diagnostics-tab;
+            tab-clicked(key) => { root.diagnostics-tab = key; }
         }
 
         if root.diagnostics-tab == "overview": Card {
@@ -151,14 +120,14 @@ export component DiagnosticsPage inherits Rectangle {
                     spacing: 8px;
                     height: 22px;
                     Text { text: "LM Studio"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; min-width: 70px; }
-                    Badge { label: root.overview-lm-level; bg: root.badge-bg(root.overview-lm-level); fg: root.badge-fg(root.overview-lm-level); }
+                    Badge { label: root.overview-lm-level; bg: Theme.doctor-badge-bg(root.overview-lm-level); fg: Theme.doctor-badge-fg(root.overview-lm-level); }
                     Text { text: root.overview-lm-message; color: Theme.text; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
                 }
                 HorizontalLayout {
                     spacing: 8px;
                     height: 22px;
                     Text { text: "Database"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; min-width: 70px; }
-                    Badge { label: root.overview-db-status == "ok" ? "PASS" : root.overview-db-status; bg: root.overview-db-status == "ok" ? #183a24 : #4a3a12; fg: root.overview-db-status == "ok" ? #a8e8b0 : #ffdf8a; }
+                    Badge { label: root.overview-db-status == "ok" ? "PASS" : root.overview-db-status; bg: Theme.doctor-badge-bg(root.overview-db-status == "ok" ? "PASS" : "WARN"); fg: Theme.doctor-badge-fg(root.overview-db-status == "ok" ? "PASS" : "WARN"); }
                     Text { text: root.overview-schema + " · " + root.overview-inventory + " · " + root.overview-review; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
                 }
                 Rectangle { height: 1px; background: Theme.divider; }
@@ -209,6 +178,7 @@ export component DiagnosticsPage inherits Rectangle {
             debug-prompt-options: root.debug-prompt-options;
             debug-run-options: root.debug-run-options;
             table-h <=> root.debug-table-h;
+            col-image-w <=> root.col-image-w;
             debug-refresh-requested() => { root.debug-refresh-requested(); }
             debug-filter-changed(s,b,m,p,r) => { root.debug-filter-changed(s,b,m,p,r); }
             debug-case-selected(i) => { root.debug-case-selected(i); }
@@ -224,14 +194,14 @@ export component DiagnosticsPage inherits Rectangle {
                     spacing: 8px;
                     height: 36px;
                     Text { text: "Database Doctor"; color: Theme.text; font-weight: 700; vertical-alignment: center; }
-                    Badge { label: root.doctor-overall; bg: root.badge-bg(root.doctor-overall); fg: root.badge-fg(root.doctor-overall); }
+                    Badge { label: root.doctor-overall; bg: Theme.doctor-badge-bg(root.doctor-overall); fg: Theme.doctor-badge-fg(root.doctor-overall); }
                     Text { text: root.doctor-summary; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
                 }
             }
             Card {
                 vertical-stretch: 1;
                 clip: true;
-                if root.doctor-checks.length == 0: EmptyState { text: "Run DB Doctor to check the relational database integrity (63 checks)."; }
+                if root.doctor-checks.length == 0: EmptyState { width: parent.width - 24px; text: "Run DB Doctor to check the relational database integrity (63 checks)."; }
                 if root.doctor-checks.length > 0: VerticalLayout {
                     padding: 4px;
                     spacing: 0;
@@ -252,9 +222,9 @@ export component DiagnosticsPage inherits Rectangle {
                         vertical-stretch: 1;
                         for chk in root.doctor-checks: Rectangle {
                             height: 26px;
-                            background: root.row-bg(chk.result);
+                            background: Theme.doctor-row-bg(chk.result);
                             HorizontalLayout {
-                                TableCell { text: chk.result; width-pref: 80px; bold: true; text-color: root.row-fg(chk.result); }
+                                TableCell { text: chk.result; width-pref: 80px; bold: true; text-color: Theme.doctor-row-fg(chk.result); }
                                 TableCell { text: chk.count; width-pref: 65px; text-color: Theme.text-muted; }
                                 TableCell { text: chk.check; width-pref: 200px; }
                                 TableCell { text: chk.description; width-pref: 220px; flexible: true; text-color: Theme.text-muted; grid-line: false; }

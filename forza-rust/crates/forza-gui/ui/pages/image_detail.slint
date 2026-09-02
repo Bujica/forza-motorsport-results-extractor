@@ -3,7 +3,7 @@
 import { Button, ListView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { DetailAttemptItem, DetailLapItem, DetailResultItem, DetailReviewItem } from "../models.slint";
-import { Card, EmptyState, TableHeaderCell, TableCell, SplitterH } from "../components/common.slint";
+import { Card, EmptyState, TableHeaderCell, TableCell, SplitterH, TabBar } from "../components/common.slint";
 
 export component ImageDetailPage inherits Rectangle {
     background: transparent;
@@ -87,32 +87,16 @@ export component ImageDetailPage inherits Rectangle {
                 spacing: 6px;
                 horizontal-stretch: 1;
 
-                HorizontalLayout {
-                    height: 30px;
-                    spacing: 4px;
-                    for tab in [
+                TabBar {
+                    tabs: [
                         { key: "metadata", label: "Metadata" },
                         { key: "laps", label: "Laps" },
                         { key: "reviews", label: "Review cases" },
                         { key: "extractions", label: "Extractions" },
                         { key: "attempts", label: "Attempts" },
-                    ]: Rectangle {
-                        border-radius: 4px;
-                        background: root.detail-tab == tab.key ? Theme.accent : Theme.header-bg;
-                        min-width: 100px;
-                        horizontal-stretch: 1;
-                        TouchArea {
-                            clicked => { root.detail-tab-changed(tab.key); }
-                            Text {
-                                text: tab.label;
-                                color: root.detail-tab == tab.key ? #ffffff : Theme.text-muted;
-                                font-size: Theme.font-sm;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                                width: parent.width;
-                            }
-                        }
-                    }
+                    ];
+                    current: root.detail-tab;
+                    tab-clicked(key) => { root.detail-tab-changed(key); }
                 }
 
                 Card {
@@ -263,8 +247,8 @@ export component ImageDetailPage inherits Rectangle {
                                 TableHeaderCell { label: "#"; width-pref: 30px; }
                                 TableHeaderCell { label: "Reason"; width-pref: 90px; }
                                 TableHeaderCell { label: "Status"; width-pref: 74px; }
-                                TableHeaderCell { label: "Model"; width-pref: 90px; }
-                                TableHeaderCell { label: "Rejected"; width-pref: 140px; }
+                                TableHeaderCell { label: "Model"; width-pref: 130px; }
+                                TableHeaderCell { label: "Rejected"; width-pref: 100px; }
                                 TableHeaderCell { label: "Duration"; width-pref: 90px; }
                                 TableHeaderCell { label: "TPS"; width-pref: 90px; }
                                 TableHeaderCell { label: "Created"; width-pref: 150px; flexible: true; }
@@ -279,8 +263,8 @@ export component ImageDetailPage inherits Rectangle {
                                     TableCell { text: attempt.number; width-pref: 30px; }
                                     TableCell { text: attempt.reason; width-pref: 90px; text-color: Theme.warn; }
                                     TableCell { text: attempt.status; width-pref: 74px; text-color: attempt.accepted ? Theme.ok : Theme.danger; }
-                                    TableCell { text: attempt.model; width-pref: 90px; }
-                                    TableCell { text: attempt.rejected; width-pref: 140px; }
+                                    TableCell { text: attempt.model; width-pref: 130px; }
+                                    TableCell { text: attempt.rejected; width-pref: 100px; }
                                     TableCell { text: attempt.duration; width-pref: 90px; }
                                     TableCell { text: attempt.tps; width-pref: 90px; }
                                     TableCell { text: attempt.created; width-pref: 150px; flexible: true; grid-line: false; }

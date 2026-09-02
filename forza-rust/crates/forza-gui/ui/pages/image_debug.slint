@@ -4,7 +4,7 @@
 import { Button, ComboBox, ListView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { DebugCaseItem, DebugResultComboItem } from "../models.slint";
-import { Card, EmptyState, TableHeaderCell, TableCell, SplitterV } from "../components/common.slint";
+import { Card, EmptyState, TableHeaderCell, TableCell, SplitterV, TabBar } from "../components/common.slint";
 
 export component ImageDebugPage inherits Rectangle {
     background: transparent;
@@ -39,8 +39,9 @@ export component ImageDebugPage inherits Rectangle {
     in property <[string]> debug-prompt-options: ["all"];
     in property <[string]> debug-run-options: ["all"];
 
-    // Interactive column widths — Python: Image 280 Interactive, resto Fixed
-    in-out property <length> col-image-w: 280px;
+    // Interactive column widths — fixed columns rebalanced so the 11-col
+    // sum (~925px) fits the minimum window; Image is user-resizable.
+    in-out property <length> col-image-w: 220px;
     in-out property <length> table-h: 300px;
 
     callback debug-refresh-requested();
@@ -74,7 +75,7 @@ export component ImageDebugPage inherits Rectangle {
             spacing: 8px;
             Text { text: "Image Debug"; color: Theme.text; font-weight: 700; min-width: 92px; vertical-alignment: center; }
             Button { text: "Refresh"; clicked => { root.debug-refresh-requested(); } }
-            Text { text: root.debug-selected-image-id; color: Theme.text-faint; font-size: Theme.font-xs; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+            Text { text: root.debug-selected-image-id; color: Theme.text-faint; font-size: Theme.font-xs; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; max-width: 340px; }
         }
 
         // Filter bar
@@ -112,16 +113,16 @@ export component ImageDebugPage inherits Rectangle {
                     clip: true;
                     HorizontalLayout {
                         TableHeaderCell { label: "Image"; width-pref <=> root.col-image-w; resizable: true; }
-                        TableHeaderCell { label: "Race Date"; width-pref: 110px; }
-                        TableHeaderCell { label: "File"; width-pref: 100px; }
-                        TableHeaderCell { label: "Process"; width-pref: 105px; }
-                        TableHeaderCell { label: "Best"; width-pref: 110px; }
-                        TableHeaderCell { label: "Latest"; width-pref: 110px; }
-                        TableHeaderCell { label: "Run"; width-pref: 100px; }
-                        TableHeaderCell { label: "Model"; width-pref: 95px; }
-                        TableHeaderCell { label: "Att"; width-pref: 65px; }
-                        TableHeaderCell { label: "Laps"; width-pref: 60px; }
-                                TableHeaderCell { label: "Rev"; width-pref: 65px; flexible: true; resizable: true; }
+                        TableHeaderCell { label: "Race Date"; width-pref: 90px; }
+                        TableHeaderCell { label: "File"; width-pref: 85px; }
+                        TableHeaderCell { label: "Process"; width-pref: 95px; }
+                        TableHeaderCell { label: "Best"; width-pref: 90px; }
+                        TableHeaderCell { label: "Latest"; width-pref: 90px; }
+                        TableHeaderCell { label: "Run"; width-pref: 90px; }
+                        TableHeaderCell { label: "Model"; width-pref: 85px; }
+                        TableHeaderCell { label: "Att"; width-pref: 40px; }
+                        TableHeaderCell { label: "Laps"; width-pref: 40px; }
+                        TableHeaderCell { label: "Rev"; width-pref: 44px; flexible: true; resizable: true; }
                     }
                 }
                 dcv := ListView {
@@ -138,22 +139,23 @@ export component ImageDebugPage inherits Rectangle {
                             background: root.debug-selected-image-id == item.image-file-id ? Theme.selection-bg : transparent;
                             HorizontalLayout {
                                 TableCell { text: item.image-name; width-pref: root.col-image-w; text-color: Theme.text; }
-                                TableCell { text: item.race-date; width-pref: 110px; text-color: Theme.text-muted; }
-                                TableCell { text: item.file-status; width-pref: 100px; text-color: Theme.text-muted; }
-                                TableCell { text: item.processing; width-pref: 105px; text-color: item.processing == "processed_ok" ? Theme.ok : item.processing == "processed_error" ? Theme.danger : Theme.text-muted; }
-                                TableCell { text: item.best-lap; width-pref: 110px; text-color: Theme.text-muted; }
-                                TableCell { text: item.latest-status; width-pref: 110px; text-color: item.latest-status == "ok" ? Theme.ok : item.latest-status == "error" ? Theme.danger : Theme.text-muted; }
-                                TableCell { text: item.run-id; width-pref: 100px; text-color: Theme.text-muted; }
-                                TableCell { text: item.model; width-pref: 95px; text-color: Theme.text-muted; }
-                                TableCell { text: item.attempts; width-pref: 65px; text-color: Theme.text-faint; }
-                                TableCell { text: item.laps; width-pref: 60px; text-color: Theme.text-faint; }
-                                TableCell { text: item.reviews; width-pref: 65px; flexible: true; text-color: Theme.text-faint; grid-line: false; }
+                                TableCell { text: item.race-date; width-pref: 90px; text-color: Theme.text-muted; }
+                                TableCell { text: item.file-status; width-pref: 85px; text-color: Theme.text-muted; }
+                                TableCell { text: item.processing; width-pref: 95px; text-color: item.processing == "processed_ok" ? Theme.ok : item.processing == "processed_error" ? Theme.danger : Theme.text-muted; }
+                                TableCell { text: item.best-lap; width-pref: 90px; text-color: Theme.text-muted; }
+                                TableCell { text: item.latest-status; width-pref: 90px; text-color: item.latest-status == "ok" ? Theme.ok : item.latest-status == "error" ? Theme.danger : Theme.text-muted; }
+                                TableCell { text: item.run-id; width-pref: 90px; text-color: Theme.text-muted; }
+                                TableCell { text: item.model; width-pref: 85px; text-color: Theme.text-muted; }
+                                TableCell { text: item.attempts; width-pref: 40px; text-color: Theme.text-faint; }
+                                TableCell { text: item.laps; width-pref: 40px; text-color: Theme.text-faint; }
+                                TableCell { text: item.reviews; width-pref: 44px; flexible: true; text-color: Theme.text-faint; grid-line: false; }
                             }
                         }
                     }
                 }
             }
             if root.debug-cases.length == 0: EmptyState {
+                width: parent.width - 24px;
                 text: "No debug cases. Refresh to load the latest extraction cases.";
             }
         }
@@ -178,11 +180,9 @@ export component ImageDebugPage inherits Rectangle {
             Button { text: "Image details"; clicked => { root.debug-open-image-detail(); } }
         }
 
-        // Tabs — 10 tabs (Python parity)
-        HorizontalLayout {
-            height: 30px;
-            spacing: 4px;
-            for tab in [
+        // Tabs — 10 tabs (Python parity) — shared TabBar component
+        TabBar {
+            tabs: [
                 { key: "overview", label: "Overview" },
                 { key: "metadata", label: "Metadata" },
                 { key: "results", label: "Results" },
@@ -193,23 +193,9 @@ export component ImageDebugPage inherits Rectangle {
                 { key: "artifacts", label: "Artifacts" },
                 { key: "runtime", label: "Runtime" },
                 { key: "timeline", label: "Timeline" },
-            ]: Rectangle {
-                border-radius: 4px;
-                background: root.debug-tab == tab.key ? Theme.accent : Theme.header-bg;
-                min-width: 85px;
-                horizontal-stretch: 1;
-                TouchArea {
-                    clicked => { root.debug-tab = tab.key; }
-                    Text {
-                        text: tab.label;
-                        color: root.debug-tab == tab.key ? #ffffff : Theme.text-muted;
-                        font-size: Theme.font-sm;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        width: parent.width;
-                    }
-                }
-            }
+            ];
+            current <=> root.debug-tab;
+            tab-clicked(key) => { root.debug-tab = key; }
         }
 
         Card {

@@ -82,19 +82,18 @@ export component LogsPage inherits Rectangle {
         Card {
             vertical-stretch: 1;
             clip: true;
-            // Scrollable plain text area (last 200KB, scroll to end on load)
+            // Log text area (last 200KB). Wrapped so full lines are readable;
+            // the search box filters down long files. Font follows the
+            // scalable Theme.log-font (was a fixed 10px that ignored ui-scale).
             Rectangle {
                 clip: true;
                 Text {
                     x: 10px; y: 8px;
                     width: parent.width - 20px;
-                    height: parent.height - 16px;
                     text: root.filtered-text();
                     color: Theme.text-muted;
-                    wrap: no-wrap;
-                    overflow: elide;
-                    font-size: 10px;
-                    // Monospace hint via small font; Slint has no family per se.
+                    wrap: word-wrap;
+                    font-size: Theme.log-font;
                 }
             }
             if root.filtered-text() == "": EmptyState {

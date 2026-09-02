@@ -107,8 +107,8 @@ export component ProcessPage inherits Rectangle {
                         Text { text: root.run-paused ? "Paused" : root.run-running ? "Running" : "Ready";
                                color: root.run-paused ? Theme.warn : Theme.text-muted; horizontal-stretch: 1; }
                         Text { text: root.run-done + " / " + root.run-total; color: Theme.text-muted; horizontal-stretch: 1; horizontal-alignment: center; }
-                        Text { text: "Rate: " + root.run-rate; color: Theme.text-muted; horizontal-stretch: 1; horizontal-alignment: center; }
-                        Text { text: "ETA: " + root.run-eta; color: Theme.text-muted; horizontal-stretch: 1; horizontal-alignment: right; }
+                        Text { text: "Rate: " + (root.run-rate == "" ? "—" : root.run-rate); color: Theme.text-muted; horizontal-stretch: 1; horizontal-alignment: center; overflow: elide; }
+                        Text { text: "ETA: " + (root.run-eta == "" ? "—" : root.run-eta); color: Theme.text-muted; horizontal-stretch: 1; horizontal-alignment: right; overflow: elide; }
                     }
                 }
             }
@@ -129,18 +129,19 @@ export component ProcessPage inherits Rectangle {
                 width: parent.width - 12px;
                 height: parent.height - 12px;
                 for line in root.run-log: Text {
-                    height: 18px;
+                    // Row height follows the scalable font (18px fixed clipped
+                    // glyphs at ui-scale >= 1.25).
+                    height: Math.max(18px, Theme.font-sm * 1.5);
                     width: elv.width;
                     text: line;
                     color: Theme.text-muted;
                     font-size: Theme.font-sm;
+                    overflow: elide;
                 }
             }
-            if root.run-log.length == 0: Text {
+            if root.run-log.length == 0: EmptyState {
+                width: parent.width - 24px;
                 text: "Run events and logs will appear here.";
-                color: Theme.text-faint;
-                horizontal-alignment: center;
-                vertical-alignment: center;
             }
         }
     }

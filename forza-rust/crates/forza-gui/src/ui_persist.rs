@@ -9,21 +9,28 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WindowState {
+    /// Logical px (divided by the window scale factor at save time).
     pub width: Option<f32>,
     pub height: Option<f32>,
     pub x: Option<i32>,
     pub y: Option<i32>,
+    #[serde(default)]
+    pub maximized: Option<bool>,
 }
 
+/// Splitter positions stored as fractions (0.05..0.95) of the window's
+/// logical width (horizontal splits) or height (vertical splits), so a
+/// layout saved at one resolution still lands proportionally on another.
+/// Renamed from the old absolute-px fields; legacy values are ignored.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SplitState {
-    pub images_table_split: Option<f32>,
-    pub images_preview_h: Option<f32>,
-    pub review_main_split: Option<f32>,
-    pub review_preview_h: Option<f32>,
-    pub detail_preview_split: Option<f32>,
-    pub debug_table_h: Option<f32>,
-    pub process_progress_h: Option<f32>,
+    pub images_table_split_ratio: Option<f32>,
+    pub images_preview_h_ratio: Option<f32>,
+    pub review_main_split_ratio: Option<f32>,
+    pub review_preview_h_ratio: Option<f32>,
+    pub detail_preview_split_ratio: Option<f32>,
+    pub debug_table_h_ratio: Option<f32>,
+    pub process_progress_h_ratio: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

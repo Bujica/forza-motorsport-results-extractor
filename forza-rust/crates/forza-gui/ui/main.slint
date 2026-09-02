@@ -9,21 +9,19 @@ import { ImagesPage } from "pages/images.slint";
 import { ProcessPage } from "pages/process.slint";
 import { ReviewPage } from "pages/review.slint";
 import { BestLapsPage } from "pages/bestlaps.slint";
-import { RecordsPage } from "pages/records.slint";
 import { DiagnosticsPage } from "pages/diagnostics.slint";
-import { ImageDebugPage } from "pages/image_debug.slint";
 import { LogsPage } from "pages/logs.slint";
-import { PerformancePage } from "pages/performance.slint";
 import { ImageDetailPage } from "pages/image_detail.slint";
 import { SettingsPage } from "pages/settings.slint";
 
 export component MainWindow inherits Window {
     in-out property <string> app-version;
     title: "Forza Motorsport Results Extractor — " + root.app-version;
-    min-width: 1180px;
-    min-height: 640px;
+    min-width: 1240px;
+    min-height: 680px;
     preferred-width: 1400px;
     preferred-height: 800px;
+    default-font-size: Theme.font-md;
     background: Theme.bg;
 
     callback refresh-requested(string, string, string, string, string, string);
@@ -55,7 +53,7 @@ export component MainWindow inherits Window {
     callback bestlaps-generate-pdf();
     callback bestlaps-open-pdf();
     callback bestlaps-import();
-    callback records-refresh-requested();
+    callback bestlaps-detail-requested(string);
     callback doctor-requested();
     callback rebuild-requested();
     callback overview-requested();
@@ -120,8 +118,6 @@ export component MainWindow inherits Window {
     in property <[string]> best-laps-laps: ["all", "clean", "dirty"];
     in property <int> best-laps-sort-column: 99;
     in property <bool> best-laps-sort-ascending: true;
-    in property <string> records-status;
-    in property <bool> records-loading: false;
     in property <string> selection-summary;
     in property <int> sort-column;
     in property <bool> sort-ascending;
@@ -242,6 +238,17 @@ export component MainWindow inherits Window {
     in-out property <length> detail-preview-split: 460px;
     in-out property <length> debug-table-h: 300px;
     in-out property <length> process-progress-h: 90px;
+    // Persisted per-column widths (two-way bound to the pages)
+    in-out property <length> images-col-name-w: 320px;
+    in-out property <length> images-col-semantic-w: 320px;
+    in-out property <length> images-col-best-w: 140px;
+    in-out property <length> review-col-decision-w: 195px;
+    in-out property <length> review-col-driver-w: 150px;
+    in-out property <length> bestlaps-col-driver-w: 150px;
+    in-out property <length> bestlaps-col-car-w: 160px;
+    in-out property <length> bestlaps-col-source-w: 140px;
+    in-out property <length> debug-col-image-w: 220px;
+    in-out property <string> scan-status: "";
 
     changed ui-scale => { Theme.ui-scale = root.ui-scale; }
     changed ui-min-px => { Theme.ui-min-px = root.ui-min-px; }
@@ -270,7 +277,6 @@ export component MainWindow inherits Window {
                 { key: "process", label: "Process" },
                 { key: "review", label: "Review" },
                 { key: "best-laps", label: "Best Laps" },
-                { key: "records", label: "Records" },
                 { key: "diagnostics", label: "Diagnostics" },
                 { key: "settings", label: "Settings" },
             ]: TouchArea {
@@ -349,6 +355,10 @@ export component MainWindow inherits Window {
                 detail-has-preview: root.detail-has-preview;
                 table-split <=> root.images-table-split;
                 preview-h <=> root.images-preview-h;
+                scan-status <=> root.scan-status;
+                col-name-w <=> root.images-col-name-w;
+                col-semantic-w <=> root.images-col-semantic-w;
+                col-best-w <=> root.images-col-best-w;
                 refresh-requested(a, b, c, d, e, f) => { root.refresh-requested(a, b, c, d, e, f); }
                 scan-folder() => { root.scan-folder(); }
                 selection-changed(i) => { root.selection-changed(i); }
@@ -385,6 +395,7 @@ export component MainWindow inherits Window {
                 start-run(dry, force, retry) => { root.start-run(dry, force, retry); }
                 cancel-run() => { root.cancel-run(); }
                 toggle-pause() => { root.toggle-pause(); }
+                select-in-images() => { root.select-in-images(); }
             }
 
             // ══ Review page ══
@@ -408,13 +419,14 @@ export component MainWindow inherits Window {
                 review-has-preview: root.review-has-preview;
                 main-split <=> root.review-main-split;
                 preview-h <=> root.review-preview-h;
+                col-decision-w <=> root.review-col-decision-w;
+                col-driver-w <=> root.review-col-driver-w;
                 review-filter-changed(status, reason, outcome, run) => { root.review-filter-changed(status, reason, outcome, run); }
                 review-selected(i) => { root.review-selected(i); }
                 review-apply(n, f, v) => { root.review-apply(n, f, v); }
                 review-ignore(n) => { root.review-ignore(n); }
                 review-reopen(n) => { root.review-reopen(n); }
                 review-open-detail(n) => { root.review-open-detail(n); }
-                review-step(d) => { }
             }
 
             // ══ Best Laps page ══
@@ -440,13 +452,10 @@ export component MainWindow inherits Window {
                 generate-pdf-requested() => { root.bestlaps-generate-pdf(); }
                 open-pdf-requested() => { root.bestlaps-open-pdf(); }
                 import-requested() => { root.bestlaps-import(); }
-            }
-
-            // ══ Records page ══
-            if root.page == "records": RecordsPage {
-                records-status: root.records-status;
-                records-loading: root.records-loading;
-                refresh-requested() => { root.records-refresh-requested(); }
+                detail-requested(id) => { root.bestlaps-detail-requested(id); }
+                col-driver-w <=> root.bestlaps-col-driver-w;
+                col-car-w <=> root.bestlaps-col-car-w;
+                col-source-w <=> root.bestlaps-col-source-w;
             }
 
             // ══ Diagnostics page ══ (4 tabs parity Python: overview / Image Debug / DB Doctor / Logs)
@@ -501,6 +510,7 @@ export component MainWindow inherits Window {
                 debug-prompt-options: root.debug-prompt-options;
                 debug-run-options: root.debug-run-options;
                 debug-table-h <=> root.debug-table-h;
+                col-image-w <=> root.debug-col-image-w;
                 app-log-text: root.app-log-text;
                 error-log-text: root.error-log-text;
                 logs-tab <=> root.logs-tab;
@@ -533,9 +543,6 @@ export component MainWindow inherits Window {
                 logs-open-folder() => { root.logs-open-folder(); }
                 logs-search-changed(text) => { root.logs-search-changed(text); }
             }
-
-            // ══ Performance page (deferred scope) ══
-            if root.page == "performance": PerformancePage {}
 
             // ══ Image Detail page ══
             if root.page == "image-detail": ImageDetailPage {
@@ -575,14 +582,14 @@ export component MainWindow inherits Window {
             // ── Status bar (versão · db · schema) ──
             Rectangle { height: 1px; background: Theme.border; }
             Rectangle {
-                height: 22px;
+                height: Theme.statusbar-h;
                 background: Theme.header-bg;
                 HorizontalLayout {
                     padding-left: 8px; padding-right: 8px;
                     spacing: 8px;
                     Text { text: root.app-version; color: Theme.text-muted; font-size: Theme.font-xs; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
                     Text { text: root.context-db; color: Theme.text-muted; font-size: Theme.font-xs; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; horizontal-alignment: right; }
-                    Text { text: root.doctor-summary == "Not checked" ? root.overview-schema : root.doctor-summary; color: Theme.text-muted; font-size: Theme.font-xs; vertical-alignment: center; }
+                    Text { text: root.doctor-summary == "Not checked" ? root.overview-schema : root.doctor-summary; color: Theme.text-muted; font-size: Theme.font-xs; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; horizontal-alignment: right; }
                 }
             }
         }

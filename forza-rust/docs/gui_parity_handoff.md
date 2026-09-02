@@ -1,9 +1,9 @@
 # GUI Rust Parity — Plano e Estado (handoff)
 
-**Última atualização:** 2026-08-31
-**Objetivo:** GUI Rust funcionalmente igual ou melhor que a Python (`forza/gui/`),
-exceto a view Records/Performance (adiada por decisão do usuário — o dashboard
-Python será refeito upstream). Deve funcionar de 1080p a 4K (usuário usa QHD).
+**Última atualização:** 2026-09-01
+**Objetivo:** GUI Rust funcionalmente igual ou melhor que a Python (`forza/gui/`).
+A página Records (placeholder) foi **removida** por decisão do usuário, junto com o
+placeholder inacessível de Performance. Deve funcionar de 1080p a 4K (usuário usa QHD).
 
 ## Estado por fase
 
@@ -73,3 +73,56 @@ Padrões estabelecidos:
 - Doctor view: `forza/gui/views/db_doctor_view.py` (4 colunas, cores).
 - Logs: `forza/gui/views/logs_view.py` (busca QTextEdit.find, clear c/ flush de handlers).
 - Overview: `forza/gui/views/developer_overview_view.py` (ping LM Studio 1s + fast_db_report).
+
+---
+
+## Rodada de correções (2026-09-01) — truncamentos, DPI, consistência
+
+**F0 — Remoções:** `records.slint` + `performance.slint` apagados (imports, rotas,
+`records-*` props/callbacks); `GridText` removido; cópia morta `class_color` (lib.rs)
+removida — fonte única `Theme.class-color`; `ui-min-px` default alinhado (12→13).
+
+**F1 — Janela/DPI/persistência (`lib.rs` + `ui_persist.rs`):**
+- Save converte px físicos → lógicos via `window.scale_factor()` (bug antigo "scale
+  factor 1" que crescia a janela a cada ciclo em displays != 100%).
+- `WindowState.maximized` persistido e restaurado (`set_maximized`).
+- 1ª abertura (sem `ui_state.json`): tamanho calculado `min(92% work area, 1600) x
+  min(88%, 950)` via `GetSystemMetrics(SM_CXFULLSCREEN/CYFULLSCREEN)` (windows-sys,
+  feature `Win32_UI_WindowsAndMessaging`); fallback 1400x800.
+- Splitters persistem como **rácios** do tamanho lógico da janela
+  (`*_ratio`, clamp 0.05..0.95) — layout proporcional entre resoluções; campos
+  renomeados, formato antigo ignorado pelo serde.
+- Larguras de coluna persistidas de verdade: 9 colunas redimensionáveis expostas no
+  `MainWindow` (`images-col-*`, `review-col-*`, `bestlaps-col-*`, `debug-col-image-w`)
+  com binding two-way às páginas; keys `images.name`, `review.decision`, etc., clamp
+  44..2000. Fallback mal ligado `"images.name"` removido.
+- Min window 1240x680.
+
+**F2 — Escala:** tokens geométricos escalados no Theme (`row-h`, `header-h`,
+`control-h`, `bar-h`, `badge-h`, `card-pad`, `pad-sm/md`, `splitter-w`,
+`statusbar-h`, `log-font`) adotados em headers/splitters/status bar;
+`default-font-size: Theme.font-md` na Window (textos sem font-size escalam).
+
+**F3 — Truncamentos (capturas):** banda de grupo Best Laps usa toda a largura
+(spacer concorrente removido) + `Theme.text-on-dark`; combo Class min-width 70→100
+("TCR" cabe); id do Image Debug com max-width 340 + elide; Laps & Reviews sem o
+prefixo repetido da pista; tabela Image Debug rebalanceada (soma fixa 1200→~925,
+Rev não corta mais); Attempts: Model 130px/Rejected 100px/Created flexível;
+Trigger do Review 160px; label "Status:" no filtro do Review; Rate/ETA mostram "—"
+em repouso; filter bar de Images em Flickable horizontal com viewport elástico
+(`Math.max(1050px, self.width)`); `log-font` aplicado no Logs (era 10px fixo) com
+wrap; EmptyState com `width` nos cards (review/bestlaps/doctor/image_debug/process);
+linhas do event log com altura ligada à fonte.
+
+**F4 — Consistência:** `TabBar` compartilhado adotado em Diagnostics, Image Debug e
+Image Detail; cores doctor/badge deduplicadas via `Theme.doctor-badge-*` /
+`doctor-row-*`; `PageHeader` não adotado foi removido (código morto).
+
+**F5 — Wiring:** `bestlaps-detail-requested` handler completo (abre image-detail via
+`BestLapItem.image-file-id`, botão enabled condicional); auto-advance do Review
+preserva/avança `REVIEW_INDEX` no reload do filtro corrente (`review-step` morto
+removido); `ProcessPage.select-in-images` ligado ao handler raiz; `scan-status`
+preenchido no sync do input folder.
+
+**Verificação:** `cargo check -p forza-gui` OK; `cargo test -p forza-gui` 5/5 OK.
+Pendente: checklist visual 1080p/QHD/4K@150% e commit.

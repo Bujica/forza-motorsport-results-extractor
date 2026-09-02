@@ -11,6 +11,34 @@ export component Card inherits Rectangle {
     border-color: Theme.border;
 }
 
+// Tab bar (pills) — shared by Diagnostics, Image Debug, Image Detail, Logs (F4)
+export component TabBar inherits Rectangle {
+    in property <[{key: string, label: string}]> tabs;
+    in-out property <string> current;
+    callback tab-clicked(string);
+    height: Theme.header-h;
+    HorizontalLayout {
+        spacing: 4px;
+        for tab in root.tabs: Rectangle {
+            border-radius: 4px;
+            background: root.current == tab.key ? Theme.accent : Theme.header-bg;
+            min-width: 85px;
+            horizontal-stretch: 1;
+            TouchArea {
+                clicked => { root.tab-clicked(tab.key); }
+                Text {
+                    text: tab.label;
+                    color: root.current == tab.key ? #ffffff : Theme.text-muted;
+                    font-size: Theme.font-sm;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+    }
+}
+
 // Rounded pill label for status readouts (valid/invalid, PASS/WARN/FAIL...).
 export component Badge inherits Rectangle {
     in property <string> label;
@@ -18,7 +46,8 @@ export component Badge inherits Rectangle {
     in property <color> bg;
     border-radius: 9px;
     background: bg;
-    height: 18px;
+    // Scales with ui-scale so the label never clips at 125%+.
+    height: Math.max(18px, Theme.badge-h);
     min-width: 48px;
     HorizontalLayout {
         padding-left: 8px;
@@ -83,6 +112,7 @@ component ColResizeEdge inherits TouchArea {
 export component SortHeaderCell inherits TouchArea {
     in property <string> label;
     in-out property <length> col-min-width: 60px;
+    in property <length> default-width: 90px;
     in property <bool> flexible: false;
     in property <bool> resizable: false;
     in property <int> sort-state; // 0 none, 1 asc, 2 desc
@@ -90,7 +120,7 @@ export component SortHeaderCell inherits TouchArea {
     min-width: root.col-min-width;
     max-width: root.flexible ? 16777215px : root.col-min-width;
     horizontal-stretch: root.flexible ? 1 : 0;
-    height: 26px;
+    height: Theme.header-h;
     clicked => { root.sort-clicked(); }
     Rectangle {
         width: 100%;
@@ -99,7 +129,7 @@ export component SortHeaderCell inherits TouchArea {
         clip: true;
         Text {
             x: 8px;
-            width: parent.width - 22px;
+            width: parent.width - 28px;
             text: root.label;
             color: root.sort-state > 0 ? Theme.accent : Theme.text-muted;
             font-size: Theme.font-sm;
@@ -108,7 +138,7 @@ export component SortHeaderCell inherits TouchArea {
             overflow: elide;
         }
         if root.sort-state > 0: Text {
-            x: parent.width - 14px;
+            x: parent.width - 20px;
             width: 12px;
             text: root.sort-state == 1 ? "▲" : "▼";
             color: Theme.accent;
@@ -124,6 +154,7 @@ export component SortHeaderCell inherits TouchArea {
         if root.resizable: ColResizeEdge {
             x: parent.width - self.width;
             target-width <=> root.col-min-width;
+            default-width: root.default-width;
         }
     }
 }
@@ -209,30 +240,6 @@ export component BatchActionBar inherits HorizontalLayout {
     }
 }
 
-// Body-row text cell carrying the column grid line on its right edge.
-export component GridText inherits Rectangle {
-    in property <string> text;
-    in property <color> text-color: Theme.text;
-    in property <length> font-size: Theme.font-md;
-    height: Theme.row-h;
-    clip: true;
-    Text {
-        width: parent.width;
-        height: parent.height;
-        vertical-alignment: center;
-        overflow: elide;
-        text: root.text;
-        color: root.text-color;
-        font-size: root.font-size;
-    }
-    Rectangle {
-        x: parent.width - 1px;
-        width: 1px;
-        height: parent.height;
-        background: Theme.border;
-    }
-}
-
 // ── Splitters (QSplitter parity) ────────────────────────────────────────────
 // Drag handle between two panes. The caller positions panes and binds `split`
 // (width of the left pane / height of the top pane); the handle only tracks
@@ -243,7 +250,7 @@ export component SplitterH inherits Rectangle {
     in property <length> min-split: 160px;
     in property <length> max-split: 100000px;
     property <length> grab-offset: 3px;
-    width: 6px;
+    width: Theme.splitter-w;
     background: ta.has-hover ? Theme.accent-soft : transparent;
     ta := TouchArea {
         width: 100%;
@@ -272,7 +279,7 @@ export component SplitterV inherits Rectangle {
     in property <length> min-split: 80px;
     in property <length> max-split: 100000px;
     property <length> grab-offset: 3px;
-    height: 6px;
+    height: Theme.splitter-w;
     background: ta.has-hover ? Theme.accent-soft : transparent;
     ta := TouchArea {
         width: 100%;
@@ -343,17 +350,18 @@ export component TableCell inherits Rectangle {
 export component TableHeaderCell inherits Rectangle {
     in property <string> label;
     in-out property <length> width-pref: 90px;
+    in property <length> default-width: 90px;
     in property <bool> flexible: false;
     in property <bool> resizable: false;
     in property <TextHorizontalAlignment> align: TextHorizontalAlignment.left;
     min-width: root.width-pref;
     max-width: root.flexible ? 16777215px : root.width-pref;
     horizontal-stretch: root.flexible ? 1 : 0;
-    height: 26px;
+    height: Theme.header-h;
     clip: true;
     Text {
         x: 8px;
-        width: parent.width - 14px;
+        width: parent.width - 16px;
         text: root.label;
         color: Theme.text-muted;
         font-size: Theme.font-sm;
@@ -371,5 +379,6 @@ export component TableHeaderCell inherits Rectangle {
     if root.resizable: ColResizeEdge {
         x: parent.width - self.width;
         target-width <=> root.width-pref;
+        default-width: root.default-width;
     }
 }

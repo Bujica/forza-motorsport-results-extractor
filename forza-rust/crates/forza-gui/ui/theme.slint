@@ -48,7 +48,7 @@ export global Theme {
     // ui-scale is driven from [ui] font_scale (1.0 default, 1.25 QuadHD comfort)
     // and min-font-px from [ui] min_font_px (12 default).
     in-out property <float> ui-scale: 1.0;
-    in-out property <int> ui-min-px: 12;
+    in-out property <int> ui-min-px: 13;
     out property <length> _base-xs: 10px;
     out property <length> _base-sm: 12px;
     out property <length> _base-md: 13px;
@@ -59,10 +59,36 @@ export global Theme {
     out property <length> font-lg: Math.max(14px, 15px * root.ui-scale);
     out property <length> font-title: Math.max(16px, 18px * root.ui-scale);
     out property <length> font-xl: Math.max(15px, 17px * root.ui-scale);
+    out property <length> log-font: Math.max(11px, 11px * root.ui-scale);
 
-    // ── Spacing & metrics ──
+    // ── Spacing & metrics — scaled with ui-scale (F2)
     out property <length> radius: 12px;
-    out property <length> row-h: 38px;       // (Python ROW_HEIGHT)
-    out property <length> row-h-tall: 46px;
-    out property <length> card-pad: 14px;
+    out property <length> row-h: Math.max(32px, 38px * root.ui-scale);
+    out property <length> row-h-tall: Math.max(38px, 46px * root.ui-scale);
+    out property <length> card-pad: Math.max(12px, 14px * root.ui-scale);
+    out property <length> header-h: Math.max(22px, 26px * root.ui-scale);
+    out property <length> control-h: Math.max(24px, 28px * root.ui-scale);
+    out property <length> bar-h: Math.max(36px, 42px * root.ui-scale);
+    out property <length> badge-h: Math.max(16px, 18px * root.ui-scale);
+    out property <length> pad-sm: Math.max(6px, 8px * root.ui-scale);
+    out property <length> pad-md: Math.max(10px, 12px * root.ui-scale);
+    out property <length> splitter-w: Math.max(5px, 6px * root.ui-scale);
+    out property <length> statusbar-h: Math.max(20px, 22px * root.ui-scale);
+
+    // ── Class palette (F4) → Theme
+    public pure function class-color(c: string) -> color {
+        return c == "E" ? #C7368E : c == "D" ? #127F85 : c == "C" ? #BB7A00 : c == "B" ? #C54E00 : c == "A" ? #992800 : c == "TCR" ? #1E90FF : c == "S" ? #613BBF : c == "R" ? #105DAB : c == "P" ? #0C8540 : c == "X" ? #006000 : c == "Mixed" ? #555555 : #000000;
+    }
+    public pure function doctor-row-bg(result: string) -> color {
+        return result == "FAIL" ? #fde8e7 : result == "WARN" ? #fdf3d7 : #e2f5e9;
+    }
+    public pure function doctor-row-fg(result: string) -> color {
+        return result == "FAIL" ? #b3261e : result == "WARN" ? #8a6116 : #1d7a45;
+    }
+    public pure function doctor-badge-bg(level: string) -> color {
+        return level == "FAIL" ? #481818 : level == "WARN" ? #4a3a12 : #183a24;
+    }
+    public pure function doctor-badge-fg(level: string) -> color {
+        return level == "FAIL" ? #ffb4b4 : level == "WARN" ? #ffdf8a : #a8e8b0;
+    }
 }

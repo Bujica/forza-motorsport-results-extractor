@@ -515,15 +515,10 @@ pub(crate) fn apply_debug_detail(
                     (false, true) => "best",
                     _ => "clean",
                 };
+                // Track omitted (constant per result) for single-line readability
                 lines.push(format!(
-                    "#{} · {} · {} · {} · {} · {} · {}",
-                    lap.lap_index,
-                    lap.track,
-                    lap.race_class,
-                    lap.driver,
-                    lap.car,
-                    lap.best_lap,
-                    flags
+                    "#{} {} · {} · {} · {} · {}",
+                    lap.lap_index, lap.race_class, lap.driver, lap.car, lap.best_lap, flags
                 ));
             }
         }

@@ -34,6 +34,10 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 [build-dependencies]
 slint-build = "1"
 
+# Primary-display work-area metrics for the computed first-launch window size.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging"] }
+
 [dev-dependencies]
 tempfile = "3"
 
