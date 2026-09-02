@@ -20,6 +20,8 @@ pub struct ExportFlatRow {
     pub best_lap_ms: Option<i64>,
     pub dirty: bool,
     pub source_file: Option<String>,
+    /// Origin image id (`image_files.id`), when the lap came from a screenshot.
+    pub image_file_id: Option<String>,
     /// ISO date portion of the image file modification timestamp.
     pub race_date: Option<String>,
     pub image_format: Option<String>,
@@ -36,14 +38,14 @@ pub fn list_clean_flat(
     let mut stmt = conn.prepare(
         "SELECT l.track, l.race_class, COALESCE(l.weather,'unknown'),
                 l.temp_f, l.temp_c, l.driver, l.car, l.best_lap, l.best_lap_ms, l.dirty,
-                l.source_file, i.race_date, i.image_format, i.width_px, i.height_px
+                l.source_file, l.image_file_id, i.race_date, i.image_format, i.width_px, i.height_px
          FROM lap_records l
          LEFT JOIN image_files i ON i.id = l.image_file_id
          WHERE l.is_best_lap = 1
          ORDER BY LOWER(l.track), LOWER(l.race_class), LOWER(l.driver), l.best_lap_ms",
     )?;
     let rows = stmt.query_map([], |row| {
-        let modified: Option<String> = row.get(11)?;
+        let modified: Option<String> = row.get(12)?;
         Ok(ExportFlatRow {
             track: row.get(0)?,
             race_class: row.get(1)?,
@@ -56,12 +58,13 @@ pub fn list_clean_flat(
             best_lap_ms: row.get(8)?,
             dirty: row.get::<_, i64>(9)? != 0,
             source_file: row.get(10)?,
+            image_file_id: row.get(11)?,
             race_date: modified
                 .as_ref()
                 .map(|m| m.get(..10).unwrap_or(m).to_string()),
-            image_format: row.get(12)?,
-            width_px: row.get(13)?,
-            height_px: row.get(14)?,
+            image_format: row.get(13)?,
+            width_px: row.get(14)?,
+            height_px: row.get(15)?,
             mine: false,
         })
     })?;

@@ -79,6 +79,26 @@ fn best_laps_round_trip_returns_seeded_rows() {
             assert_eq!(rows.len(), 2);
             assert!(rows.iter().any(|row| row.mine));
             assert!(rows.iter().any(|row| !row.mine));
+            // Screenshot-sourced laps must carry their origin image id so the
+            // GUI "Image details" button can resolve it (regression: this used
+            // to arrive empty and the button stayed permanently disabled).
+            let image_id = rows
+                .iter()
+                .find_map(|row| row.image_file_id.clone())
+                .expect("seeded screenshot lap must expose its image id");
+            match handle_request(
+                &ctx,
+                &service,
+                &Request::LoadImageDetail {
+                    image_id: image_id.clone(),
+                },
+            ) {
+                Response::ImageDetail(result) => {
+                    let data = result.unwrap().expect("best-lap image id must resolve");
+                    assert_eq!(data.meta.id, image_id);
+                }
+                _ => panic!("expected image-detail response"),
+            }
         }
         _ => panic!("expected best-laps response"),
     }

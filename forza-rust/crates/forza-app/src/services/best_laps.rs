@@ -134,7 +134,8 @@ fn row_from_export(row: forza_db::repositories::ExportFlatRow) -> BestLapRow {
     let source_file = row.source_file.clone().unwrap_or_default();
     BestLapRow {
         lap_id: None,
-        image_file_id: None,
+        // Origin screenshot id — feeds the Best Laps "Image details" button.
+        image_file_id: row.image_file_id.clone(),
         run_id: None,
         track: row.track.clone(),
         race_class: row.race_class.clone(),
