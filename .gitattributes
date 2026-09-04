@@ -1,0 +1,9 @@
+# Line-ending policy.
+#
+# Rust embeds these files byte-for-byte via `include_str!`, and
+# `default_prompt_snapshot_identity_matches_python` sha256-hashes one of them.
+# A CRLF checkout (Windows default without this file) silently changes those
+# bytes and breaks golden hashes on CI while passing locally. Force LF.
+forza-rust/assets/*.txt text eol=lf
+forza-rust/assets/*.json text eol=lf
+forza-rust/fixtures/**/*.json text eol=lf
