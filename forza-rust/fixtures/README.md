@@ -19,8 +19,12 @@ Python 0.21.0-beta.1 baseline database.
 | `python_outputs/runs_performance_summary.json` | Per-run status/performance fields plus attempt aggregates (TPS, parse errors). No driver names. |
 | `README.md` | This file. |
 
-Regenerate with `py -3.11 tools/export_rust_baseline.py` from the repository
-root (Python environment required).
+Regeneration: the one-shot exporter (`tools/export_rust_baseline.py`,
+retired after the migration — see git history, e.g. commit `e454fdc`) is no
+longer part of the public baseline. Fixtures are stable; if regeneration is
+ever needed again, restore the script from history into a private checkout
+(it must not return to `tools/`, which the open-source readiness gate keeps
+release-build-only).
 
 ## Kept out of Git (personal or large)
 
