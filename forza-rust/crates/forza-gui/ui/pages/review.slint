@@ -240,7 +240,7 @@ export component ReviewPage inherits Rectangle {
                         } else if event.text == "c" && root.selected-reason() == "dirty_lap" {
                             root.review-apply(root.selected-number(), "dirty", "false");
                             accept
-                        } else if event.text == "i" {
+                        } else if event.text == "i" && root.selected-number() >= 0 {
                             root.review-ignore(root.selected-number());
                             accept
                         } else {

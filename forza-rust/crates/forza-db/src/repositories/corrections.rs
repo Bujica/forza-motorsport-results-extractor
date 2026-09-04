@@ -187,13 +187,16 @@ pub fn apply_manual_correction(
     let _ = &case_id;
 
     // Persist the decision evidence (stable key keeps reapply deterministic).
+    // Doctor contract: image-scoped fields (track/weather/race_class) must
+    // have lap_index NULL; lap-scoped (dirty/car/driver) must have it set.
     let stable_key = format!("{field}:{business_key}");
+    let image_scoped = matches!(field, "track" | "weather" | "race_class");
     conn.execute(
         "INSERT INTO review_corrections
             (id, stable_key, image_file_id, lap_index, field,
              model_value, corrected_value, cause, review_case_id,
              created_at, updated_at)
-         SELECT ?1, ?2, c.image_file_id, c.lap_index, ?3,
+         SELECT ?1, ?2, c.image_file_id, CASE WHEN ?6 THEN NULL ELSE c.lap_index END, ?3,
                 c.model_value, ?4, 'review', c.id, datetime('now'), datetime('now')
          FROM review_cases c WHERE c.case_number=?5
          ON CONFLICT(stable_key) DO UPDATE SET
@@ -203,13 +206,23 @@ pub fn apply_manual_correction(
             stable_key,
             field,
             new_value,
-            case_number
+            case_number,
+            image_scoped,
         ],
     )?;
 
     // Immediate effect with the same scoping `apply_all` will later repeat,
     // plus the case's own linked lap (which may fall outside the scope when
     // the correction carries no lap_index).
+    let case_lap_index: Option<i64> = match conn.query_row(
+        "SELECT lap_index FROM review_cases WHERE case_number=?1",
+        params![case_number],
+        |r| r.get(0),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(e) => return Err(DbError::from(e)),
+    };
     let correction = CorrectionRow {
         field: field.to_string(),
         corrected_value: new_value.to_string(),
@@ -220,13 +233,7 @@ pub fn apply_manual_correction(
                 |r| r.get(0),
             )
             .unwrap_or_default(),
-        lap_index: conn
-            .query_row(
-                "SELECT lap_index FROM review_cases WHERE case_number=?1",
-                params![case_number],
-                |r| r.get(0),
-            )
-            .ok(),
+        lap_index: if image_scoped { None } else { case_lap_index },
     };
     let mut targets = laps_for_correction(conn, &correction)?;
     if let Some(linked) = &linked_lap

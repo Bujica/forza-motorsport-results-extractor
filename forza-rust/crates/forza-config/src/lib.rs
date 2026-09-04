@@ -169,11 +169,13 @@ fn parse_float(raw: &str, section: &str, key: &str) -> Parsed<f64> {
 
 fn parse_bool(raw: &str, section: &str, key: &str) -> Parsed<bool> {
     match raw.trim().to_lowercase().as_str() {
-        "1" | "yes" | "true" | "on" => Parsed {
+        // The writer accepts y/n shorthands, so the loader must too —
+        // otherwise `grayscale = n` silently becomes `true`.
+        "1" | "yes" | "y" | "true" | "on" => Parsed {
             value: true,
             invalid: None,
         },
-        "0" | "no" | "false" | "off" => Parsed {
+        "0" | "no" | "n" | "false" | "off" => Parsed {
             value: false,
             invalid: None,
         },
@@ -235,7 +237,10 @@ impl<'a> Loader<'a> {
     ) -> Option<i64> {
         match self.raw(section, key) {
             None => fallback,
-            Some(text) if text.trim().is_empty() => None,
+            // "0" and "" both mean "unset" for optional ints — matching the
+            // writer, which serializes None as "" and 0-valued optionals are
+            // never meaningful (context/batch sizes must be > 0 when set).
+            Some(text) if text.trim().is_empty() || text.trim() == "0" => None,
             Some(text) => {
                 let parsed = parse_int(&text, section, key);
                 match parsed.invalid {
@@ -280,6 +285,12 @@ impl<'a> Loader<'a> {
 /// mirroring the Python lenient behavior.
 pub fn load_config(path: &Path, strict: bool) -> Result<(AppConfig, Warnings), ConfigError> {
     let mut warnings = Warnings::new();
+    if !path.exists() {
+        warnings.push(format!(
+            "config file not found ({}): using all defaults",
+            path.display()
+        ));
+    }
     let map = read_ini(path);
     let mut loader = Loader {
         map: &map,
@@ -303,8 +314,10 @@ pub fn load_config(path: &Path, strict: bool) -> Result<(AppConfig, Warnings), C
     );
     let reasoning_mode = match loader.raw("lmstudio", "reasoning_mode") {
         None => Some(LM_DEFAULT_REASONING_MODE.to_string()),
-        Some(v) if v.is_empty() => None,
-        Some(v) => Some(v),
+        // Trim + lowercase: a trailing space or "OFF" from a hand edit must
+        // not fail validation while `opt_int` treats whitespace as unset.
+        Some(v) if v.trim().is_empty() => None,
+        Some(v) => Some(v.trim().to_lowercase()),
     };
     let eval_batch_size = loader.opt_int(
         "lmstudio",
@@ -341,6 +354,55 @@ pub fn load_config(path: &Path, strict: bool) -> Result<(AppConfig, Warnings), C
 
     let font_scale = loader.float("ui", "font_scale", 1.0);
     let min_font_px = loader.int("ui", "min_font_px", 13);
+
+    // Typo guard: silently ignoring unknown keys turned `timout_read`
+    // into a mysterious default. Legacy/known-extra keys are allow-listed.
+    const KNOWN: &[(&str, &str)] = &[
+        ("lmstudio", "url"),
+        ("lmstudio", "model"),
+        ("lmstudio", "max_completion_tokens"),
+        ("lmstudio", "temperature"),
+        ("lmstudio", "timeout_connect"),
+        ("lmstudio", "timeout_read"),
+        ("lmstudio", "max_retries"),
+        ("lmstudio", "image_format"),
+        ("lmstudio", "context_length"),
+        ("lmstudio", "reasoning_mode"),
+        ("lmstudio", "eval_batch_size"),
+        ("lmstudio", "physical_batch_size"),
+        ("lmstudio", "flash_attention"),
+        ("lmstudio", "offload_kv_cache_to_gpu"),
+        ("lmstudio", "performance_tps_floor"),
+        ("lmstudio", "performance_reload_elapsed_s"),
+        ("lmstudio", "performance_reload_streak"),
+        ("llm", "workers"),
+        ("llm", "backend"),
+        ("paths", "input_dir"),
+        ("paths", "pdf_file"),
+        ("paths", "log_file"),
+        ("paths", "database_file"),
+        ("paths", "output_dir"),
+        ("user", "gamertag"),
+        ("image", "max_width"),
+        ("image", "encode_quality"),
+        ("image", "grayscale"),
+        ("validation", "temp_min_f"),
+        ("validation", "temp_max_f"),
+        ("pdf", "dirty_lap_symbol"),
+        ("pdf", "show_dirty_lap_symbol"),
+        ("prompt", "active"),
+        ("ui", "font_scale"),
+        ("ui", "min_font_px"),
+    ];
+    for (section, kv) in &map {
+        for key in kv.keys() {
+            if !KNOWN.contains(&(section.as_str(), key.as_str())) {
+                loader.warnings.push(format!(
+                    "Unknown config key [{section}] {key}: ignored (typo?)"
+                ));
+            }
+        }
+    }
 
     if let Some(err) = loader.first_error.take() {
         return Err(err);
@@ -424,6 +486,65 @@ pub fn validate_config(cfg: &AppConfig) -> Result<(), Vec<String>> {
     }
     if cfg.workers < 1 {
         errors.push(format!("[llm] workers={} must be >= 1", cfg.workers));
+    }
+    // Identity / endpoint: empty strings used to sail through and fail
+    // obscurely at run time (wrong DB, ungrouped laps, unreachable backend).
+    if cfg.llm.url.trim().is_empty() {
+        errors.push("[lmstudio] url must not be empty".to_string());
+    }
+    if cfg.llm.model.trim().is_empty() {
+        errors.push("[lmstudio] model must not be empty".to_string());
+    }
+    if cfg.gamertag.trim().is_empty() {
+        errors.push("[user] gamertag must not be empty".to_string());
+    }
+    for (label, value) in [
+        ("paths.input_dir", cfg.input_dir.to_string_lossy()),
+        ("paths.pdf_file", cfg.pdf_file.to_string_lossy()),
+        ("paths.log_file", cfg.log_file.to_string_lossy()),
+        ("paths.database_file", cfg.database_file.to_string_lossy()),
+    ] {
+        if value.trim().is_empty() {
+            errors.push(format!("[{label}] must not be empty"));
+        }
+    }
+    // Token/temperature/retry ranges (as advertised in the settings UI).
+    // `str::parse::<f64>` accepts NaN/inf, so check finiteness explicitly —
+    // NaN otherwise defeats every comparison below.
+    if cfg.llm.max_completion_tokens <= 0 {
+        errors.push(format!(
+            "[lmstudio] max_completion_tokens={} must be > 0",
+            cfg.llm.max_completion_tokens
+        ));
+    }
+    if !cfg.llm.temperature.is_finite() || !(0.0..=2.0).contains(&cfg.llm.temperature) {
+        errors.push(format!(
+            "[lmstudio] temperature={} must be finite and within [0, 2]",
+            cfg.llm.temperature
+        ));
+    }
+    if !(0..=10).contains(&cfg.llm.max_retries) {
+        errors.push(format!(
+            "[lmstudio] max_retries={} is out of range [0, 10]",
+            cfg.llm.max_retries
+        ));
+    }
+    if !cfg.llm.performance_tps_floor.is_finite() || !(0.0..=500.0).contains(&cfg.llm.performance_tps_floor) {
+        errors.push(format!(
+            "[lmstudio] performance_tps_floor={} must be finite and within [0, 500]",
+            cfg.llm.performance_tps_floor
+        ));
+    }
+    if !cfg.llm.performance_reload_elapsed_s.is_finite()
+        || !(0.0..=900.0).contains(&cfg.llm.performance_reload_elapsed_s)
+    {
+        errors.push(format!(
+            "[lmstudio] performance_reload_elapsed_s={} must be finite and within [0, 900]",
+            cfg.llm.performance_reload_elapsed_s
+        ));
+    }
+    if !cfg.validation.temp_min_f.is_finite() || !cfg.validation.temp_max_f.is_finite() {
+        errors.push("[validation] temp bounds must be finite numbers".to_string());
     }
     if cfg.llm.timeout_read <= 0 {
         errors.push(format!(

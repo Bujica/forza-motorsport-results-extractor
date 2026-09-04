@@ -62,7 +62,9 @@ fn write_ini(dir: &Path, name: &str, content: &str) -> std::path::PathBuf {
 #[test]
 fn missing_file_yields_python_defaults() {
     let (cfg, warnings) = load_config(Path::new("definitely_missing.ini"), false).unwrap();
-    assert!(warnings.is_empty());
+    // A missing file still yields defaults, but announces it: silent defaults
+    // sent runs against the wrong DB with no trace.
+    assert!(warnings.iter().any(|w| w.contains("not found")));
     assert_eq!(cfg.gamertag, "Player");
     assert_eq!(cfg.workers, 1);
     assert_eq!(cfg.llm.url, "http://127.0.0.1:1234/api/v1/chat");
@@ -214,6 +216,10 @@ fn validation_collects_all_failures() {
         },
         prompt: forza_config::PromptConfig {
             active: "nope".into(),
+        },
+        ui: forza_config::UiConfig {
+            font_scale: 1.0,
+            min_font_px: 13,
         },
     };
     cfg.workers = 0;

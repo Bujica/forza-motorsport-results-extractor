@@ -45,13 +45,30 @@ thread_local! {
     static INVENTORY_REFRESH_IN_FLIGHT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static PENDING_INVENTORY_FILTER: std::cell::RefCell<Option<ImageInventoryFilter>> =
         const { std::cell::RefCell::new(None) };
+    /// Last inventory filter actually issued, so background refreshes
+    /// (post-decision, rescan, rebuild) don't clobber the user's filter bar
+    /// with defaults.
+    static CURRENT_INVENTORY_FILTER: std::cell::RefCell<ImageInventoryFilter> =
+        const { std::cell::RefCell::new(ImageInventoryFilter {
+            file_status: None,
+            best_lap_status: None,
+            inventory_filter: None,
+            track: None,
+            run_id: None,
+            processing_status: None,
+            include_missing_files: false,
+        }) };
     static REVIEW_REFRESH_IN_FLIGHT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static PENDING_REVIEW_FILTER: std::cell::RefCell<Option<ReviewQueueFilter>> =
         const { std::cell::RefCell::new(None) };
 }
 
 fn current_inventory_filter() -> ImageInventoryFilter {
-    ImageInventoryFilter::default()
+    CURRENT_INVENTORY_FILTER.with(|s| s.borrow().clone())
+}
+
+fn remember_inventory_filter(filter: &ImageInventoryFilter) {
+    CURRENT_INVENTORY_FILTER.with(|s| *s.borrow_mut() = filter.clone());
 }
 
 /// Re-sort the cached rows per SORT_STATE and refresh the visible model and
@@ -385,6 +402,33 @@ fn open_image_detail_at(ui: &slint::Weak<MainWindow>, index: i32) {
         w.set_detail_loaded(false);
         w.invoke_open_image_detail(index);
     }
+}
+
+/// Open image detail directly by image id (used by the Review page: the
+/// review queue and the inventory are different lists, so a review-cache
+/// position must never be reused as an inventory index).
+fn open_image_detail_by_id(ui: &slint::Weak<MainWindow>, image_id: &str) {
+    let index = ROW_CACHE.with(|rows| {
+        rows.borrow()
+            .iter()
+            .position(|e| e.id == image_id)
+            .map(|p| p as i32)
+            .unwrap_or(-1)
+    });
+    if index >= 0 {
+        open_image_detail_at(ui, index);
+        return;
+    }
+    // Not in the current inventory window: request detail directly.
+    DETAIL_INDEX.with(|slot| *slot.borrow_mut() = -1);
+    if let Some(w) = ui.upgrade() {
+        w.set_page("image-detail".into());
+        w.set_detail_loaded(false);
+        set_status(&w, "loading image detail…");
+    }
+    send_request(Request::LoadImageDetail {
+        image_id: image_id.to_string(),
+    });
 }
 
 /// Primary display work area in physical px (0 when unknown).
@@ -841,9 +885,20 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                             }
                         }
                         Err(message) => {
+                            // Clear the cache AND the visible model together:
+                            // leaving stale rows on screen while apply/ignore
+                            // operate against an emptied cache is a desync.
                             REVIEW_CASES_CACHE.with(|slot| slot.borrow_mut().clear());
+                            REVIEW_MODEL.with(|slot| {
+                                if let Some(model) = slot.borrow().as_ref() {
+                                    model.set_vec(Vec::new());
+                                }
+                            });
+                            REVIEW_INDEX.with(|s| *s.borrow_mut() = -1);
                             if let Some(w) = ui.upgrade() {
+                                w.set_review_selected_index(-1);
                                 w.set_status_text(format!("error: {message}").into());
+                                apply_review_detail(&w);
                             }
                         }
                     }
@@ -909,6 +964,12 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         });
                         send_request(Request::ListReviews { filter });
                         send_request(Request::ListBestLaps);
+                        // A decision can change best-lap/processing columns, so
+                        // refresh the inventory too with the user's current
+                        // filter (never forced defaults).
+                        send_request(Request::RefreshInventory {
+                            filter: current_inventory_filter(),
+                        });
                     }
                 }
                 Response::BestLaps(result) => {
@@ -1244,6 +1305,16 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         }
                     }
                 },
+                Response::Error(message) => {
+                    // A job thread panicked: release the coalescing flags so
+                    // later filter changes issue fresh requests instead of
+                    // parking behind "loading…" forever.
+                    INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(false));
+                    REVIEW_REFRESH_IN_FLIGHT.with(|f| f.set(false));
+                    if let Some(w) = ui.upgrade() {
+                        w.set_status_text(format!("error: {message}").into());
+                    }
+                }
             });
         });
     }
@@ -1252,14 +1323,6 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     WORKER_TX.with(|slot| {
         let _ = slot.set(tx);
     });
-
-    // Initial inventory load (fast, no filesystem scan) — mirrors Python's
-    // ImageController which refreshes from DB on startup and only scans on demand.
-    {
-        let filter = ImageInventoryFilter::default();
-        INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(true));
-        send_request(Request::RefreshInventory { filter });
-    }
 
     // ── Page callbacks ────────────────────────────────────────────────────
     {
@@ -1289,6 +1352,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(true));
                 // Clear pending because we're about to process this exact filter
                 PENDING_INVENTORY_FILTER.with(|slot| *slot.borrow_mut() = None);
+                remember_inventory_filter(&filter);
                 enqueue(
                     Request::RefreshInventory { filter },
                     &ui,
@@ -1470,6 +1534,16 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     {
         let ui = main.as_weak();
         main.on_process_selected(move || {
+            // Don't stash the selection before knowing the run will start:
+            // if a run is already active `on_start_run` returns early and the
+            // stale `RUN_SELECTED_IDS` would leak into the next plain Run All.
+            let already_running = RUN_CONTROL.with(|slot| slot.borrow().is_some());
+            if already_running {
+                if let Some(w) = ui.upgrade() {
+                    set_status(&w, "a run is already active");
+                }
+                return;
+            }
             let selected = SELECTED_IMAGE_IDS.with(|ids| ids.borrow().clone());
             if selected.is_empty() {
                 return;
@@ -1638,16 +1712,15 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     {
         let ui = main.as_weak();
         main.on_review_open_detail(move |case_number| {
-            let index = REVIEW_CASES_CACHE.with(|slot| {
+            let image_id = REVIEW_CASES_CACHE.with(|slot| {
                 slot.borrow()
                     .iter()
-                    .position(|c| c.case_number == case_number as i64)
-                    .map(|p| p as i32)
-                    .unwrap_or(-1)
+                    .find(|c| c.case_number == case_number as i64)
+                    .and_then(|c| c.image_file_id.clone())
             });
-            if index >= 0 {
+            if let Some(image_id) = image_id {
                 let ui2 = ui.clone();
-                open_image_detail_at(&ui2, index);
+                open_image_detail_by_id(&ui2, &image_id);
             }
         });
     }
@@ -2270,12 +2343,18 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             }
             let already_running = RUN_CONTROL.with(|slot| slot.borrow().is_some());
             if already_running {
+                // Defensive: never let a stale selection survive a refused
+                // start; the next Run All must mean "all".
+                RUN_SELECTED_IDS.with(|slot| *slot.borrow_mut() = None);
                 if let Some(w) = ui.upgrade() {
                     set_status(&w, "a run is already active");
                 }
                 return;
             }
-            let Some(params) = RUN_CONFIG.with(|slot| slot.borrow().clone()) else { return };
+            let Some(params) = RUN_CONFIG.with(|slot| slot.borrow().clone()) else {
+                RUN_SELECTED_IDS.with(|slot| *slot.borrow_mut() = None);
+                return;
+            };
             let params = forza_app::RunParams {
                 force,
                 retry_errors: retry && !force,
@@ -2478,11 +2557,16 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
         });
     }
 
-    // Initial load.
+    // Initial load (single inventory request — mirrors Python's
+    // ImageController which refreshes from DB on startup and only scans on
+    // demand).
     main.set_status_text("loading…".into());
-    send_request(Request::RefreshInventory {
-        filter: ImageInventoryFilter::default(),
-    });
+    {
+        let filter = ImageInventoryFilter::default();
+        remember_inventory_filter(&filter);
+        INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(true));
+        send_request(Request::RefreshInventory { filter });
+    }
     send_request(Request::ListReviews {
         filter: ReviewQueueFilter {
             bucket: "open".into(),

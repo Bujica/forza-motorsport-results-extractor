@@ -15,7 +15,15 @@ use forza_lmstudio::protocol::{AttemptStatus, ModelAttemptRecord};
 use forza_lmstudio::response::{parse_and_validate_response, semantic_retry_issues};
 
 /// Convert a backend record into the persistence primitive.
-pub fn to_attempt_insert<'a>(record: &'a ModelAttemptRecord, model: &'a str) -> AttemptInsert<'a> {
+///
+/// `context_length`/`reasoning_mode` are the run's real settings: persisting
+/// hardcoded `5000`/`off` contradicts the run's own metadata row.
+pub fn to_attempt_insert<'a>(
+    record: &'a ModelAttemptRecord,
+    model: &'a str,
+    context_length: Option<i64>,
+    reasoning_mode: Option<&'a str>,
+) -> AttemptInsert<'a> {
     AttemptInsert {
         attempt_number: record.attempt_number,
         attempt_reason: &record.attempt_reason,
@@ -35,8 +43,8 @@ pub fn to_attempt_insert<'a>(record: &'a ModelAttemptRecord, model: &'a str) -> 
         request_image_width: None,
         request_image_height: None,
         request_image_bytes: None,
-        context_length: Some(5000),
-        reasoning_mode: Some("off"),
+        context_length,
+        reasoning_mode,
         request_config_json: record.request_config_json.as_deref(),
         request_messages_json: record.request_messages_json.as_deref(),
         request_hash: record.request_hash.as_deref(),
@@ -99,7 +107,9 @@ pub fn replay_recorded_response(
         validation_issues_json: (!issues.is_empty()).then(|| serde_json::json!(issues).to_string()),
         ..Default::default()
     };
-    let insert = to_attempt_insert(&record, model);
+    // Replay has no live run settings: persist NULL (unknown) rather than a
+    // fabricated 5000/off that contradicts the run metadata.
+    let insert = to_attempt_insert(&record, model, None, None);
     let attempt_row_id =
         insert_attempt_full(conn, run_id, image_file_id, extraction_result_id, &insert)
             .map_err(|e| format!("insert attempt: {e}"))?;

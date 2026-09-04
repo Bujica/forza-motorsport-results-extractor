@@ -480,7 +480,7 @@ pub const TABLE_DDL: &[&str] = &[
         )"#,
     // run_inputs
     r#"CREATE TABLE run_inputs (
-	id INTEGER NOT NULL, 
+	id INTEGER PRIMARY KEY AUTOINCREMENT, 
 	run_id VARCHAR NOT NULL, 
 	image_file_id VARCHAR, 
 	input_order INTEGER NOT NULL, 
@@ -498,7 +498,6 @@ pub const TABLE_DDL: &[&str] = &[
 	duplicate_of_hash VARCHAR, 
 	duplicate_of_input_id INTEGER, 
 	created_at DATETIME NOT NULL, 
-	PRIMARY KEY (id), 
 	CONSTRAINT ck_run_inputs_order CHECK (input_order >= 0), 
 	CONSTRAINT ck_run_inputs_size_nonnegative CHECK (size_bytes IS NULL OR size_bytes >= 0), 
 	FOREIGN KEY(run_id) REFERENCES extraction_runs (id) ON DELETE CASCADE, 
@@ -583,4 +582,8 @@ pub const INDEX_DDL: &[&str] = &[
 ];
 
 /// Schema version stamped into `PRAGMA user_version` after a full build.
-pub const SCHEMA_VERSION: i64 = 1;
+///
+/// v2: `run_inputs.id` is `INTEGER PRIMARY KEY AUTOINCREMENT` (atomic,
+/// worker-safe) instead of a client-computed `MAX(id)+1`. Old v1 databases
+/// are test-only and are rebuilt from scratch (no data migration).
+pub const SCHEMA_VERSION: i64 = 2;

@@ -92,11 +92,25 @@ impl BackendConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PerformancePolicy {
     pub tps_floor: f64,
     pub reload_elapsed_s: f64,
     pub reload_streak: i64,
+}
+
+impl Default for PerformancePolicy {
+    // Python parity (`backend.py`): 20 tok/s floor, 45 s elapsed, streak 3.
+    // A derived `Default` (0/0.0/0) made `elapsed_s > 0.0` always true, so
+    // every call counted as slow and `reload_before_next` latched on after
+    // the first image, forever.
+    fn default() -> Self {
+        Self {
+            tps_floor: 20.0,
+            reload_elapsed_s: 45.0,
+            reload_streak: 3,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -159,9 +173,13 @@ pub struct LMStudioBackend {
 
 impl LMStudioBackend {
     pub fn new(cfg: BackendConfig, performance: PerformancePolicy) -> Result<Self, LlmError> {
-        let timeout_read = Duration::from_secs(cfg.timeout_read_secs);
+        // Total timeout stays read-bound, but the TCP/TLS connect phase gets
+        // its own budget: previously `timeout_connect_secs` never reached the
+        // chat client (only `list_models`), so slow connects were misbilled
+        // to `timeout_read`.
         let http = reqwest::Client::builder()
-            .timeout(timeout_read)
+            .timeout(Duration::from_secs(cfg.timeout_read_secs))
+            .connect_timeout(Duration::from_secs(cfg.timeout_connect_secs.max(1)))
             .build()
             .map_err(|e| LlmError::Runtime(format!("http client: {e}")))?;
         let runtime = RuntimeClient::new(&cfg.url, cfg.timeout_connect_secs);
@@ -216,7 +234,10 @@ impl LMStudioBackend {
                 model_matches_config: Some(false),
             });
         };
+        // Present-but-unloaded must not claim healthy/compatible: with zero
+        // loaded instances there is nothing to run against yet.
         let instance = model.loaded_instances.first();
+        let loaded = instance.is_some();
         Ok(RuntimeSnapshot {
             endpoint: self.cfg.url.clone(),
             configured_model: self.cfg.model.clone(),
@@ -235,9 +256,16 @@ impl LMStudioBackend {
             capabilities_json: Some(model.capabilities.to_string()),
             desired_load_config_json: desired_json.to_string(),
             effective_load_config_json: instance.map(|value| value.config.to_string()),
-            health_ok: true,
-            health_message: format!("{} model(s) available", models.len()),
-            model_matches_config: Some(true),
+            health_ok: loaded,
+            health_message: if loaded {
+                format!("{} model(s) available", models.len())
+            } else {
+                format!(
+                    "model '{}' found but no instance loaded — load it before running",
+                    self.cfg.model
+                )
+            },
+            model_matches_config: Some(loaded),
         })
     }
 
@@ -380,15 +408,19 @@ impl LMStudioBackend {
             };
 
             let elapsed_ms = started.elapsed().as_millis() as i64;
-            let (http_status, body): (Option<u16>, Option<Value>) = match response_result {
+            let (http_status, body, transport_detail): (
+                Option<u16>,
+                Option<Value>,
+                Option<String>,
+            ) = match response_result {
                 Ok(resp) => {
                     let status = resp.status().as_u16();
                     match resp.json::<Value>().await {
-                        Ok(v) => (Some(status), Some(v)),
-                        Err(_e) => (Some(status), None),
+                        Ok(v) => (Some(status), Some(v), None),
+                        Err(e) => (Some(status), None, Some(format!("body decode: {e}"))),
                     }
                 }
-                Err(_e) => (None, None),
+                Err(e) => (None, None, Some(format!("{e}"))),
             };
 
             let stats = body
@@ -397,9 +429,13 @@ impl LMStudioBackend {
                 .cloned()
                 .unwrap_or(Value::Null);
 
-            // Transport failure path.
+            // Transport failure path (preserve the real detail: timeout vs
+            // DNS vs reset used to collapse into one useless string).
             let Some(status_code) = http_status else {
-                let message = "transport error".to_string();
+                let message = transport_detail
+                    .clone()
+                    .map(|d| format!("transport error: {d}"))
+                    .unwrap_or_else(|| "transport error".to_string());
                 let record = ModelAttemptRecord {
                     attempt_number: attempt_no as i64,
                     attempt_reason: kind.as_str().into(),
@@ -430,16 +466,31 @@ impl LMStudioBackend {
             };
 
             if !(200..300).contains(&status_code) {
-                let message = format!("HTTP {status_code}");
+                // Only transient statuses merit a transport retry: 4xx (other
+                // than 429) is a caller bug that looping cannot fix.
+                let retryable = status_code == 429 || (500..600).contains(&status_code);
+                let detail_suffix = transport_detail
+                    .as_deref()
+                    .map(|d| format!(" ({d})"))
+                    .unwrap_or_default();
+                let message = format!("HTTP {status_code}{detail_suffix}");
                 let record = ModelAttemptRecord {
                     attempt_number: attempt_no as i64,
                     attempt_reason: kind.as_str().into(),
                     status: AttemptStatus::Error,
                     accepted: false,
-                    rejected_reason: Some("transport_error".into()),
+                    rejected_reason: Some(if retryable {
+                        "transport_error"
+                    } else {
+                        "http_error"
+                    }.into()),
                     http_status: Some(status_code as i64),
                     duration_ms: elapsed_ms,
-                    error_code: Some("transport_error".into()),
+                    error_code: Some(if retryable {
+                        "transport_error"
+                    } else {
+                        "http_error"
+                    }.into()),
                     error_message: Some(message),
                     retry_instruction_text: Some(user_text.clone()),
                     request_config_json: Some(Self::request_config(&payload).to_string()),
@@ -453,14 +504,53 @@ impl LMStudioBackend {
                 };
                 on_attempt(&record);
                 attempts.push(record);
-                if attempt_no < self.cfg.max_retries {
+                if retryable && attempt_no < self.cfg.max_retries {
                     kind = RequestKind::TransportRetry;
+                    // Backoff so 500s aren't hammered in a tight loop.
+                    let backoff_ms =
+                        (200u64 << (attempt_no - 1).min(4)).min(5_000);
+                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
                     continue;
                 }
                 break;
             }
 
-            let body = body.ok_or_else(|| LlmError::Parse("missing response body".into()))?;
+            // A 2xx with an undecodable body must still produce an attempt
+            // record: `?` here used to lose the attempt entirely (no evidence
+            // row, undercounted attempts, `Exhausted` never built).
+            let Some(body) = body else {
+                let message = format!("HTTP {status_code}: response body is not valid JSON");
+                let record = ModelAttemptRecord {
+                    attempt_number: attempt_no as i64,
+                    attempt_reason: kind.as_str().into(),
+                    status: AttemptStatus::Error,
+                    accepted: false,
+                    rejected_reason: Some("parse_error".into()),
+                    http_status: Some(status_code as i64),
+                    duration_ms: elapsed_ms,
+                    error_code: Some("parse_error".into()),
+                    error_message: Some(message.clone()),
+                    retry_instruction_text: Some(user_text.clone()),
+                    request_config_json: Some(Self::request_config(&payload).to_string()),
+                    request_messages_json: Some(Self::redacted_messages(&payload).to_string()),
+                    request_hash: Some(Self::request_hash(
+                        &Self::redacted_messages(&payload),
+                        &Self::request_config(&payload),
+                        file_hash,
+                    )),
+                    parse_error: Some(message.clone()),
+                    response_stats_json: Some(stats.to_string()),
+                    ..Default::default()
+                };
+                on_attempt(&record);
+                attempts.push(record);
+                if attempt_no < self.cfg.max_retries {
+                    kind = RequestKind::JsonRetry;
+                    detail = Some(message);
+                    continue;
+                }
+                break;
+            };
             let content = output_text(&body);
             let instance_from_response = body
                 .get("model_instance_id")
@@ -621,7 +711,13 @@ impl LMStudioBackend {
         let _guard = lock.lock().await;
 
         let models = self.runtime.list_models().await?;
-        let Some(model) = models.iter().find(|m| m.id == self.cfg.model) else {
+        // Same identity rule as preflight (`id || path || display_name`): an
+        // id-only match rejects configs that preflight just accepted.
+        let Some(model) = models.iter().find(|m| {
+            m.id == self.cfg.model
+                || m.path == self.cfg.model
+                || m.display_name == self.cfg.model
+        }) else {
             return Err(LlmError::Runtime(format!(
                 "configured model not found: {}",
                 self.cfg.model

@@ -483,8 +483,10 @@ fn load_aliases_robust(
     // Try the requested path first.
     if path.exists() {
         let (m, i) = load_aliases(path, known_tracks);
-        if !m.is_empty() || !i.is_empty() || path.exists() {
-            // If file existed we return whatever we parsed (even if empty, it was intentional).
+        // A corrupt/unparseable file yields (empty, empty): fall through to
+        // the embedded asset instead of silently rejecting every alias track.
+        // (The old `|| path.exists()` guard was always true here.)
+        if !m.is_empty() || !i.is_empty() {
             return (m, i);
         }
     }
@@ -563,22 +565,18 @@ fn normalize_class(value: &str) -> String {
 }
 
 fn normalize_lap(raw: &str) -> Result<(String, i64), String> {
-    let cleaned: String = raw
-        .chars()
-        .filter(|c| c.is_ascii_digit() || *c == ':' || *c == '.')
-        .collect();
-    if !cleaned.contains(':') {
-        return Err(format!("No colon in lap time: {raw:?}"));
-    }
-    let parts: Vec<&str> = cleaned.splitn(2, ':').collect();
-    let mins: i64 = parts[0]
-        .parse()
-        .map_err(|e| format!("minutes parse: {e}"))?;
-    let secs: f64 = parts[1]
-        .parse()
-        .map_err(|e| format!("seconds parse: {e}"))?;
-    let lap = format!("{mins:02}:{secs:06.3}");
-    let ms = (mins * 60 * 1000) + (secs * 1000.0).round() as i64;
+    // Delegate acceptance to the domain parser (`parse_lap_time_ms`): the old
+    // filter-everything-except-`[0-9:.]` laundering accepted "+1.234" (a gap)
+    // and "abc1:31x" (garbage) that the pipeline itself rejects, so the same
+    // string meant two different things in import vs extraction. Formatting
+    // goes through the millisecond value, so 59.9995s carries into the next
+    // minute instead of printing the impossible "01:60.000".
+    let ms = forza_domain::lap::parse_lap_time_ms(Some(raw))
+        .ok_or_else(|| format!("No valid lap time in: {raw:?}"))?;
+    let total_secs = ms / 1000;
+    let out_mins = total_secs / 60;
+    let out_secs = (ms % 60_000) as f64 / 1000.0;
+    let lap = format!("{out_mins:02}:{out_secs:06.3}");
     Ok((lap, ms))
 }
 

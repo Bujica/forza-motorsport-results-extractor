@@ -149,22 +149,28 @@ pub fn build_pdf_plan_ext(
     > = Default::default();
 
     for row in rows {
-        let track = if row.track.is_empty() {
-            "Unknown".to_string()
-        } else {
-            row.track.clone()
+        // Trim like the external pass below: "Fuji " vs "Fuji" must not
+        // become separate sections/TOC entries and split leaderboards.
+        let track = {
+            let t = row.track.trim();
+            if t.is_empty() {
+                "Unknown".to_string()
+            } else {
+                t.to_string()
+            }
         };
+        let cls = row.race_class.trim().to_string();
         data_map
             .entry(track)
             .or_default()
-            .entry(row.race_class.clone())
+            .entry(cls)
             .or_default()
             .push(PdfRow {
                 driver: row.driver.clone(),
                 car: row.car.clone(),
                 time_str: row.best_lap.clone().unwrap_or_default(),
                 dirty: row.dirty,
-                mine: row.driver.to_lowercase() == gamertag_lower,
+                mine: row.driver.trim().to_lowercase() == gamertag_lower,
                 time_ms: row.best_lap_ms.unwrap_or(i64::MAX),
                 temp_c: row.temp_c,
                 weather: row.weather.clone().unwrap_or_default(),
@@ -261,18 +267,23 @@ fn archive_pdf(pdf_path: &Path) -> Result<(), PdfRenderError> {
     let parent = pdf_path.parent().unwrap_or_else(|| Path::new("."));
     let archive_dir = parent.join("archive");
     std::fs::create_dir_all(&archive_dir).map_err(|e| PdfRenderError::Io(e.to_string()))?;
+    // Second-resolution stamps collide when two renders land in the same
+    // second (double-click / script): never overwrite a previous archive.
     let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
-    let dest = archive_dir.join(format!(
-        "{}_{ts}{}",
-        pdf_path
-            .file_stem()
-            .and_then(|n| n.to_str())
-            .unwrap_or("report"),
-        pdf_path
-            .extension()
-            .map(|e| format!(".{}", e.to_string_lossy()))
-            .unwrap_or_default()
-    ));
+    let stem = pdf_path
+        .file_stem()
+        .and_then(|n| n.to_str())
+        .unwrap_or("report");
+    let ext = pdf_path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    let mut dest = archive_dir.join(format!("{stem}_{ts}{ext}"));
+    let mut counter = 2u32;
+    while dest.exists() {
+        dest = archive_dir.join(format!("{stem}_{ts}-{counter}{ext}"));
+        counter += 1;
+    }
     if std::fs::rename(pdf_path, &dest).is_err() {
         // Cross-device moves need copy + delete, like shutil.move.
         std::fs::copy(pdf_path, &dest).map_err(|e| PdfRenderError::Io(e.to_string()))?;

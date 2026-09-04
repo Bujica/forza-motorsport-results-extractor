@@ -77,6 +77,11 @@ pub fn parse_lap_time_ms(value: Option<&str>) -> Option<i64> {
         let frac = fraction_ms(m.get(3).map(|g| g.as_str()));
         let minutes: i64 = m[1].parse().ok()?;
         let seconds: i64 = m[2].parse().ok()?;
+        // NOTE: no `< 60` seconds guard here on purpose — Python
+        // `domain/lap.py` shares the same regex without a range check, and
+        // forking the two parsers would split lap identity/review keys
+        // between implementations. A joint Python+Rust range rule is future
+        // work, not a Rust-only fix.
         return Some((minutes * 60 + seconds) * 1000 + frac);
     }
 
@@ -148,6 +153,9 @@ pub fn sanitize_driver_name(value: Option<&str>) -> String {
     let trimmed = clean.trim_matches(|c| matches!(c, ' ' | '.' | '_' | '-'));
     let trimmed = trimmed.to_string();
     if trimmed.is_empty() {
+        // Python parity: a name made entirely of stripped symbols round-trips
+        // unchanged (golden: "★☆♪" -> "★☆♪"). Changing this would fork
+        // frontier identity between the two implementations.
         text.to_string()
     } else {
         trimmed

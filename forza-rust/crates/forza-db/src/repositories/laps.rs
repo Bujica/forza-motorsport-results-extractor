@@ -233,11 +233,15 @@ pub fn add_result(
         if !result.id.is_empty() {
             result.id.clone()
         } else {
-            let existing: Option<String> = conn.query_row(
-            "SELECT id FROM extraction_results WHERE run_id=?1 AND image_file_id=?2 LIMIT 1",
-            params![run_id, image_file_id],
-            |r| r.get::<_, String>(0),
-        ).ok();
+            let existing: Option<String> = match conn.query_row(
+                "SELECT id FROM extraction_results WHERE run_id=?1 AND image_file_id=?2 LIMIT 1",
+                params![run_id, image_file_id],
+                |r| r.get::<_, String>(0),
+            ) {
+                Ok(id) => Some(id),
+                Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                Err(e) => return Err(DbError::from(e)),
+            };
 
             match existing {
                 Some(id) => id,
@@ -249,11 +253,27 @@ pub fn add_result(
                             .map(|d| d.as_nanos() as u64)
                             .unwrap_or(0)
                     );
+                    // `extraction_results.run_input_id` is NOT NULL: create the
+                    // owning `process` input first so this fallback insert is
+                    // valid instead of always failing on the constraint.
+                    let next_order: i64 = conn
+                        .query_row(
+                            "SELECT COALESCE(MAX(input_order), 0) + 1 FROM run_inputs WHERE run_id = ?1",
+                            params![run_id],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(1);
+                    conn.execute(
+                        "INSERT INTO run_inputs (run_id, image_file_id, decision, input_order, input_path, process_reason, created_at)
+                         VALUES (?1, ?2, 'process', ?3, 'seed/path.png', 'full_run', datetime('now'))",
+                        params![run_id, image_file_id, next_order],
+                    )?;
+                    let run_input_id: i64 = conn.last_insert_rowid();
                     conn.execute(
                         "INSERT INTO extraction_results
-                        (id, run_id, image_file_id, status, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, 'ok', datetime('now'), datetime('now'))",
-                        params![&new_id, run_id, image_file_id],
+                        (id, run_id, run_input_id, image_file_id, status, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, 'ok', datetime('now'), datetime('now'))",
+                        params![&new_id, run_id, run_input_id, image_file_id],
                     )?;
                     new_id
                 }

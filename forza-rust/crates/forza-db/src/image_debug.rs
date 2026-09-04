@@ -533,12 +533,44 @@ pub fn get_image_debug_detail(
     let timeline = build_timeline(&image_name, &results, &attempts, &laps, &reviews);
 
     // One-row cases list for the header title area (single image).
-    let cases = list_image_debug_cases(conn, 1)
-        .map(|mut v: Vec<ImageDebugCase>| {
-            v.retain(|c| c.image_file_id == image_file_id);
-            v
+    // NOTE: never derive this from `list_image_debug_cases(conn, 1)` — that
+    // fetches only the globally most-recent image, leaving `cases` silently
+    // empty for every other image. Build the row from this image's own data.
+    let latest = results.first();
+    let artifact_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM model_artifacts WHERE image_file_id = ?1",
+            [image_file_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let processing_status = latest
+        .map(|r| match r.status.as_str() {
+            "pending" | "running" => "processing".to_string(),
+            "ok" => "processed_ok".to_string(),
+            "cancelled" => "cancelled".to_string(),
+            _ => "processed_error".to_string(),
         })
-        .unwrap_or_default();
+        .unwrap_or_else(|| "unprocessed".to_string());
+    let cases = vec![ImageDebugCase {
+        image_file_id: id.clone(),
+        image_name: image_name.clone(),
+        race_date: None,
+        file_status: _file_status.clone(),
+        processing_status,
+        best_lap_status: _best_lap_status.clone(),
+        latest_result_id: latest.map(|r| r.id.clone()),
+        latest_result_status: latest.map(|r| r.status.clone()),
+        run_id: latest.map(|r| r.run_id.clone()),
+        backend: latest.and_then(|r| r.backend.clone()),
+        model: latest.and_then(|r| r.model.clone()),
+        prompt_name: latest.and_then(|r| r.prompt_name.clone()),
+        attempt_count: latest.map(|r| r.attempt_count).unwrap_or(0),
+        lap_count: laps.len() as i64,
+        review_count: reviews.len() as i64,
+        artifact_count,
+        created_at: _created_at.clone().or(_updated_at.clone()),
+    }];
 
     Ok(Some(ImageDebugDetail {
         image_file_id: id.clone(),
@@ -560,15 +592,14 @@ pub fn get_image_debug_detail_by_result(
     conn: &Connection,
     extraction_result_id: &str,
 ) -> Result<Option<ImageDebugDetail>, DbError> {
-    let image_file_id: Option<String> = conn
-        .query_row(
-            "SELECT image_file_id FROM extraction_results WHERE id = ?1",
-            [extraction_result_id],
-            |row| row.get(0),
-        )
-        .ok();
-    let Some(image_file_id) = image_file_id else {
-        return Ok(None);
+    let image_file_id: String = match conn.query_row(
+        "SELECT image_file_id FROM extraction_results WHERE id = ?1",
+        [extraction_result_id],
+        |row| row.get(0),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+        Err(e) => return Err(DbError::from(e)),
     };
     get_image_debug_detail(conn, &image_file_id, Some(extraction_result_id))
 }

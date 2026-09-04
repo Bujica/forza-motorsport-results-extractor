@@ -32,7 +32,10 @@ pub fn candidate_config(
     path: &Path,
     changes: &std::collections::BTreeMap<String, String>,
 ) -> Result<AppConfig, String> {
-    let (base, _) = load_config(path, true).map_err(|e| e.message)?;
+    // Load leniently: a stale invalid value in an unrelated field must not
+    // block saving a valid edit. The candidate as a whole is still validated
+    // below, so nothing invalid can be written.
+    let (base, _) = load_config(path, false).map_err(|e| e.message)?;
     let mut candidate = base;
     // BTreeMap iterates sorted; Python applies in dict insertion order, which
     // for the GUI's single-edit flow is equivalent.
@@ -167,7 +170,10 @@ fn apply_llm(cfg: &mut AppConfig, key: &str, value: &str) -> Result<(), String> 
         "url" => llm.url = value.to_string(),
         "model" => llm.model = value.to_string(),
         "image_format" => llm.image_format = value.to_string(),
-        "reasoning_mode" => llm.reasoning_mode = (!value.is_empty()).then(|| value.to_string()),
+        "reasoning_mode" => {
+            let v = value.trim().to_lowercase();
+            llm.reasoning_mode = (!v.is_empty()).then_some(v);
+        }
         other => return Err(format!("Unknown LLM field: {other}")),
     }
     Ok(())

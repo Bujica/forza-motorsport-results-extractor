@@ -27,10 +27,13 @@ pub fn rebuild(conn: &Connection, gamertag: &str) -> Result<RebuildOutcome, Stri
     let (inserted, kept, auto_resolved) =
         upsert_review_cases(conn, &candidates).map_err(|e| e.to_string())?;
 
-    // Run-level review counters.
-    conn.execute_batch(
-        "UPDATE extraction_runs SET review_case_count=
-            (SELECT COUNT(*) FROM review_cases WHERE status='open');",
+    // Run-level review counters, per run (a bare uncorrelated subquery would
+    // stamp every run with the *global* open count, clobbering `complete_run`).
+    conn.execute(
+        "UPDATE extraction_runs SET review_case_count = (
+            SELECT COUNT(*) FROM review_cases rc WHERE rc.status = 'open' AND rc.run_id = extraction_runs.id
+        )",
+        [],
     )
     .map_err(|e| e.to_string())?;
 

@@ -82,8 +82,16 @@ pub fn replace_active_snapshot(
         .unwrap_or(0);
 
     // Atomic snapshot replacement — use explicit transaction so a failure doesn't leave
-    // the DB with imports deactivated but no new rows.
-    let _ = conn.execute_batch("BEGIN IMMEDIATE");
+    // the DB with imports deactivated but no new rows. Never swallow BEGIN:
+    // a COMMIT failure must propagate (caller was told nothing was replaced),
+    // and running nested inside someone else's transaction would let our
+    // ROLLBACK undo the caller's outer work.
+    if !conn.is_autocommit() {
+        return Err(DbError::SchemaState {
+            message: "replace_active_snapshot requires autocommit (no outer transaction)".into(),
+        });
+    }
+    conn.execute_batch("BEGIN IMMEDIATE").map_err(|e| DbError::Pool(format!("BEGIN IMMEDIATE: {e}")))?;
     let inner: Result<String, DbError> = (|| {
         conn.execute(
             "UPDATE external_record_imports SET active = 0 WHERE active = 1",
@@ -134,7 +142,8 @@ pub fn replace_active_snapshot(
     })();
     match inner {
         Ok(id) => {
-            let _ = conn.execute_batch("COMMIT");
+            conn.execute_batch("COMMIT")
+                .map_err(|e| DbError::Pool(format!("COMMIT snapshot: {e}")))?;
             Ok(id)
         }
         Err(e) => {

@@ -164,40 +164,52 @@ impl ImageInventoryService {
                 continue;
             };
 
-            let existing_path: Option<String> = conn
+            // A different file now occupying a known path must NOT rewrite the
+            // existing row's identity in place: past extraction_results /
+            // lap_records reference that row id. Retire the old owner
+            // (missing) and fall through to insert a fresh row below —
+            // parity with `upsert_image_for_run`.
+            let existing_path: Option<(String, String)> = conn
                 .query_row(
-                    "SELECT id FROM image_files WHERE current_path = ?1 LIMIT 1",
+                    "SELECT id, file_hash FROM image_files WHERE current_path = ?1 LIMIT 1",
                     [&path_text],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .optional()?;
-            if let Some(id) = existing_path {
+            if let Some((id, db_hash)) = existing_path {
+                if db_hash == file_hash {
+                    conn.execute(
+                        "UPDATE image_files
+                         SET current_name=?2, file_status='available', missing_at=NULL,
+                             size_bytes=?3, width_px=?4, height_px=?5,
+                             bit_depth=?6, color_mode=?7, image_metadata_json=?8,
+                             file_modified_at=?9, race_datetime=?10, race_date=?11,
+                             race_datetime_source=?12,
+                             last_seen_at=datetime('now'), updated_at=datetime('now')
+                         WHERE id=?1",
+                        params![
+                            id,
+                            name,
+                            metadata.file_size_bytes as i64,
+                            metadata.width_px as i64,
+                            metadata.height_px as i64,
+                            metadata.bit_depth.map(|b| b as i64),
+                            metadata.color_mode,
+                            metadata.image_metadata_json,
+                            metadata.file_modified_at,
+                            metadata.race_datetime,
+                            metadata.race_date,
+                            metadata.race_datetime_source,
+                        ],
+                    )?;
+                    continue;
+                }
                 conn.execute(
-                    "UPDATE image_files
-                     SET current_name=?2, file_hash=?3, file_status='available',
-                         size_bytes=?4, width_px=?5, height_px=?6,
-                         bit_depth=?7, color_mode=?8, image_metadata_json=?9,
-                         file_modified_at=?10, race_datetime=?11, race_date=?12,
-                         race_datetime_source=?13,
-                         last_seen_at=datetime('now'), updated_at=datetime('now')
-                     WHERE id=?1",
-                    params![
-                        id,
-                        name,
-                        file_hash,
-                        metadata.file_size_bytes as i64,
-                        metadata.width_px as i64,
-                        metadata.height_px as i64,
-                        metadata.bit_depth.map(|b| b as i64),
-                        metadata.color_mode,
-                        metadata.image_metadata_json,
-                        metadata.file_modified_at,
-                        metadata.race_datetime,
-                        metadata.race_date,
-                        metadata.race_datetime_source,
-                    ],
+                    "UPDATE image_files SET file_status='missing', missing_at=datetime('now'),
+                            updated_at=datetime('now') WHERE id=?1",
+                    params![id],
                 )?;
-                continue;
+                // Fall through: insert a new row for the new bytes.
             }
 
             let canonical_id: Option<String> = conn

@@ -213,13 +213,15 @@ pub fn insert_input_and_result(
     result_status: &str,
     input_order: i64,
 ) -> Result<String, DbError> {
-    let input_id: i64 = conn.query_row(
-        "INSERT INTO run_inputs (id, run_id, image_file_id, decision, input_order, input_path, created_at)
-         SELECT COALESCE(MAX(id), 0) + 1, ?1, ?2, ?3, ?4, 'seed/path.png', datetime('now')
-         FROM run_inputs RETURNING id",
+    // `run_inputs.id` is `INTEGER PRIMARY KEY AUTOINCREMENT` (atomic,
+    // worker-safe): never compute `MAX(id)+1` client-side — concurrent
+    // workers snapshotting the same MAX would collide on the PK.
+    conn.execute(
+        "INSERT INTO run_inputs (run_id, image_file_id, decision, input_order, input_path, created_at)
+         VALUES (?1, ?2, ?3, ?4, 'seed/path.png', datetime('now'))",
         params![run_id, image_file_id, decision, input_order],
-        |row| row.get(0),
     )?;
+    let input_id: i64 = conn.last_insert_rowid();
     let result_id = format!("res-{run_id}-{input_id}");
     conn.execute(
         "INSERT INTO extraction_results
@@ -241,11 +243,25 @@ pub fn insert_processed_input(
     process_reason: &str,
     input_order: i64,
 ) -> Result<String, DbError> {
-    let input_id: i64 = conn.query_row(
-        "INSERT INTO run_inputs (id, run_id, image_file_id, decision, input_order,
+    insert_processed_input_full(conn, run_id, image_file_id, input_path, process_reason, input_order)
+        .map(|(result_id, _)| result_id)
+}
+
+/// Same as `insert_processed_input` but also returns the `run_inputs` row id,
+/// so multi-worker code can stamp metadata with `WHERE id = ?` instead of the
+/// non-unique `(run_id, input_order)` predicate.
+pub fn insert_processed_input_full(
+    conn: &Connection,
+    run_id: &str,
+    image_file_id: &str,
+    input_path: &str,
+    process_reason: &str,
+    input_order: i64,
+) -> Result<(String, i64), DbError> {
+    conn.execute(
+        "INSERT INTO run_inputs (run_id, image_file_id, decision, input_order,
                                  input_path, process_reason, created_at)
-         SELECT COALESCE(MAX(id), 0) + 1, ?1, ?2, 'process', ?3, ?4, ?5, datetime('now')
-         FROM run_inputs RETURNING id",
+         VALUES (?1, ?2, 'process', ?3, ?4, ?5, datetime('now'))",
         params![
             run_id,
             image_file_id,
@@ -253,8 +269,8 @@ pub fn insert_processed_input(
             input_path,
             process_reason
         ],
-        |row| row.get(0),
     )?;
+    let input_id: i64 = conn.last_insert_rowid();
     let result_id = format!("res-{run_id}-{input_id}");
     conn.execute(
         "INSERT INTO extraction_results
@@ -262,7 +278,7 @@ pub fn insert_processed_input(
          VALUES (?1, ?2, ?3, ?4, 'running', 0, datetime('now'), datetime('now'))",
         params![result_id, run_id, input_id, image_file_id],
     )?;
-    Ok(result_id)
+    Ok((result_id, input_id))
 }
 
 /// Primitive attempt row for persistence — converted from the backend's
@@ -432,6 +448,21 @@ pub struct ResultStats<'a> {
 
 /// Insert a standalone run_input row (skip/duplicate/missing decisions —
 /// no extraction_result attached).
+///
+/// `duplicate` rows must carry the doctor-required evidence (`duplicate_kind`,
+/// `file_hash`/`duplicate_of_hash`, and `duplicate_of_input_id` for batch
+/// duplicates); callers that omit it produce permanent doctor Errors.
+pub struct RunInputOnly<'a> {
+    pub image_file_id: Option<&'a str>,
+    pub decision: &'a str,
+    pub input_order: i64,
+    pub input_path: &'a str,
+    pub file_hash: Option<&'a str>,
+    pub duplicate_kind: Option<&'a str>,
+    pub duplicate_of_hash: Option<&'a str>,
+    pub duplicate_of_input_id: Option<i64>,
+}
+
 pub fn insert_run_input_only(
     conn: &Connection,
     run_id: &str,
@@ -440,10 +471,43 @@ pub fn insert_run_input_only(
     input_order: i64,
     input_path: &str,
 ) -> Result<i64, DbError> {
+    insert_run_input_full(
+        conn,
+        run_id,
+        &RunInputOnly {
+            image_file_id,
+            decision,
+            input_order,
+            input_path,
+            file_hash: None,
+            duplicate_kind: None,
+            duplicate_of_hash: None,
+            duplicate_of_input_id: None,
+        },
+    )
+}
+
+pub fn insert_run_input_full(
+    conn: &Connection,
+    run_id: &str,
+    input: &RunInputOnly<'_>,
+) -> Result<i64, DbError> {
     conn.execute(
-        "INSERT INTO run_inputs (id, run_id, image_file_id, decision, input_order, input_path, created_at)
-         SELECT COALESCE(MAX(id), 0) + 1, ?1, ?2, ?3, ?4, ?5, datetime('now') FROM run_inputs",
-        params![run_id, image_file_id, decision, input_order, input_path],
+        "INSERT INTO run_inputs (run_id, image_file_id, decision, input_order, input_path,
+                                 file_hash, duplicate_kind, duplicate_of_hash, duplicate_of_input_id,
+                                 created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))",
+        params![
+            run_id,
+            input.image_file_id,
+            input.decision,
+            input.input_order,
+            input.input_path,
+            input.file_hash,
+            input.duplicate_kind,
+            input.duplicate_of_hash,
+            input.duplicate_of_input_id,
+        ],
     )?;
     Ok(conn.last_insert_rowid())
 }
@@ -488,14 +552,19 @@ pub fn find_image_id_by_hash(
     conn: &Connection,
     file_hash: &str,
 ) -> Result<Option<String>, DbError> {
-    let id = conn
-        .query_row(
-            "SELECT id FROM image_files WHERE file_hash=?1 AND file_status='available' LIMIT 1",
-            params![file_hash],
-            |r| r.get::<_, String>(0),
-        )
-        .ok();
-    Ok(id)
+    // Match "no rows" explicitly: `.ok()` would conflate a transient SQLite
+    // failure (busy/corrupt I/O) with "hash not present", leading the caller
+    // to insert a second `image_files` row for an existing hash.
+    use rusqlite::Error as RusqliteError;
+    match conn.query_row(
+        "SELECT id FROM image_files WHERE file_hash=?1 AND file_status='available' LIMIT 1",
+        params![file_hash],
+        |r| r.get::<_, String>(0),
+    ) {
+        Ok(id) => Ok(Some(id)),
+        Err(RusqliteError::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(DbError::from(e)),
+    }
 }
 
 /// Insert an accepted attempt for a result. The caller must ensure the
@@ -528,8 +597,17 @@ pub fn insert_accepted_attempt(
 /// Each run is wrapped in try/except so one corrupt run does not prevent
 /// recovery of the others (Python `_reconcile_abandoned_runs` semantics).
 pub fn reconcile_abandoned_runs(conn: &Connection) -> Result<usize, DbError> {
-    let mut stmt =
-        conn.prepare("SELECT id FROM extraction_runs WHERE status='running' ORDER BY created_at")?;
+    // Recover `pending` runs too: a crash between `insert_run` ('pending')
+    // and `mark_run_running` used to leave rows no later invocation ever
+    // touched. Only recent-pending is unclaimed work; very fresh rows (same
+    // second, e.g. a concurrent starter) are left alone.
+    let mut stmt = conn.prepare(
+        "SELECT id FROM extraction_runs
+          WHERE status = 'running'
+             OR (status = 'pending'
+                 AND (created_at IS NULL OR created_at < datetime('now', '-2 minutes')))
+          ORDER BY created_at",
+    )?;
 
     let run_ids: Vec<String> = stmt
         .query_map([], |r| r.get::<_, String>(0))

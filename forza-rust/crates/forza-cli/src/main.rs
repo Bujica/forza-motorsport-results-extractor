@@ -21,9 +21,14 @@ struct Cli {
     #[arg(long, default_value = "forza_config.ini")]
     config: PathBuf,
 
-    /// Enable verbose debug output.
+    /// Enable verbose debug output (display only; never changes parsing).
     #[arg(long)]
     debug: bool,
+
+    /// Strict config parsing: abort on the first invalid value instead of
+    /// falling back to defaults with a warning.
+    #[arg(long)]
+    strict: bool,
 
     /// Subcommand to run.
     #[command(subcommand)]
@@ -127,41 +132,61 @@ enum MaintenanceCommand {
     Heal,
 }
 
+/// Resolve the configured database path. Bare relative paths are resolved
+/// against the config file's directory, not the process CWD — otherwise
+/// `forza --config /other/dir/forza_config.ini db-status` silently opens
+/// `./data/forza.sqlite3` instead of `/other/dir/data/forza.sqlite3`.
+fn resolve_db_path(config_path: &Path, configured: PathBuf) -> PathBuf {
+    if configured.is_absolute() {
+        return configured;
+    }
+    match config_path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.join(configured),
+        _ => configured,
+    }
+}
+
 fn database_file(config_path: &Path) -> PathBuf {
     match forza_config::load_config(config_path, false) {
-        Ok((cfg, _)) => cfg.database_file,
+        Ok((cfg, _)) => resolve_db_path(config_path, cfg.database_file),
         Err(_) => PathBuf::from("data/forza.sqlite3"),
     }
 }
 
-/// Count rows in a table; returns 0 if the table does not exist.
-fn table_count(conn: &Connection, name: &str) -> i64 {
+/// Count rows in a table; `None` when the table is missing/unreadable (never
+/// conflate corruption with "empty" — callers print ERR instead of 0).
+fn table_count(conn: &Connection, name: &str) -> Option<i64> {
     conn.query_row(&format!("SELECT COUNT(*) FROM \"{name}\""), [], |r| {
         r.get(0)
     })
-    .unwrap_or(0)
+    .ok()
 }
 
 fn cmd_config_check(config_path: &Path) -> anyhow::Result<()> {
+    // Lenient load so every problem is reported, but ANY parse warning fails
+    // the check: previously `workers=abc` warned, defaulted to 1, and still
+    // printed "OK" with exit 0.
     let (cfg, warnings) = forza_config::load_config(config_path, false)?;
     for warning in &warnings {
         println!("warning: {warning}");
     }
-    match forza_config::validate_config(&cfg) {
-        Ok(()) => {
-            println!("config-check: OK");
-            println!("  database_file = {}", cfg.database_file.display());
-            println!("  input_dir     = {}", cfg.input_dir.display());
-            Ok(())
-        }
-        Err(errors) => {
-            eprintln!("config-check failed:");
-            for error in errors {
-                eprintln!("  - {error}");
-            }
-            std::process::exit(1);
+    let validation = forza_config::validate_config(&cfg);
+    if warnings.is_empty() && validation.is_ok() {
+        println!("config-check: OK");
+        println!("  database_file = {}", cfg.database_file.display());
+        println!("  input_dir     = {}", cfg.input_dir.display());
+        return Ok(());
+    }
+    eprintln!("config-check failed:");
+    for warning in &warnings {
+        eprintln!("  - config value ignored: {warning}");
+    }
+    if let Err(errors) = validation {
+        for error in errors {
+            eprintln!("  - {error}");
         }
     }
+    std::process::exit(1);
 }
 
 fn cmd_db_status(db_path: &Path) -> anyhow::Result<()> {
@@ -199,21 +224,24 @@ fn cmd_db_status(db_path: &Path) -> anyhow::Result<()> {
     let external_record_imports = table_count(&conn, "external_record_imports");
     let external_lap_records = table_count(&conn, "external_lap_records");
 
+    fn show(count: Option<i64>) -> String {
+        count.map(|n| n.to_string()).unwrap_or_else(|| "ERR (unreadable)".to_string())
+    }
     println!();
     println!("Relational store");
-    println!("  image_files         : {image_files}");
-    println!("  extraction_runs     : {extraction_runs}");
-    println!("  extraction_results  : {extraction_results}");
-    println!("  extraction_attempts : {extraction_attempts}");
-    println!("  lap_records         : {lap_records}");
-    println!("  review_cases        : {review_cases}");
-    println!("  review_corrections  : {review_corrections}");
-    println!("  image_flags         : {image_flags}");
-    println!("  export_artifacts    : {export_artifacts}");
-    println!("  reference_tracks    : {reference_tracks}");
-    println!("  reference_cars      : {reference_cars}");
-    println!("  external_record_imports : {external_record_imports}");
-    println!("  external_lap_records    : {external_lap_records}");
+    println!("  image_files         : {}", show(image_files));
+    println!("  extraction_runs     : {}", show(extraction_runs));
+    println!("  extraction_results  : {}", show(extraction_results));
+    println!("  extraction_attempts : {}", show(extraction_attempts));
+    println!("  lap_records         : {}", show(lap_records));
+    println!("  review_cases        : {}", show(review_cases));
+    println!("  review_corrections  : {}", show(review_corrections));
+    println!("  image_flags         : {}", show(image_flags));
+    println!("  export_artifacts    : {}", show(export_artifacts));
+    println!("  reference_tracks    : {}", show(reference_tracks));
+    println!("  reference_cars      : {}", show(reference_cars));
+    println!("  external_record_imports : {}", show(external_record_imports));
+    println!("  external_lap_records    : {}", show(external_lap_records));
 
     Ok(())
 }
@@ -300,8 +328,10 @@ fn ensure_exclusive_access(db_path: &Path) -> anyhow::Result<()> {
     // so we fall back to just BEGIN EXCLUSIVE and catch SQLITE_BUSY.
     match conn.execute("BEGIN EXCLUSIVE", []) {
         Ok(_) => {
-            let conn2 = Connection::open(db_path)?;
-            let _ = conn2.execute("COMMIT", []);
+            // COMMIT on the SAME connection that began the transaction: a
+            // COMMIT on a second connection is a no-op and would hold the
+            // lock until `conn` drops (longer than intended).
+            let _ = conn.execute("COMMIT", []);
             Ok(())
         }
         Err(e) => {
@@ -371,16 +401,13 @@ fn cmd_db_reset(db_path: &Path, yes: bool) -> anyhow::Result<()> {
 
 fn cmd_run(
     config_path: &Path,
-    debug: bool,
+    strict: bool,
     dry_run: bool,
     force: bool,
     retry_errors: bool,
     limit: Option<usize>,
 ) -> anyhow::Result<()> {
-    let (cfg, warnings) = forza_config::load_config(config_path, debug)?;
-    for warning in &warnings {
-        eprintln!("warning: {warning}");
-    }
+    let cfg = load_validated_config(config_path, strict)?;
     if force && retry_errors {
         return Err(anyhow::anyhow!(
             "--force and --retry-errors cannot be combined."
@@ -401,9 +428,10 @@ fn cmd_run(
         for (path, hash) in failed {
             let candidate = PathBuf::from(&path);
             if candidate.exists() {
+                let live_hash = forza_pipeline::file_hash(&candidate).unwrap_or(hash);
                 new_images.push(forza_pipeline::planning::DiscoveredImage {
                     path: candidate,
-                    file_hash: hash,
+                    file_hash: live_hash,
                 });
             }
         }
@@ -548,13 +576,32 @@ fn cmd_live_run(
     Ok(())
 }
 
+/// Lenient load + print warnings, then enforce `validate_config`: run /
+/// rebuild / export must not proceed with `workers=0`, `image_format=bmp`
+/// etc. into obscure downstream failures when `config-check` already fails.
+fn load_validated_config(config_path: &Path, strict: bool) -> anyhow::Result<forza_config::AppConfig> {
+    let (cfg, warnings) = forza_config::load_config(config_path, strict)?;
+    for warning in &warnings {
+        eprintln!("warning: {warning}");
+    }
+    match forza_config::validate_config(&cfg) {
+        Ok(()) => Ok(cfg),
+        Err(errors) => Err(anyhow::anyhow!(
+            "configuration invalid (run `forza config-check`): {}",
+            errors.join("; ")
+        )),
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let debug = cli.debug;
+    let strict = cli.strict;
+    let _ = debug;
     match cli.command {
         Command::Gui => forza_gui::run(&cli.config),
         Command::Rebuild => {
-            let (cfg, _) = forza_config::load_config(&cli.config, debug)?;
+            let cfg = load_validated_config(&cli.config, strict)?;
             let conn = forza_db::open_connection(&cfg.database_file)?;
             let outcome = forza_app::services::rebuild::rebuild(&conn, &cfg.gamertag)
                 .map_err(|e| anyhow::anyhow!(e))?;
@@ -572,9 +619,9 @@ fn main() -> anyhow::Result<()> {
             force,
             retry_errors,
             limit,
-        } => cmd_run(&cli.config, debug, dry_run, force, retry_errors, limit),
+        } => cmd_run(&cli.config, strict, dry_run, force, retry_errors, limit),
         Command::Export { out, pdf } => {
-            let (cfg, _) = forza_config::load_config(&cli.config, debug)?;
+            let cfg = load_validated_config(&cli.config, strict)?;
             let conn = forza_db::open_connection(&cfg.database_file)?;
             let rows =
                 forza_db::repositories::laps::list_clean_flat(&conn, &cfg.gamertag.to_lowercase())?;

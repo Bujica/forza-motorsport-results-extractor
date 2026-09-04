@@ -238,6 +238,10 @@ pub enum Response {
     Overview(Result<forza_app::OverviewSnapshot, String>),
     Settings(Result<SettingsOutcome, String>),
     ImportDone(Result<forza_app::services::external_import::ExternalImportResult, String>),
+    /// A job thread panicked; carries a display message. The UI must reset
+    /// any IN_FLIGHT flag it set (the only reset points are delivered
+    /// responses) so inventory/review don't wedge behind "loading…".
+    Error(String),
 }
 
 /// Pure handler (no channels) so tests can exercise it headlessly.
@@ -607,6 +611,9 @@ fn rename_images(ctx: &WorkerContext, image_ids: &[String]) -> Result<String, St
             "UPDATE image_files SET current_path=?2, current_name=?3, file_status='available', missing_at=NULL, updated_at=datetime('now') WHERE id=?1",
             rusqlite::params![image_id, target.to_string_lossy(), target.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()],
         ) {
+            // Roll the file back: otherwise the row keeps pointing at the old
+            // path and the image shows "missing" until a rescan.
+            let _ = std::fs::rename(&target, &source);
             errors.push(format!("{}: DB update failed: {}", image_id, error));
         } else {
             changed += 1;
@@ -652,7 +659,22 @@ fn export_images(
             continue;
         };
         let safe = sanitize_export_name(&name);
-        if std::fs::write(std::path::Path::new(dest_dir).join(safe), bytes).is_ok() {
+        // Never silently overwrite: first writer wins, later same-name files
+        // get a `-N` suffix so no export is lost without accounting.
+        let mut dest = std::path::Path::new(dest_dir).join(&safe);
+        let mut counter = 2u32;
+        while dest.exists() {
+            let suffixed = match dest.file_stem().and_then(|s| s.to_str()) {
+                Some(stem) => match dest.extension().and_then(|e| e.to_str()) {
+                    Some(ext) => format!("{stem}-{counter}.{ext}"),
+                    None => format!("{stem}-{counter}"),
+                },
+                None => format!("{safe}-{counter}"),
+            };
+            dest = std::path::Path::new(dest_dir).join(suffixed);
+            counter += 1;
+        }
+        if std::fs::write(&dest, bytes).is_ok() {
             exported += 1;
         } else {
             skipped += 1;
@@ -743,27 +765,48 @@ fn delete_images(
             continue;
         };
         // Safety: only delete files inside the configured input folder.
-        let allowed = std::path::Path::new(&path)
-            .canonicalize()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d == std::path::Path::new(&input_dir)))
-            .unwrap_or(false);
+        // Both sides are canonicalized (Windows `canonicalize()` yields
+        // `\\?\C:\…` verbatim paths) and subfolders are allowed via
+        // `starts_with` — a bare `parent == input_dir` check would refuse
+        // everything and reject legitimate subfolder images.
+        let allowed = (|| -> Option<bool> {
+            let canon_path = std::path::Path::new(&path).canonicalize().ok()?;
+            let canon_dir = std::path::Path::new(&input_dir).canonicalize().ok()?;
+            // The file itself or its parent must live under the input dir.
+            if canon_path.starts_with(&canon_dir) {
+                return Some(true);
+            }
+            let parent = canon_path.parent()?;
+            Some(parent.starts_with(&canon_dir))
+        })()
+        .unwrap_or(false);
         if !allowed {
             refused += 1;
-            if refusal_sample.len() < 80 {
+            if refusal_sample.len() < 2000 {
                 refusal_sample.push_str(&format!("{name} (outside input folder); "));
             }
             continue;
         }
-        if let Err(e) = std::fs::remove_file(&path) {
-            refused += 1;
-            if refusal_sample.len() < 80 {
-                refusal_sample.push_str(&format!("{name} ({e}); "));
-            }
-            continue;
-        }
+        // Delete the DB row FIRST: if FK RESTRICT refuses (extraction
+        // evidence exists) the file on disk must be preserved. Deleting the
+        // file first would cause silent data loss with a misleading
+        // "has extraction evidence" report.
         match conn.execute("DELETE FROM image_files WHERE id = ?1", [id]) {
-            Ok(n) if n > 0 => deleted += 1,
+            Ok(n) if n > 0 => {
+                if let Err(e) = std::fs::remove_file(&path) {
+                    // Row is gone but the file remains: report it explicitly
+                    // (recoverable via rescan) instead of counting success.
+                    refused += 1;
+                    if refusal_sample.len() < 2000 {
+                        refusal_sample.push_str(&format!("{name} (db-deleted-file-kept: {e}); "));
+                    }
+                    continue;
+                }
+                deleted += 1;
+            }
+            Ok(_) => {
+                refused += 1;
+            }
             Err(e) => {
                 refused += 1;
                 let reason = if e.to_string().contains("FOREIGN KEY") {
@@ -772,11 +815,10 @@ fn delete_images(
                     e.to_string()
                 };
                 let reason = reason.as_str();
-                if refusal_sample.len() < 80 {
+                if refusal_sample.len() < 2000 {
                     refusal_sample.push_str(&format!("{name}: {reason}; "));
                 }
             }
-            _ => {}
         }
     }
     Ok((deleted, refused, refusal_sample))
@@ -833,10 +875,14 @@ fn read_log_file(path: &Path) -> String {
     }
     match std::fs::read_to_string(path) {
         Ok(content) if content.len() > 200_000 => {
-            let tail = &content[content.len() - 200_000..];
-            // Avoid cutting in the middle of a UTF-8 sequence: find next char boundary.
-            let start = tail.char_indices().next().map(|(i, _)| i).unwrap_or(0);
-            format!("… [truncated to last 200KB] …\n{}", &tail[start..])
+            // Find the cut point BEFORE slicing: `content.len()` is bytes,
+            // so slicing first panics when a multi-byte char straddles the
+            // cut (this app logs "✓"/"→"). Advance to the next char boundary.
+            let mut cut = content.len() - 200_000;
+            while cut < content.len() && !content.is_char_boundary(cut) {
+                cut += 1;
+            }
+            format!("… [truncated to last 200KB] …\n{}", &content[cut..])
         }
         Ok(content) => content,
         Err(e) => format!("Could not read log file: {}\n{e}", path.display()),
@@ -871,7 +917,18 @@ where
                 std::thread::Builder::new()
                     .name("forza-gui-worker-job".into())
                     .spawn(move || {
-                        let response = handle_request(&ctx, &service, &request);
+                        // Never let a panicking job wedge the coalescing flags:
+                        // the UI only resets IN_FLIGHT on a delivered response,
+                        // so a silent thread death would freeze inventory/review
+                        // behind "loading…" forever.
+                        let response = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                            || handle_request(&ctx, &service, &request),
+                        )) {
+                            Ok(r) => r,
+                            Err(_) => Response::Error(
+                                "background job panicked; please retry".to_string(),
+                            ),
+                        };
                         if let Ok(f) = on_response.lock() {
                             f(response);
                         }

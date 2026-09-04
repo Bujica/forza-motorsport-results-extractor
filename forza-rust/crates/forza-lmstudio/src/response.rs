@@ -122,10 +122,13 @@ pub fn semantic_retry_issues(parsed: &Value) -> Vec<String> {
         .filter_map(|e| e.get("bl"))
         .map(Some)
         .collect();
+    // Mirror the validator's extraction (`to_string` + quote-trim): using
+    // `as_str` here counted numeric lap times as null and forced a wasted
+    // semantic retry for payloads the validator itself accepts.
     if !lap_values.is_empty()
         && lap_values.iter().all(|bl| {
-            bl.and_then(|v| v.as_str())
-                .and_then(|s| parse_lap_time_ms(Some(s)))
+            bl.map(|v| strip_dirty_symbol(v.to_string().trim_matches('"')))
+                .and_then(|s| parse_lap_time_ms(Some(&s)))
                 .is_none()
         })
     {

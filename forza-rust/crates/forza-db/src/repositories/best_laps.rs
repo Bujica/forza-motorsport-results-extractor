@@ -143,6 +143,10 @@ pub fn mark_best_laps(
     gamertag: Option<&str>,
 ) -> Result<Vec<String>, crate::DbError> {
     let rows = LapExportRow::load_all(conn)?;
+    // All-or-nothing: a crash between clear and set used to leave best-lap
+    // flags half-cleared (wrong export until the next rebuild).
+    conn.execute_batch("BEGIN IMMEDIATE")?;
+    let outcome: Result<Vec<String>, crate::DbError> = (|| {
     for row in &rows {
         conn.execute(
             "UPDATE lap_records SET is_best_lap=0 WHERE id=?1",
@@ -192,4 +196,15 @@ pub fn mark_best_laps(
     }
 
     Ok(winners.into_iter().map(|w| w.id).collect())
+    })();
+    match outcome {
+        Ok(ids) => {
+            conn.execute_batch("COMMIT")?;
+            Ok(ids)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
 }

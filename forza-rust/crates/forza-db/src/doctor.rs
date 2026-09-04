@@ -222,12 +222,23 @@ use crate::evidence::canonical_request_hash;
 // ── SQLite integrity (sqlite_checks.py) ──────────────────────────────────────
 
 fn integrity_check(conn: &Connection) -> Result<DoctorCheck, DbError> {
-    let result: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+    // `PRAGMA integrity_check` emits one row per error: collect them all
+    // instead of reporting only the first row.
+    let mut stmt = conn.prepare("PRAGMA integrity_check")?;
+    let rows: Vec<String> = stmt
+        .query_map([], |r| r.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let damaged = rows.iter().any(|r| r != "ok");
+    let detail = if damaged {
+        format!("integrity_check -> {}", rows.join("; "))
+    } else {
+        "integrity_check -> ok".to_string()
+    };
     Ok(DoctorCheck::new(
         "sqlite_integrity_check",
         DoctorSeverity::Error,
-        format!("integrity_check -> {result}"),
-        i64::from(result != "ok"),
+        detail,
+        i64::from(damaged),
     ))
 }
 

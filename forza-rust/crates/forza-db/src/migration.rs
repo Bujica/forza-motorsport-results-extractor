@@ -66,69 +66,7 @@ pub fn upgrade(path: &Path) -> Result<(), DbError> {
     }
     let mut conn = Connection::open(path)?;
 
-    match schema_status(path)? {
-        SchemaStatus::Current => {
-            if let Ok(c) = crate::open_connection(path) {
-                let _ = seed_reference_catalog(&c);
-                for (name, sql) in [
-                    (
-                        "idx_extraction_results_image_file_created",
-                        "CREATE INDEX idx_extraction_results_image_file_created ON extraction_results(image_file_id, created_at DESC, id DESC)",
-                    ),
-                    (
-                        "idx_run_inputs_image_file_latest",
-                        "CREATE INDEX idx_run_inputs_image_file_latest ON run_inputs(image_file_id, id DESC)",
-                    ),
-                ] {
-                    let exists: Option<String> = c
-                        .query_row(
-                            "SELECT name FROM sqlite_master WHERE type='index' AND name=?1",
-                            [name],
-                            |r| r.get(0),
-                        )
-                        .optional()
-                        .unwrap_or(None);
-                    if exists.is_none() {
-                        let _ = c.execute_batch(sql);
-                    }
-                }
-            }
-            return Ok(());
-        }
-        SchemaStatus::Incompatible { found } => {
-            return Err(DbError::SchemaState {
-                message: format!(
-                    "refusing to upgrade: database has user_version={found} but this build expects {SCHEMA_VERSION}; \
-                     the Rust line creates its own databases from zero"
-                ),
-            });
-        }
-        SchemaStatus::Empty => {}
-    }
-
-    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    tx.pragma_update(None, "foreign_keys", "OFF")?;
-    for statement in TABLE_DDL {
-        tx.execute_batch(statement)?;
-    }
-    for statement in INDEX_DDL {
-        tx.execute_batch(statement)?;
-    }
-    // Performance indexes for the Images inventory (not in the Python baseline but
-    // critical for the Rust GUI's filtered queries).
-    tx.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_extraction_results_image_file_created
-         ON extraction_results(image_file_id, created_at DESC, id DESC);
-         CREATE INDEX IF NOT EXISTS idx_run_inputs_image_file_latest
-         ON run_inputs(image_file_id, id DESC);",
-    )?;
-    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-    tx.pragma_update(None, "foreign_keys", "ON")?;
-    tx.commit()?;
-    crate::configure_connection(&conn)?;
-    // Seed reference catalog from embedded assets if tables are empty (first creation or legacy DB).
-    if let Ok(c) = crate::open_connection(path) {
-        let _ = seed_reference_catalog(&c);
+    fn backfill_perf_indexes(c: &Connection) -> Result<(), DbError> {
         for (name, sql) in [
             (
                 "idx_extraction_results_image_file_created",
@@ -148,10 +86,63 @@ pub fn upgrade(path: &Path) -> Result<(), DbError> {
                 .optional()
                 .unwrap_or(None);
             if exists.is_none() {
-                let _ = c.execute_batch(sql);
+                // Surface backfill failures: a silent skip leaves a DB the
+                // doctor later flags with no trace of the real cause.
+                c.execute_batch(sql).map_err(|e| {
+                    DbError::Pool(format!("backfill index {name}: {e}"))
+                })?;
             }
         }
+        Ok(())
     }
+
+    match schema_status(path)? {
+        SchemaStatus::Current => {
+            // Surface seed/backfill failures instead of swallowing them: a
+            // failing catalog seed yields a DB the doctor flags with no trace.
+            let c = crate::open_connection(path)?;
+            seed_reference_catalog(&c)?;
+            backfill_perf_indexes(&c)?;
+            return Ok(());
+        }
+        SchemaStatus::Incompatible { found } => {
+            return Err(DbError::SchemaState {
+                message: format!(
+                    "refusing to upgrade: database has user_version={found} but this build expects {SCHEMA_VERSION}; \
+                     the Rust line creates its own databases from zero"
+                ),
+            });
+        }
+        SchemaStatus::Empty => {}
+    }
+
+    // NOTE: no `PRAGMA foreign_keys=OFF/ON` around the build: that pragma is
+    // documented as a no-op inside a transaction, so the old toggle was a
+    // false guarantee. Fresh `Connection::open` leaves FK off by default,
+    // which is what the DDL build relies on; `configure_connection` enables
+    // FK (plus WAL/busy-timeout) on the connection afterwards.
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    for statement in TABLE_DDL {
+        tx.execute_batch(statement)?;
+    }
+    for statement in INDEX_DDL {
+        tx.execute_batch(statement)?;
+    }
+    // Performance indexes for the Images inventory (not in the Python baseline but
+    // critical for the Rust GUI's filtered queries).
+    tx.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_extraction_results_image_file_created
+         ON extraction_results(image_file_id, created_at DESC, id DESC);
+         CREATE INDEX IF NOT EXISTS idx_run_inputs_image_file_latest
+         ON run_inputs(image_file_id, id DESC);",
+    )?;
+    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    tx.commit()?;
+    crate::configure_connection(&conn)?;
+    // Seed reference catalog from embedded assets if tables are empty (first creation or legacy DB).
+    let c = crate::open_connection(path)?;
+    seed_reference_catalog(&c)?;
+    backfill_perf_indexes(&c)?;
     Ok(())
 }
 
