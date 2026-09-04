@@ -453,9 +453,20 @@ fn num(v: f64) -> String {
 
 // ── Page drawing primitives ──────────────────────────────────────────────────
 
+/// Clickable rectangle jumping to a named destination (`/Dests` in the
+/// catalog). Coordinates are PDF points with the origin at bottom-left.
+struct PdfLink {
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+    dest: String,
+}
+
 #[derive(Default)]
 struct Page {
     ops: String,
+    links: Vec<PdfLink>,
 }
 
 impl Page {
@@ -622,13 +633,20 @@ pub fn render_pdf(plan: &PdfDocumentPlan, path: &Path) -> Result<HashSet<String>
     }
 
     let mut pages = renderer.pages;
-    let heading_page_numbers: Vec<usize> = heading_pages.iter().map(|p| p + 1).collect();
+    // TOC page count is known before rendering sections: with >52 tracks the
+    // index spans several pages and every section number shifts by that many
+    // (the old hardcoded `+ 1` printed wrong page numbers on full reports).
+    let toc_page_count = plan
+        .sections
+        .len()
+        .div_ceil(TOC_ENTRIES_PER_PAGE)
+        .max(1);
+    let heading_page_numbers: Vec<usize> = heading_pages.iter().map(|p| p + toc_page_count).collect();
 
-    // ── TOC pages ────────────────────────────────────────────────────────────
+    // ── TOC pages (each row links to its section) ────────────────────────────
     let mut toc_pages: Vec<Page> = Vec::new();
     {
         let entries = plan.sections.len();
-        let toc_page_count = entries.div_ceil(TOC_ENTRIES_PER_PAGE).max(1);
         for index in 0..toc_page_count {
             let mut page = Page::default();
             let cursor_top = CONTENT_TOP;
@@ -645,7 +663,8 @@ pub fn render_pdf(plan: &PdfDocumentPlan, path: &Path) -> Result<HashSet<String>
             let chunk_end = ((index + 1) * TOC_ENTRIES_PER_PAGE).min(entries);
             let mut y = title_baseline - 12.0 - 10.0;
             for (entry_idx, section) in plan.sections[chunk_start..chunk_end].iter().enumerate() {
-                let page_no = heading_page_numbers[chunk_start + entry_idx];
+                let global_idx = chunk_start + entry_idx;
+                let page_no = heading_page_numbers[global_idx];
                 page.text(
                     Font::Regular,
                     10.0,
@@ -664,6 +683,15 @@ pub fn render_pdf(plan: &PdfDocumentPlan, path: &Path) -> Result<HashSet<String>
                     y,
                     &number,
                 );
+                // The whole row is clickable (baseline y is 10pt text: glyphs
+                // span roughly y-2..y+8; pad generously for touch/mouse).
+                page.links.push(PdfLink {
+                    x0: MARGIN_SIDE,
+                    y0: y - 4.0,
+                    x1: PAGE_W - MARGIN_SIDE,
+                    y1: y + 12.0,
+                    dest: format!("sec-{global_idx}"),
+                });
                 y -= 14.0;
             }
             toc_pages.push(page);
@@ -675,7 +703,15 @@ pub fn render_pdf(plan: &PdfDocumentPlan, path: &Path) -> Result<HashSet<String>
     let mut ordered = vec![cover];
     ordered.extend(toc_pages);
     ordered.append(&mut pages);
-    let toc_page_index = 1; // first TOC page is physical page 2
+    // Named destinations: the TOC itself plus one per section heading.
+    // Ordered-page index of section i = cover + TOC pages + renderer-local.
+    let mut dests: Vec<(String, usize)> = vec![("toc".to_string(), 1)];
+    for (i, &renderer_page) in heading_pages.iter().enumerate() {
+        dests.push((
+            format!("sec-{i}"),
+            1 + toc_page_count + (renderer_page - 1),
+        ));
+    }
 
     // ── Footer on every page ─────────────────────────────────────────────────
     for (idx, page) in ordered.iter_mut().enumerate() {
@@ -695,7 +731,7 @@ pub fn render_pdf(plan: &PdfDocumentPlan, path: &Path) -> Result<HashSet<String>
         page.text(Font::Regular, 7.0, GREY, PAGE_W - MARGIN_SIDE, 15.0, "TOC");
     }
 
-    write_pdf_file(&ordered, path, toc_page_index)?;
+    write_pdf_file(&ordered, path, &dests)?;
     Ok(used_files)
 }
 
@@ -1081,10 +1117,11 @@ fn build_cover_page(plan: &PdfDocumentPlan) -> Page {
 
 // ── PDF file serialization ───────────────────────────────────────────────────
 
+/// `dests`: (destination name, ordered page index) for the catalog `/Dests`.
 fn write_pdf_file(
     pages: &[Page],
     path: &Path,
-    toc_page_index: usize,
+    dests: &[(String, usize)],
 ) -> Result<(), PdfRenderError> {
     let mut objects: Vec<Vec<u8>> = vec![Vec::new()];
     let catalog_id = add_object(&mut objects, b"PLACEHOLDER-CATALOG");
@@ -1097,13 +1134,19 @@ fn write_pdf_file(
         &mut objects,
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
     );
+    // Footer "TOC" label hotspot: the 7pt label starts at the left edge
+    // `PAGE_W - MARGIN_SIDE`, so the rect must COVER the glyphs (the old rect
+    // ended exactly where the text began — zero overlap, unclickable label).
+    let toc_label_w = text_width(Font::Regular, 7.0, "TOC");
+    let toc_x0 = PAGE_W - MARGIN_SIDE - 4.0;
+    let toc_x1 = PAGE_W - MARGIN_SIDE + toc_label_w + 6.0;
     let link_annot = add_object(
         &mut objects,
         format!(
             "<< /Type /Annot /Subtype /Link /Rect [{} {} {} {}] /Border [0 0 0] /Dest /toc >>",
-            PAGE_W - 48.0,
+            num(toc_x0),
             11.0,
-            PAGE_W - MARGIN_SIDE,
+            num(toc_x1),
             21.0
         )
         .as_bytes(),
@@ -1117,20 +1160,44 @@ fn write_pdf_file(
         stream.extend(page.ops.chars().map(|c| c as u8));
         stream.extend_from_slice(b"endstream");
         let content_id = add_object(&mut objects, &stream);
+        // Per-page row links (TOC entries) plus the shared footer TOC link.
+        let mut annot_refs = vec![format!("{link_annot} 0 R")];
+        for link in &page.links {
+            let annot_id = add_object(
+                &mut objects,
+                format!(
+                    "<< /Type /Annot /Subtype /Link /Rect [{} {} {} {}] /Border [0 0 0] /Dest /{} >>",
+                    num(link.x0),
+                    num(link.y0),
+                    num(link.x1),
+                    num(link.y1),
+                    link.dest,
+                )
+                .as_bytes(),
+            );
+            annot_refs.push(format!("{annot_id} 0 R"));
+        }
         let page_body = format!(
             "<< /Type /Page /Parent {pages_id} 0 R /MediaBox [0 0 {} {}] \
              /Resources << /Font << /F1 {font_regular} 0 R /F2 {font_bold} 0 R >> >> \
-             /Annots [{link_annot} 0 R] /Contents {content_id} 0 R >>",
+             /Annots [{}] /Contents {content_id} 0 R >>",
             num(PAGE_W),
-            num(PAGE_H)
+            num(PAGE_H),
+            annot_refs.join(" "),
         );
         page_ids.push(add_object(&mut objects, page_body.as_bytes()));
     }
 
-    let toc_page_object = page_ids[toc_page_index.min(page_ids.len() - 1)];
+    let dest_entries = dests
+        .iter()
+        .map(|(name, page_idx)| {
+            let obj = page_ids[(*page_idx).min(page_ids.len() - 1)];
+            format!("/{} [{obj} 0 R /XYZ null {} null]", name, num(PAGE_H))
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
     objects[catalog_id] = format!(
-        "<< /Type /Catalog /Pages {pages_id} 0 R /Dests << /toc [{toc_page_object} 0 R /XYZ null {} null] >> >>",
-        num(PAGE_H)
+        "<< /Type /Catalog /Pages {pages_id} 0 R /Dests << {dest_entries} >> >>"
     )
     .into_bytes();
 

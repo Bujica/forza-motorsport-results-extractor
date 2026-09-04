@@ -218,6 +218,40 @@ fn render_pdf_archives_previous_report() {
 }
 
 #[test]
+fn toc_entries_link_to_sections_and_footer_rect_covers_label() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("links.pdf");
+    let plan = build_pdf_plan(&synthetic_rows(), "TestDriver", &[]);
+    render_pdf(&plan, &path).unwrap();
+    let text = pdf_text(&std::fs::read(&path).unwrap());
+
+    // One named destination per section plus the TOC itself.
+    assert!(text.contains("/sec-0 "), "section 0 destination missing");
+    assert!(text.contains("/sec-1 "), "section 1 destination missing");
+    // TOC rows carry Link annotations to their sections.
+    assert!(text.contains("/Dest /sec-0"), "TOC row 0 has no link");
+    assert!(text.contains("/Dest /sec-1"), "TOC row 1 has no link");
+    // Footer hotspot must cover the "TOC" glyphs: the 7pt label starts at
+    // x = 595-30 = 565, so the rect must extend past 565 (the old rect ended
+    // exactly at 565 — zero overlap with the visible text).
+    let footer_rect = text
+        .find("/Dest /toc")
+        .and_then(|i| text[..i].rfind("/Rect ["))
+        .map(|i| text[i..i + 40].to_string())
+        .unwrap_or_default();
+    let right: f64 = footer_rect
+        .trim_start_matches("/Rect [")
+        .split_whitespace()
+        .nth(2)
+        .and_then(|n| n.trim_end_matches(']').parse().ok())
+        .unwrap_or(0.0);
+    assert!(
+        right > 565.0,
+        "footer TOC rect {footer_rect:?} does not cover the label"
+    );
+}
+
+#[test]
 fn empty_plan_writes_nothing_like_python() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("empty.pdf");
