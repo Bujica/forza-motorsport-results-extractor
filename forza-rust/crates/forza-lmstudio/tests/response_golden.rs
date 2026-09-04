@@ -28,6 +28,13 @@ fn read_fixture(path: &std::path::Path) -> serde_json::Value {
 #[test]
 fn all_50_real_responses_parse_and_validate() {
     let dir = fixture_dir();
+    // `fixtures/model_responses/` is git-ignored on purpose (sampled LM Studio
+    // responses contain opponent gamertags): skip on fresh checkouts incl. CI
+    // instead of failing. Synthetic + inline coverage below runs everywhere.
+    if !dir.is_dir() {
+        eprintln!("skipping fixture test: {dir:?} not present (personal data, git-ignored)");
+        return;
+    }
     let mut checked = 0usize;
     let entries = std::fs::read_dir(&dir).unwrap();
     for entry in entries {
