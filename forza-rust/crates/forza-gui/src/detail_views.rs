@@ -326,25 +326,25 @@ pub(crate) fn apply_debug_cases(
                 let mut runs: std::collections::BTreeSet<String> =
                     std::collections::BTreeSet::new();
                 for c in &cases {
-                    if let Some(v) = &c.backend {
-                        if !v.is_empty() {
-                            backends.insert(v.clone());
-                        }
+                    if let Some(v) = &c.backend
+                        && !v.is_empty()
+                    {
+                        backends.insert(v.clone());
                     }
-                    if let Some(v) = &c.model {
-                        if !v.is_empty() {
-                            models.insert(v.clone());
-                        }
+                    if let Some(v) = &c.model
+                        && !v.is_empty()
+                    {
+                        models.insert(v.clone());
                     }
-                    if let Some(v) = &c.prompt_name {
-                        if !v.is_empty() {
-                            prompts.insert(v.clone());
-                        }
+                    if let Some(v) = &c.prompt_name
+                        && !v.is_empty()
+                    {
+                        prompts.insert(v.clone());
                     }
-                    if let Some(v) = &c.run_id {
-                        if !v.is_empty() {
-                            runs.insert(v.clone());
-                        }
+                    if let Some(v) = &c.run_id
+                        && !v.is_empty()
+                    {
+                        runs.insert(v.clone());
                     }
                 }
                 let to_model =

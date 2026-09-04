@@ -58,10 +58,10 @@ pub fn load(config_path: &Path) -> Option<UiPersist> {
 
 pub fn save(config_path: &Path, state: &UiPersist) -> anyhow::Result<()> {
     let path = state_path(config_path);
-    if let Some(dir) = path.parent() {
-        if !dir.as_os_str().is_empty() {
-            std::fs::create_dir_all(dir)?;
-        }
+    if let Some(dir) = path.parent()
+        && !dir.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(dir)?;
     }
     let text = serde_json::to_string_pretty(state)?;
     // Atomic write via tmp + rename

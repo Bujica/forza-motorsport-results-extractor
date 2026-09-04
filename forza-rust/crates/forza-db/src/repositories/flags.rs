@@ -73,6 +73,57 @@ struct LapHint {
     race_class: String,
 }
 
+/// Resolved flag identity + columns for one open case (kept as a struct —
+/// a 6-tuple trips `clippy::type_complexity` under the CI `-D warnings`).
+struct ResolvedFlag {
+    flag_key: String,
+    scope: &'static str,
+    lap_index: Option<i64>,
+    driver_normalized: Option<String>,
+    track_normalized: Option<String>,
+    race_class: Option<String>,
+    lap_record_id: Option<String>,
+    extraction_result_id: Option<String>,
+    run_id: Option<String>,
+}
+
+fn resolve_flag(case: &OpenCase, lap: Option<&LapHint>, image_scoped: bool) -> ResolvedFlag {
+    match lap {
+        Some(l) if !image_scoped => ResolvedFlag {
+            flag_key: flag_key_lap(
+                &case.image_file_id,
+                &case.reason,
+                l.lap_index,
+                l.driver_normalized.as_deref().unwrap_or(""),
+                l.track_normalized.as_deref().unwrap_or(""),
+                &l.race_class,
+            ),
+            scope: "lap",
+            lap_index: Some(l.lap_index),
+            driver_normalized: l.driver_normalized.clone(),
+            track_normalized: l.track_normalized.clone(),
+            race_class: Some(l.race_class.clone()),
+            lap_record_id: Some(l.id.clone()),
+            extraction_result_id: l.extraction_result_id.clone(),
+            run_id: case.run_id.clone().or(Some(l.run_id.clone())),
+        },
+        // The doctor matches flags to cases on `COALESCE(lap_index,-1)`: an
+        // image-scoped case (lap_index NULL) maps to an image key with
+        // lap_index NULL even when the case row carries a lap_record_id.
+        _ => ResolvedFlag {
+            flag_key: flag_key_image(&case.image_file_id, &case.reason),
+            scope: "image",
+            lap_index: None,
+            driver_normalized: None,
+            track_normalized: None,
+            race_class: None,
+            lap_record_id: None,
+            extraction_result_id: case.extraction_result_id.clone(),
+            run_id: case.run_id.clone(),
+        },
+    }
+}
+
 fn find_lap(conn: &Connection, lap_id: &str) -> Result<Option<LapHint>, DbError> {
     conn.query_row(
         "SELECT id, run_id, extraction_result_id, lap_index,
@@ -145,56 +196,9 @@ pub fn sync_review_flags(conn: &Connection) -> Result<(usize, usize), DbError> {
             fallback_lap(conn, &case.image_file_id, case.lap_index)?
         };
 
-        let (flag_key, scope, lap_index, drv, trk, cls): (
-            String,
-            &str,
-            Option<i64>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-        ) = match &lap {
-            Some(l) if !image_scoped => (
-                flag_key_lap(
-                    &case.image_file_id,
-                    &case.reason,
-                    l.lap_index,
-                    l.driver_normalized.as_deref().unwrap_or(""),
-                    l.track_normalized.as_deref().unwrap_or(""),
-                    &l.race_class,
-                ),
-                "lap",
-                Some(l.lap_index),
-                l.driver_normalized.clone(),
-                l.track_normalized.clone(),
-                Some(l.race_class.clone()),
-            ),
-            _ => (
-                flag_key_image(&case.image_file_id, &case.reason),
-                "image",
-                None,
-                None,
-                None,
-                None,
-            ),
-        };
-        // The doctor matches flags to cases on
-        // `COALESCE(lap_index,-1)`: an image-scoped case (lap_index NULL)
-        // must map to an image key with lap_index NULL even when the case
-        // row happens to carry a lap_record_id.
-        let (lap_id_link, result_id_link, run_id_link): (
-            Option<String>,
-            Option<String>,
-            Option<String>,
-        ) = match &lap {
-            Some(l) if !image_scoped => (
-                Some(l.id.clone()),
-                l.extraction_result_id.clone(),
-                case.run_id.clone().or(Some(l.run_id.clone())),
-            ),
-            _ => (None, case.extraction_result_id.clone(), case.run_id.clone()),
-        };
+        let resolved = resolve_flag(case, lap.as_ref(), image_scoped);
 
-        desired.insert(flag_key.clone());
+        desired.insert(resolved.flag_key.clone());
         counter += 1;
         let fid = nanos_id("flg", counter);
         conn.execute(
@@ -218,15 +222,15 @@ pub fn sync_review_flags(conn: &Connection) -> Result<(usize, usize), DbError> {
             params![
                 fid,
                 case.image_file_id,
-                run_id_link,
-                result_id_link,
-                lap_id_link,
-                flag_key,
-                scope,
-                lap_index,
-                drv,
-                trk,
-                cls,
+                resolved.run_id,
+                resolved.extraction_result_id,
+                resolved.lap_record_id,
+                resolved.flag_key,
+                resolved.scope,
+                resolved.lap_index,
+                resolved.driver_normalized,
+                resolved.track_normalized,
+                resolved.race_class,
                 case.reason,
                 case.reason,
             ],
@@ -236,14 +240,13 @@ pub fn sync_review_flags(conn: &Connection) -> Result<(usize, usize), DbError> {
 
     // Resolve active system review flags with no matching open case (Python
     // parity: by flag_key; operator-owned flags are never touched).
-    let resolved: usize;
-    if desired.is_empty() {
-        resolved = conn.execute(
+    let resolved: usize = if desired.is_empty() {
+        conn.execute(
             "UPDATE image_flags SET status = 'resolved', resolved_at = datetime('now')
              WHERE status = 'active' AND created_by = 'system'
                AND flag_type IN ('dirty_lap','track','weather','race_class','car','driver_name')",
             [],
-        )?;
+        )?
     } else {
         let placeholders = desired.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let sql = format!(
@@ -257,8 +260,8 @@ pub fn sync_review_flags(conn: &Connection) -> Result<(usize, usize), DbError> {
             .iter()
             .map(|k| k as &dyn rusqlite::types::ToSql)
             .collect();
-        resolved = stmt.execute(refs.as_slice())?;
-    }
+        stmt.execute(refs.as_slice())?
+    };
 
     Ok((ensured, resolved))
 }

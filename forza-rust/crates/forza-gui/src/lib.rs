@@ -530,17 +530,14 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                     })
                 })
                 .unwrap_or(false)
+            && let Ok(ws_meta) = std::fs::metadata(&workspace_cand)
+            && let Ok(cur_meta) = std::fs::metadata(&db_path)
+            && ws_meta.len() > cur_meta.len()
         {
-            if let Ok(ws_meta) = std::fs::metadata(&workspace_cand) {
-                if let Ok(cur_meta) = std::fs::metadata(&db_path) {
-                    if ws_meta.len() > cur_meta.len() {
-                        db_path = workspace_cand
-                            .canonicalize()
-                            .unwrap_or(workspace_cand.clone());
-                        cfg.database_file = db_path.clone();
-                    }
-                }
-            }
+            db_path = workspace_cand
+                .canonicalize()
+                .unwrap_or(workspace_cand.clone());
+            cfg.database_file = db_path.clone();
         }
     }
     if !db_path.exists() {

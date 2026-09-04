@@ -642,9 +642,8 @@ where
             },
         )
         .map_err(|e| e.to_string())
-        .map(|id| {
+        .inspect(|&id| {
             canonical_input.entry(hash.clone()).or_insert(id);
-            id
         })?;
     }
     for skipped in &plan.skipped_images {

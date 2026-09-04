@@ -380,70 +380,71 @@ pub fn append_rain_time_review_candidates(
          FROM lap_records WHERE is_best_lap=1 ORDER BY track, race_class, weather, best_lap_ms",
     )?;
 
+    /// Best-lap row projection for the rain-bucket comparison (struct, not a
+    /// 10-tuple, per `clippy::type_complexity` under the CI `-D warnings`).
+    struct BestLapRow {
+        lap_id: String,
+        track: String,
+        race_class: String,
+        weather: String,
+        best_lap_ms: i64,
+        image_file_id: String,
+        lap_index: i64,
+        driver: String,
+        best_lap: Option<String>,
+        car: String,
+    }
+
     // Nullable text columns degrade gracefully (unknown/empty) instead of
     // failing the whole candidate pass on one sparse row.
     let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-            row.get::<_, Option<String>>(3)?
+        Ok(BestLapRow {
+            lap_id: row.get(0)?,
+            track: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            race_class: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            weather: row
+                .get::<_, Option<String>>(3)?
                 .unwrap_or_else(|| "unknown".into()),
-            row.get::<_, i64>(4)?,
-            row.get::<_, String>(5)?,
-            row.get::<_, i64>(6)?,
-            row.get::<_, String>(7)?,
-            row.get::<_, Option<String>>(8)?,
+            best_lap_ms: row.get(4)?,
+            image_file_id: row.get(5)?,
+            lap_index: row.get(6)?,
+            driver: row.get(7)?,
+            best_lap: row.get(8)?,
             // `car` is nullable in the schema: degrade to "" (the review
             // upserts a `car_empty` case from it when appropriate).
-            row.get::<_, Option<String>>(9)?.unwrap_or_default(),
-        ))
+            car: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
+        })
     })?;
 
-    let laps: Vec<(
-        String,
-        String,
-        String,
-        String,
-        i64,
-        String,
-        i64,
-        String,
-        Option<String>,
-        String,
-    )> = rows.collect::<Result<_, _>>()?;
+    let laps: Vec<BestLapRow> = rows.collect::<Result<_, _>>()?;
 
     // Python compares the bucket minima (best rain vs best dry on the same
     // track/class) and then flags EVERY rain best-lap row of that bucket.
     let mut best_by_key: HashMap<(String, String, String), i64> = HashMap::new();
-    for (_, track, race_class, weather, best_lap_ms, _, _, _, _, _) in &laps {
-        let key = (track.clone(), race_class.clone(), weather.clone());
+    for row in &laps {
+        let key = (
+            row.track.clone(),
+            row.race_class.clone(),
+            row.weather.clone(),
+        );
         match best_by_key.get(&key) {
-            Some(current) if *current <= *best_lap_ms => {}
+            Some(current) if *current <= row.best_lap_ms => {}
             _ => {
-                best_by_key.insert(key, *best_lap_ms);
+                best_by_key.insert(key, row.best_lap_ms);
             }
         }
     }
 
-    for (
-        lap_id,
-        track,
-        race_class,
-        weather,
-        best_lap_ms,
-        image_file_id,
-        lap_index,
-        driver,
-        best_lap,
-        car,
-    ) in &laps
-    {
-        if !weather.eq_ignore_ascii_case("rain") {
+    for row in &laps {
+        if !row.weather.eq_ignore_ascii_case("rain") {
             continue;
         }
-        let rain_key = (track.clone(), race_class.clone(), "rain".to_string());
-        let dry_key = (track.clone(), race_class.clone(), "dry".to_string());
+        let rain_key = (
+            row.track.clone(),
+            row.race_class.clone(),
+            "rain".to_string(),
+        );
+        let dry_key = (row.track.clone(), row.race_class.clone(), "dry".to_string());
         let best_rain = best_by_key.get(&rain_key);
         let best_dry = best_by_key.get(&dry_key);
         if let (Some(&best_rain), Some(&best_dry)) = (best_rain, best_dry)
@@ -452,16 +453,16 @@ pub fn append_rain_time_review_candidates(
             candidates.push(ReviewCase {
                 reason: "weather".to_string(),
                 trigger_name: "rain_time_suspicious".to_string(),
-                lap_id: lap_id.clone(),
-                image_file_id: image_file_id.clone(),
-                lap_index: *lap_index,
-                driver: driver.clone(),
-                track: track.clone(),
-                race_class: race_class.clone(),
-                weather: weather.clone(),
-                best_lap: best_lap.clone(),
-                car: car.clone(),
-                best_lap_ms: *best_lap_ms,
+                lap_id: row.lap_id.clone(),
+                image_file_id: row.image_file_id.clone(),
+                lap_index: row.lap_index,
+                driver: row.driver.clone(),
+                track: row.track.clone(),
+                race_class: row.race_class.clone(),
+                weather: row.weather.clone(),
+                best_lap: row.best_lap.clone(),
+                car: row.car.clone(),
+                best_lap_ms: row.best_lap_ms,
             });
         }
     }
