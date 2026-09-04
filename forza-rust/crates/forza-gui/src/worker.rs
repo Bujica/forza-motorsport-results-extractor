@@ -114,8 +114,11 @@ pub enum Request {
     },
     LoadSettings,
     /// Validate pending edits without saving (status bar shows the verdict).
+    /// `seq` is echoed back in the outcome so the UI can drop stale
+    /// responses when edits outrun the worker threads.
     PreviewSettings {
         changes: BTreeMap<String, String>,
+        seq: u64,
     },
     SaveSettings {
         changes: BTreeMap<String, String>,
@@ -199,6 +202,9 @@ pub struct SettingsOutcome {
     /// True when a save changed `user.gamertag` and the best-lap frontier
     /// was recomputed (configuration contract).
     pub gamertag_recomputed: bool,
+    /// Echo of `Request::PreviewSettings.seq` (0 for load/save): lets the UI
+    /// ignore an older preview that arrives after a newer one.
+    pub seq: u64,
 }
 
 /// Typed response delivered back to the UI thread.
@@ -418,11 +424,13 @@ pub fn handle_request(
                     snapshot,
                     config: cfg,
                     gamertag_recomputed: false,
+                    seq: 0,
                 })
             })();
             Response::Settings(outcome)
         }
-        Request::PreviewSettings { changes } => {
+        Request::PreviewSettings { changes, seq } => {
+            let seq = *seq;
             let current = ctx.cfg.lock().map(|c| c.clone()).map_err(|e| e.to_string());
             let outcome = match current {
                 Err(e) => Err(e),
@@ -444,6 +452,7 @@ pub fn handle_request(
                         snapshot,
                         config: current,
                         gamertag_recomputed: false,
+                        seq,
                     })
                 }
             };
@@ -470,6 +479,7 @@ pub fn handle_request(
                             snapshot,
                             config: saved.config,
                             gamertag_recomputed,
+                            seq: 0,
                         })
                     }
                     Err(message) => {
@@ -490,6 +500,7 @@ pub fn handle_request(
                             snapshot,
                             config: current,
                             gamertag_recomputed: false,
+                            seq: 0,
                         })
                     }
                 }

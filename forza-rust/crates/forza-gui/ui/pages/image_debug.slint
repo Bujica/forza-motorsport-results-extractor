@@ -12,6 +12,10 @@ export component ImageDebugPage inherits Rectangle {
     in property <[DebugCaseItem]> debug-cases;
     in property <[DebugResultComboItem]> debug-results;
     in property <[string]> debug-result-labels;
+    // Mirrors the actually-loaded result id (Rust sets it on every detail
+    // reload); without this the combo always displayed row 0 while the tabs
+    // showed another result.
+    in-out property <int> debug-result-index: 0;
     in property <string> debug-title;
     in property <string> debug-selected-image-id;
     in property <string> debug-selected-result-id;
@@ -174,8 +178,12 @@ export component ImageDebugPage inherits Rectangle {
             ComboBox {
                 min-width: 220px;
                 model: root.debug-result-labels;
-                current-index: 0;
-                selected(value) => { root.debug-result-selected(root.debug-results[self.current-index].id); }
+                current-index <=> root.debug-result-index;
+                selected(value) => {
+                    if (self.current-index >= 0 && self.current-index < root.debug-results.length) {
+                        root.debug-result-selected(root.debug-results[self.current-index].id);
+                    }
+                }
             }
             Button { text: "Image details"; clicked => { root.debug-open-image-detail(); } }
         }

@@ -371,7 +371,10 @@ fn char_width(font: Font, ch: char) -> f64 {
     let idx = match ch {
         c if (' '..='~').contains(&c) => c as usize - ' ' as usize,
         '\u{2020}' | '\u{2013}' | '\u{2014}' => 40, // approximate via 'F'
-        _ => 12,                                    // approximate via '0'
+        // WinAnsi extras from `winansi_bytes` measure approximately (exact
+        // AFM entries vary by foundry); centering may be off by a point on
+        // exotic glyphs, but the text itself now renders instead of '?'.
+        _ => 12, // approximate via ','
     };
     table[idx] as f64
 }
@@ -381,20 +384,47 @@ fn text_width(font: Font, size: f64, s: &str) -> f64 {
 }
 
 /// Greedy word wrap to fit a cell (ReportLab wraps paragraphs the same way).
+/// A single spaceless token wider than the cell is hard-split by characters —
+/// otherwise a 25+ char gamertag/car overflows the column grid (ReportLab
+/// breaks such words too; the old code drew past the border).
 fn wrap_text(s: &str, font: Font, size: f64, max_width: f64) -> Vec<String> {
+    fn split_token(token: &str, font: Font, size: f64, max_width: f64) -> Vec<String> {
+        if text_width(font, size, token) <= max_width {
+            return vec![token.to_string()];
+        }
+        let mut parts = Vec::new();
+        let mut cur = String::new();
+        for ch in token.chars() {
+            let probe = format!("{cur}{ch}");
+            if !cur.is_empty() && text_width(font, size, &probe) > max_width {
+                parts.push(std::mem::take(&mut cur));
+            }
+            cur.push(ch);
+        }
+        if !cur.is_empty() {
+            parts.push(cur);
+        }
+        if parts.is_empty() {
+            parts.push(token.to_string());
+        }
+        parts
+    }
+
     let mut lines = Vec::new();
     let mut current = String::new();
     for word in s.split_whitespace() {
-        let candidate = if current.is_empty() {
-            word.to_string()
-        } else {
-            format!("{current} {word}")
-        };
-        if !current.is_empty() && text_width(font, size, &candidate) > max_width {
-            lines.push(std::mem::take(&mut current));
-            current = word.to_string();
-        } else {
-            current = candidate;
+        for piece in split_token(word, font, size, max_width) {
+            let candidate = if current.is_empty() {
+                piece.clone()
+            } else {
+                format!("{current} {piece}")
+            };
+            if !current.is_empty() && text_width(font, size, &candidate) > max_width {
+                lines.push(std::mem::take(&mut current));
+                current = piece;
+            } else {
+                current = candidate;
+            }
         }
     }
     if !current.is_empty() || lines.is_empty() {
@@ -420,6 +450,24 @@ fn winansi_bytes(s: &str) -> Vec<u8> {
             '\u{201C}' => 0x93,
             '\u{201D}' => 0x94,
             '\u{2026}' => 0x85, // …
+            // Remaining WinAnsi punctuation (previously fell through to '?',
+            // corrupting gamertags/covers containing €, ™, smart quotes…).
+            '\u{20AC}' => 0x80, // €
+            '\u{201A}' => 0x82, // ‚
+            '\u{0192}' => 0x83, // ƒ
+            '\u{201E}' => 0x84, // „
+            '\u{2030}' => 0x89, // ‰
+            '\u{0160}' => 0x8A, // Š
+            '\u{2039}' => 0x8B, // ‹
+            '\u{0152}' => 0x8C, // Œ
+            '\u{017D}' => 0x8E, // Ž
+            '\u{2010}' | '\u{2011}' | '\u{2012}' => 0x96, // hyphen variants → –
+            '\u{2122}' => 0x99, // ™
+            '\u{0161}' => 0x9A, // š
+            '\u{203A}' => 0x9B, // ›
+            '\u{0153}' => 0x9C, // œ
+            '\u{017E}' => 0x9E, // ž
+            '\u{0178}' => 0x9F, // Ÿ
             c if (' '..='~').contains(&c) => c as u8,
             c if ('\u{A0}'..='\u{FF}').contains(&c) => c as u8,
             _ => b'?',

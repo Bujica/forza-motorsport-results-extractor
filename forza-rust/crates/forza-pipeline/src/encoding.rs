@@ -39,6 +39,8 @@ pub enum EncodeError {
     UnsupportedFormat(String),
     #[error("encode failed: {0}")]
     Io(String),
+    #[error("invalid max_width {0}: must be >= 1")]
+    InvalidWidth(u32),
 }
 
 /// Encode `path` and return transport metadata for persistence.
@@ -52,6 +54,11 @@ pub fn encode_image_payload(
     format: &str,
     grayscale: bool,
 ) -> Result<EncodedImage, EncodeError> {
+    // The live path clamps to >= 1, but direct callers must not feed a
+    // zero-dimension resize into the scaler.
+    if max_width == 0 {
+        return Err(EncodeError::InvalidWidth(max_width));
+    }
     let fmt = format.to_lowercase();
     let Some(mime_static) = mime_for_format(&fmt) else {
         return Err(EncodeError::UnsupportedFormat(format.to_string()));

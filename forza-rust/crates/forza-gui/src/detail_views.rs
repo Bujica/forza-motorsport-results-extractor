@@ -13,9 +13,8 @@ use crate::ui_state::{
 use crate::worker::Request;
 use crate::{
     DebugCaseItem, DebugResultComboItem, DetailAttemptItem, DetailLapItem, DetailResultItem,
-    DetailReviewItem, MainWindow, SettingItem,
+    DetailReviewItem, MainWindow, SettingItem, current_inventory_filter,
 };
-use forza_app::ImageInventoryFilter;
 
 pub(crate) fn step_detail(ui: &slint::Weak<MainWindow>, delta: i32) {
     let index = DETAIL_INDEX.with(|slot| *slot.borrow()) + delta;
@@ -265,7 +264,7 @@ pub(crate) fn apply_settings(
                 },
             });
             send_request(Request::RefreshInventory {
-                filter: ImageInventoryFilter::default(),
+                filter: current_inventory_filter(),
             });
         }
     }
@@ -549,6 +548,13 @@ pub(crate) fn apply_debug_detail(
             detail.selected_result_id.clone().unwrap_or_default().into(),
         );
         w.set_debug_result_labels(ModelRc::new(VecModel::from(labels)));
+        // Keep the combo on the actually-loaded result instead of row 0.
+        let selected_pos = detail
+            .selected_result_id
+            .as_deref()
+            .and_then(|wanted| detail.results.iter().position(|r| r.id == wanted))
+            .unwrap_or(0);
+        w.set_debug_result_index(selected_pos as i32);
         w.set_debug_tab("overview".into());
         w.set_debug_overview_text(overview.into());
         w.set_debug_metadata_text(metadata.into());
@@ -570,7 +576,23 @@ pub(crate) fn apply_debug_detail(
         );
         w.set_debug_laps_reviews_text(laps_reviews.into());
         w.set_debug_artifacts_text("No artifacts (see DB)".into());
-        w.set_debug_runtime_text("No runtime snapshot linked".into());
+        let runtime_text = match &detail.runtime_snapshot {
+            Some(snap) => format!(
+                "endpoint: {}\nconfigured: {}\nloaded: {}\ninstance: {}\nhealth: {} · {}\nmodel matches config: {}\ncaptured: {}\n",
+                snap.endpoint,
+                snap.configured_model.clone().unwrap_or_else(|| "—".into()),
+                snap.loaded_model.clone().unwrap_or_else(|| "—".into()),
+                snap.instance_id.clone().unwrap_or_else(|| "—".into()),
+                if snap.health_ok { "ok" } else { "FAILED" },
+                snap.health_message.clone().unwrap_or_else(|| "—".into()),
+                snap.model_matches_config
+                    .map(|m| if m { "yes" } else { "NO" }.to_string())
+                    .unwrap_or_else(|| "—".into()),
+                snap.captured_at.clone().unwrap_or_else(|| "—".into()),
+            ),
+            None => "No runtime snapshot linked.".into(),
+        };
+        w.set_debug_runtime_text(runtime_text.into());
         w.set_debug_timeline_text(detail.timeline.join("\n").into());
         w.set_status_text("debug detail loaded".into());
     }

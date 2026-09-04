@@ -12,6 +12,7 @@ use crate::client::RuntimeClient;
 use crate::error::LlmError;
 use crate::load_config::{DesiredLoadConfig, NormalizedLoadConfig, load_config_compatible};
 use crate::protocol::{AttemptStatus, ModelAttemptRecord, ModelExtractionResult, RequestKind};
+use crate::json_repair::repair_json;
 use crate::response::{parse_and_validate_response, semantic_retry_issues};
 
 const TRANSIENT_STATUS: [u16; 7] = [409, 423, 429, 500, 502, 503, 504];
@@ -557,8 +558,23 @@ impl LMStudioBackend {
                 .and_then(Value::as_str)
                 .map(String::from);
 
-            // Parse (+minimal repair), then validate.
-            let parsed_result = parse_and_validate_response(&content);
+            // Parse, then repair-and-retry once before giving up (Python
+            // `parse → repair_json → parse`). The repaired value is only
+            // used when it fully parses+validates; `raw_response` evidence
+            // always keeps the original text, so a bad repair can never
+            // corrupt stored evidence — worst case it also fails and the
+            // original parse error is reported.
+            let parsed_result = match parse_and_validate_response(&content) {
+                Ok(value) => Ok(value),
+                Err(original) => {
+                    let repaired = repair_json(&content);
+                    if repaired == content {
+                        Err(original)
+                    } else {
+                        parse_and_validate_response(&repaired).map_err(|_| original)
+                    }
+                }
+            };
             let parsed = match parsed_result {
                 Ok(value) => value,
                 Err(parse_error) => {

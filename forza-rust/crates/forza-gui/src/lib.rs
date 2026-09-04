@@ -61,9 +61,13 @@ thread_local! {
     static REVIEW_REFRESH_IN_FLIGHT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static PENDING_REVIEW_FILTER: std::cell::RefCell<Option<ReviewQueueFilter>> =
         const { std::cell::RefCell::new(None) };
+    /// Monotonic id for settings previews: preview jobs run concurrently, so
+    /// an older response arriving last must be dropped instead of restoring
+    /// stale rows over newer edits.
+    static SETTINGS_PREVIEW_SEQ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-fn current_inventory_filter() -> ImageInventoryFilter {
+pub(crate) fn current_inventory_filter() -> ImageInventoryFilter {
     CURRENT_INVENTORY_FILTER.with(|s| s.borrow().clone())
 }
 
@@ -576,10 +580,25 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             let cw = w.clamp(1240.0, max_w.max(1240.0));
             let ch = h.clamp(680.0, max_h.max(680.0));
             main.window().set_size(slint::LogicalSize::new(cw, ch));
-            if let (Some(x), Some(y)) = (p.window.x, p.window.y) {
-                main.window().set_position(slint::LogicalPosition::new(x as f32, y as f32));
+            // Validate the saved position against the current display: after
+            // a monitor change an unrestored (x, y) can land fully
+            // off-screen. A maximized window's saved geometry is its
+            // fullscreen rect, so position is only applied when not maximized.
+            let maximized = p.window.maximized.unwrap_or(false);
+            if !maximized
+                && let (Some(x), Some(y)) = (p.window.x, p.window.y)
+            {
+                let (sw, sh) = primary_screen_px();
+                let (lw, lh) = (sw as f32 / sf, sh as f32 / sf);
+                // Keep at least a 100px corner of the window visible.
+                let (xf, yf) = (x as f32, y as f32);
+                let x_ok = xf > -cw + 100.0 && (lw <= 0.0 || xf < lw - 100.0);
+                let y_ok = yf > -ch + 100.0 && (lh <= 0.0 || yf < lh - 100.0);
+                if x_ok && y_ok {
+                    main.window().set_position(slint::LogicalPosition::new(xf, yf));
+                }
             }
-            if p.window.maximized.unwrap_or(false) {
+            if maximized {
                 main.window().set_maximized(true);
             }
             (cw, ch)
@@ -866,6 +885,30 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                                 w.set_review_reasons(options_model(&options.reasons));
                                 w.set_review_outcomes(options_model(&options.outcomes));
                                 w.set_review_runs(options_model(&options.runs));
+                                // The option models were just replaced: a stale
+                                // combo index past the new length would read as
+                                // "" and silently drop that filter dimension.
+                                // Clamp back to "all" (index 0) so the bar and
+                                // the active filter agree.
+                                let clamp = |current: i32, len: usize| -> i32 {
+                                    if current >= 0 && (current as usize) < len {
+                                        current
+                                    } else {
+                                        0
+                                    }
+                                };
+                                w.set_review_reason_index(clamp(
+                                    w.get_review_reason_index(),
+                                    options.reasons.len() + 1,
+                                ));
+                                w.set_review_outcome_index(clamp(
+                                    w.get_review_outcome_index(),
+                                    options.outcomes.len() + 1,
+                                ));
+                                w.set_review_run_index(clamp(
+                                    w.get_review_run_index(),
+                                    options.runs.len() + 1,
+                                ));
                                 // Auto-advance: keep current index if still valid, else clamp to 0; -1 if empty (F5)
                                 let cur = REVIEW_INDEX.with(|s| *s.borrow());
                                 let next_idx = if entries.is_empty() {
@@ -1183,7 +1226,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         }
                         INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(true));
                         send_request(Request::RefreshInventory {
-                            filter: ImageInventoryFilter::default(),
+                            filter: current_inventory_filter(),
                         });
                     }
                     Err(message) => {
@@ -1202,7 +1245,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         }
                         INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(true));
                         send_request(Request::RefreshInventory {
-                            filter: ImageInventoryFilter::default(),
+                            filter: current_inventory_filter(),
                         });
                     }
                     Err(message) => {
@@ -1218,7 +1261,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                                 set_status(&w, &message);
                                 INVENTORY_REFRESH_IN_FLIGHT.with(|f| f.set(true));
                                 send_request(Request::RefreshInventory {
-                                    filter: ImageInventoryFilter::default(),
+                                    filter: current_inventory_filter(),
                                 });
                             }
                             Err(message) => {
@@ -1229,6 +1272,11 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 }
                 Response::Settings(result) => match result {
                     Ok(outcome) => {
+                        // Drop stale previews (seq 0 = load/save, always applied).
+                        let latest = SETTINGS_PREVIEW_SEQ.with(|s| s.get());
+                        if outcome.seq != 0 && outcome.seq != latest {
+                            return;
+                        }
                         apply_settings(&ui, outcome);
                     }
                     Err(message) => {
@@ -1658,18 +1706,11 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
         let ui = main.as_weak();
         main.on_review_selected(move |index| {
             REVIEW_INDEX.with(|slot| *slot.borrow_mut() = index as isize);
+            // Single preview request per selection: `apply_review_detail`
+            // already sends `LoadPreview` for the selected case — a second
+            // one here raced it and flashed stale previews.
             if let Some(w) = ui.upgrade() {
                 apply_review_detail(&w);
-            }
-            let preview_id = REVIEW_CASES_CACHE.with(|slot| {
-                slot.borrow()
-                    .get(index as usize)
-                    .and_then(|c| c.image_file_id.clone())
-            });
-            if let Some(image_id) = preview_id {
-                send_request(Request::LoadPreview {
-                    image_file_id: image_id,
-                });
             }
         });
     }
@@ -2025,11 +2066,9 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 SETTINGS_LOADED.with(|slot| *slot.borrow_mut() = true);
                 send_request(Request::LoadSettings);
             }
-            if page == "image-debug" {
-                send_request(Request::ListImageDebugCases {
-                    filter: forza_app::ImageDebugFilter::default(),
-                });
-            }
+            // NOTE: no `page == "image-debug"` branch — the standalone page
+            // was folded into Diagnostics ("diagnostics" below); nothing
+            // navigates to "image-debug" anymore.
             if page == "logs" {
                 send_request(Request::LoadLogs);
             }
@@ -2053,13 +2092,20 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 slot.borrow_mut().insert(key.to_string(), value.to_string());
             });
             let changes = PENDING_SETTINGS.with(|slot| slot.borrow().clone());
-            enqueue(Request::PreviewSettings { changes }, &ui, "validating…");
+            let seq = SETTINGS_PREVIEW_SEQ.with(|s| {
+                s.set(s.get().wrapping_add(1));
+                s.get()
+            });
+            enqueue(Request::PreviewSettings { changes, seq }, &ui, "validating…");
         });
     }
     {
         let ui = main.as_weak();
         main.on_discard_settings(move || {
             PENDING_SETTINGS.with(|slot| slot.borrow_mut().clear());
+            // Invalidate in-flight previews so one arriving late cannot
+            // resurrect the discarded pending rows.
+            SETTINGS_PREVIEW_SEQ.with(|s| s.set(s.get().wrapping_add(1)));
             enqueue(Request::LoadSettings, &ui, "reloading settings…");
         });
     }
@@ -2070,6 +2116,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             if changes.is_empty() {
                 return;
             }
+            SETTINGS_PREVIEW_SEQ.with(|s| s.set(s.get().wrapping_add(1)));
             enqueue(Request::SaveSettings { changes }, &ui, "saving settings…");
         });
     }
@@ -2437,12 +2484,16 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                                 w.set_run_percent(100.0);
                             }
                         }
-                        // Refresh derived views after a run.
+                        // Refresh derived views after a run, keeping the
+                        // user's active filters (forced defaults used to show
+                        // a table that no longer matched the filter bar).
                         send_request(Request::RefreshInventory {
-                            filter: ImageInventoryFilter::default(),
+                            filter: current_inventory_filter(),
                         });
                         send_request(Request::ListBestLaps);
-                        send_request(Request::ListReviews { filter: ReviewQueueFilter { bucket: String::from("open"), ..Default::default() } });
+                        send_request(Request::ListReviews {
+                            filter: REVIEW_FILTER.with(|s| s.borrow().clone()),
+                        });
                     }
                     forza_app::RunEvent::Failed(message) => {
                         append_run_log(format!("[failed] {message}"));
@@ -2522,13 +2573,17 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 let lh = size.height as f32 / sf;
                 let ratio_h = |v: f32| (v / lw).clamp(0.05, 0.95);
                 let ratio_v = |v: f32| (v / lh).clamp(0.05, 0.95);
+                // A maximized window reports its fullscreen rect: persisting
+                // that as x/y would poison the next restore on a smaller
+                // display. Keep position only for normal windows.
+                let is_max = w.window().is_maximized();
                 let state = ui_persist::UiPersist {
                     window: ui_persist::WindowState {
                         width: Some(lw),
                         height: Some(lh),
-                        x: Some((pos.x as f32 / sf).round() as i32),
-                        y: Some((pos.y as f32 / sf).round() as i32),
-                        maximized: Some(w.window().is_maximized()),
+                        x: (!is_max).then(|| (pos.x as f32 / sf).round() as i32),
+                        y: (!is_max).then(|| (pos.y as f32 / sf).round() as i32),
+                        maximized: Some(is_max),
                     },
                     splits: ui_persist::SplitState {
                         images_table_split_ratio: Some(ratio_h(w.get_images_table_split())),

@@ -7,7 +7,7 @@
 
 #![allow(clippy::type_complexity)]
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::DbError;
 
@@ -106,6 +106,20 @@ pub struct DebugReview {
     pub created_at: Option<String>,
 }
 
+/// Preflight runtime snapshot behind the selected result's run (powers the
+/// Runtime tab; `None` when the run never reached preflight).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DebugRuntimeSnapshot {
+    pub endpoint: String,
+    pub configured_model: Option<String>,
+    pub loaded_model: Option<String>,
+    pub instance_id: Option<String>,
+    pub health_ok: bool,
+    pub health_message: Option<String>,
+    pub model_matches_config: Option<bool>,
+    pub captured_at: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageDebugDetail {
     pub image_file_id: String,
@@ -118,6 +132,7 @@ pub struct ImageDebugDetail {
     pub reviews: Vec<DebugReview>,
     pub raw_response: Option<String>,
     pub parsed_json: Option<String>,
+    pub runtime_snapshot: Option<DebugRuntimeSnapshot>,
     pub timeline: Vec<String>,
 }
 
@@ -131,25 +146,29 @@ fn count_by_image(
     column: &str,
     ids: &[String],
 ) -> Result<std::collections::HashMap<String, i64>, DbError> {
-    if ids.is_empty() {
-        return Ok(std::collections::HashMap::new());
-    }
-    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-    let sql = format!(
-        "SELECT {column}, COUNT(*) FROM {table} WHERE {column} IN ({placeholders}) GROUP BY {column}"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let params: Vec<&dyn rusqlite::types::ToSql> = ids
-        .iter()
-        .map(|id| id as &dyn rusqlite::types::ToSql)
-        .collect();
-    let rows = stmt.query_map(params.as_slice(), |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-    })?;
     let mut out = std::collections::HashMap::new();
-    for item in rows {
-        let (k, v) = item?;
-        out.insert(k, v);
+    // Chunked: one giant `IN (?,?,…)` past the SQLite variable limit fails
+    // the whole query instead of degrading.
+    for chunk in crate::id_chunks(ids) {
+        if chunk.is_empty() {
+            continue;
+        }
+        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT {column}, COUNT(*) FROM {table} WHERE {column} IN ({placeholders}) GROUP BY {column}"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for item in rows {
+            let (k, v) = item?;
+            out.insert(k, v);
+        }
     }
     Ok(out)
 }
@@ -572,6 +591,38 @@ pub fn get_image_debug_detail(
         created_at: _created_at.clone().or(_updated_at.clone()),
     }];
 
+    // Preflight runtime snapshot behind the selected result's run (the
+    // Runtime tab used to claim "No runtime snapshot linked" unconditionally
+    // even though every run persists one).
+    let runtime_snapshot: Option<DebugRuntimeSnapshot> = selected
+        .map(|r| r.run_id.clone())
+        .and_then(|run_id| {
+            conn.query_row(
+                "SELECT endpoint, configured_model, loaded_model, instance_id,
+                        health_ok, health_message, model_matches_config,
+                        CAST(captured_at AS TEXT)
+                 FROM model_runtime_snapshots
+                 WHERE run_id = ?1 AND snapshot_kind = 'preflight' LIMIT 1",
+                [&run_id],
+                |row| {
+                    Ok(DebugRuntimeSnapshot {
+                        endpoint: row.get(0)?,
+                        configured_model: row.get(1)?,
+                        loaded_model: row.get(2)?,
+                        instance_id: row.get(3)?,
+                        health_ok: row.get::<_, i64>(4)? != 0,
+                        health_message: row.get(5)?,
+                        model_matches_config: row
+                            .get::<_, Option<i64>>(6)?
+                            .map(|v| v != 0),
+                        captured_at: row.get(7)?,
+                    })
+                },
+            )
+            .optional()
+            .unwrap_or(None)
+        });
+
     Ok(Some(ImageDebugDetail {
         image_file_id: id.clone(),
         image_name: image_name.clone(),
@@ -583,6 +634,7 @@ pub fn get_image_debug_detail(
         reviews,
         raw_response,
         parsed_json,
+        runtime_snapshot,
         timeline,
     }))
 }

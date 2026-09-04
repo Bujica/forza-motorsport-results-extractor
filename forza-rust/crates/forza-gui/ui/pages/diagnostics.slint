@@ -39,6 +39,7 @@ export component DiagnosticsPage inherits Rectangle {
     in property <[DebugCaseItem]> debug-cases;
     in property <[DebugResultComboItem]> debug-results;
     in property <[string]> debug-result-labels;
+    in-out property <int> debug-result-index: 0;
     in property <string> debug-title;
     in property <string> debug-selected-image-id;
     in property <string> debug-selected-result-id;
@@ -153,6 +154,7 @@ export component DiagnosticsPage inherits Rectangle {
             debug-cases: root.debug-cases;
             debug-results: root.debug-results;
             debug-result-labels: root.debug-result-labels;
+            debug-result-index <=> root.debug-result-index;
             debug-title: root.debug-title;
             debug-selected-image-id: root.debug-selected-image-id;
             debug-selected-result-id: root.debug-selected-result-id;

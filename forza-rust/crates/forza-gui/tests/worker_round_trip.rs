@@ -170,9 +170,11 @@ fn settings_load_preview_save_round_trip() {
         &service,
         &Request::PreviewSettings {
             changes: changes.clone(),
+            seq: 7,
         },
     ) {
         Response::Settings(Ok(outcome)) => {
+            assert_eq!(outcome.seq, 7);
             assert!(outcome.snapshot.dirty);
             assert!(outcome.snapshot.validation_ok);
             let row = outcome

@@ -138,32 +138,41 @@ pub fn image_inventory(
         return Ok(Vec::new());
     }
 
-    // 2) Fetch rows for those IDs with the duplicate count (no window function)
-    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-    let sql = format!(
-        "SELECT i.id, i.current_name, i.file_status, i.best_lap_status,
-                '' AS processing_status, i.size_bytes,
-                i.race_date, i.semantic_name, i.file_hash, i.current_path,
-                i.duplicate_of_image_file_id,
-                COALESCE(dup.cnt, 0) AS is_canonical
-         FROM image_files i
-         LEFT JOIN (
-            SELECT duplicate_of_image_file_id, COUNT(*) AS cnt
-            FROM image_files
-            WHERE duplicate_of_image_file_id IS NOT NULL
-            GROUP BY duplicate_of_image_file_id
-         ) dup ON dup.duplicate_of_image_file_id = i.id
-         WHERE i.id IN ({placeholders})
-         ORDER BY LOWER(i.current_name), i.id"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let params: Vec<&dyn rusqlite::types::ToSql> = ids
-        .iter()
-        .map(|id| id as &dyn rusqlite::types::ToSql)
-        .collect();
-    let mut rows: Vec<ImageInventoryRow> = stmt
-        .query_map(params.as_slice(), row_to_inventory)?
-        .collect::<Result<Vec<_>, _>>()?;
+    // 2) Fetch rows for those IDs with the duplicate count (no window
+    // function). Chunked past the SQLite variable limit instead of one giant
+    // `IN (?,?,…)` that fails the whole inventory.
+    let mut rows: Vec<ImageInventoryRow> = Vec::with_capacity(ids.len());
+    for chunk in crate::id_chunks(&ids) {
+        if chunk.is_empty() {
+            continue;
+        }
+        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT i.id, i.current_name, i.file_status, i.best_lap_status,
+                    '' AS processing_status, i.size_bytes,
+                    i.race_date, i.semantic_name, i.file_hash, i.current_path,
+                    i.duplicate_of_image_file_id,
+                    COALESCE(dup.cnt, 0) AS is_canonical
+             FROM image_files i
+             LEFT JOIN (
+                SELECT duplicate_of_image_file_id, COUNT(*) AS cnt
+                FROM image_files
+                WHERE duplicate_of_image_file_id IS NOT NULL
+                GROUP BY duplicate_of_image_file_id
+             ) dup ON dup.duplicate_of_image_file_id = i.id
+             WHERE i.id IN ({placeholders})
+             ORDER BY LOWER(i.current_name), i.id"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
+        rows.extend(
+            stmt.query_map(params.as_slice(), row_to_inventory)?
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+    }
 
     // 3) Compute processing_status only for the returned IDs (like Python's
     //    _latest_processing_statuses which does ROW_NUMBER only for those IDs).
@@ -282,37 +291,40 @@ fn processing_status_map(
     ids: &[String],
 ) -> Result<std::collections::HashMap<String, String>, DbError> {
     use std::collections::HashMap;
-    if ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-    // Latest result per image (window function only for the filtered IDs)
-    let sql = format!(
-        "SELECT image_file_id, status FROM (
-            SELECT image_file_id, status,
-                   ROW_NUMBER() OVER (PARTITION BY image_file_id ORDER BY created_at DESC, id DESC) AS rn
-            FROM extraction_results
-            WHERE image_file_id IN ({placeholders})
-        ) WHERE rn = 1"
-    );
-    let params: Vec<&dyn rusqlite::types::ToSql> = ids
-        .iter()
-        .map(|id| id as &dyn rusqlite::types::ToSql)
-        .collect();
-    let mut stmt = conn.prepare(&sql)?;
     let mut map: HashMap<String, String> = HashMap::new();
-    let rows = stmt.query_map(params.as_slice(), |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-    for (image_id, status) in rows.collect::<Result<Vec<_>, _>>()? {
-        let proc = match status.as_str() {
-            "pending" | "running" => "processing",
-            "ok" => "processed_ok",
-            "error" => "processed_error",
-            "cancelled" => "cancelled",
-            _ => "processed_error",
-        };
-        map.insert(image_id, proc.to_string());
+    // Latest result per image (window function only for the filtered IDs),
+    // chunked past the SQLite variable limit.
+    for chunk in crate::id_chunks(ids) {
+        if chunk.is_empty() {
+            continue;
+        }
+        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT image_file_id, status FROM (
+                SELECT image_file_id, status,
+                       ROW_NUMBER() OVER (PARTITION BY image_file_id ORDER BY created_at DESC, id DESC) AS rn
+                FROM extraction_results
+                WHERE image_file_id IN ({placeholders})
+            ) WHERE rn = 1"
+        );
+        let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for (image_id, status) in rows.collect::<Result<Vec<_>, _>>()? {
+            let proc = match status.as_str() {
+                "pending" | "running" => "processing",
+                "ok" => "processed_ok",
+                "error" => "processed_error",
+                "cancelled" => "cancelled",
+                _ => "processed_error",
+            };
+            map.insert(image_id, proc.to_string());
+        }
     }
     // For those without a result, check run_inputs for skipped
     let missing: Vec<String> = ids
@@ -320,15 +332,18 @@ fn processing_status_map(
         .filter(|id| !map.contains_key(*id))
         .cloned()
         .collect();
-    if !missing.is_empty() {
-        let placeholders2 = missing.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    for chunk in crate::id_chunks(&missing) {
+        if chunk.is_empty() {
+            continue;
+        }
+        let placeholders2 = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let sql2 = format!(
             "SELECT ri.image_file_id FROM run_inputs ri
              JOIN (SELECT image_file_id, MAX(id) AS latest_input_id FROM run_inputs WHERE image_file_id IS NOT NULL GROUP BY image_file_id) l
                ON ri.id = l.latest_input_id
              WHERE ri.image_file_id IN ({placeholders2}) AND ri.decision <> 'process'"
         );
-        let params2: Vec<&dyn rusqlite::types::ToSql> = missing
+        let params2: Vec<&dyn rusqlite::types::ToSql> = chunk
             .iter()
             .map(|id| id as &dyn rusqlite::types::ToSql)
             .collect();

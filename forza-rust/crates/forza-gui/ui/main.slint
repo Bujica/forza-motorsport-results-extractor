@@ -171,6 +171,7 @@ export component MainWindow inherits Window {
     in property <[DebugCaseItem]> debug-cases;
     in property <[DebugResultComboItem]> debug-results;
     in property <[string]> debug-result-labels;
+    in-out property <int> debug-result-index: 0;
     in property <string> debug-title;
     in property <string> debug-selected-image-id;
     in property <string> debug-selected-result-id;
@@ -404,6 +405,12 @@ export component MainWindow inherits Window {
                 review-reasons: root.review-reasons;
                 review-outcomes: root.review-outcomes;
                 review-runs: root.review-runs;
+                // Forwarded so Rust can clamp the indexes back into range
+                // whenever the option models are replaced (a stale index
+                // silently dropped that filter dimension).
+                review-reason-index <=> root.review-reason-index;
+                review-outcome-index <=> root.review-outcome-index;
+                review-run-index <=> root.review-run-index;
                 review-tracks: root.review-tracks;
                 review-classes: root.review-classes;
                 review-selected-index <=> root.review-selected-index;
@@ -485,6 +492,7 @@ export component MainWindow inherits Window {
                 debug-cases: root.debug-cases;
                 debug-results: root.debug-results;
                 debug-result-labels: root.debug-result-labels;
+                debug-result-index <=> root.debug-result-index;
                 debug-title: root.debug-title;
                 debug-selected-image-id: root.debug-selected-image-id;
                 debug-selected-result-id: root.debug-selected-result-id;

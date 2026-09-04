@@ -53,7 +53,6 @@ fn flag_key_image(image_file_id: &str, flag_type: &str) -> String {
 }
 
 struct OpenCase {
-    id: String,
     run_id: Option<String>,
     extraction_result_id: Option<String>,
     lap_record_id: Option<String>,
@@ -99,7 +98,7 @@ fn find_lap(conn: &Connection, lap_id: &str) -> Result<Option<LapHint>, DbError>
 pub fn sync_review_flags(conn: &Connection) -> Result<(usize, usize), DbError> {
     let cases: Vec<OpenCase> = {
         let mut stmt = conn.prepare(
-            "SELECT id, run_id, extraction_result_id, lap_record_id, reason,
+            "SELECT run_id, extraction_result_id, lap_record_id, reason,
                     lap_index, image_file_id
              FROM review_cases
              WHERE status = 'open' AND image_file_id IS NOT NULL
@@ -107,13 +106,12 @@ pub fn sync_review_flags(conn: &Connection) -> Result<(usize, usize), DbError> {
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(OpenCase {
-                id: r.get(0)?,
-                run_id: r.get(1)?,
-                extraction_result_id: r.get(2)?,
-                lap_record_id: r.get(3)?,
-                reason: r.get(4)?,
-                lap_index: r.get(5)?,
-                image_file_id: r.get(6)?,
+                run_id: r.get(0)?,
+                extraction_result_id: r.get(1)?,
+                lap_record_id: r.get(2)?,
+                reason: r.get(3)?,
+                lap_index: r.get(4)?,
+                image_file_id: r.get(5)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)?
@@ -240,7 +238,7 @@ pub fn sync_review_flags(conn: &Connection) -> Result<(usize, usize), DbError> {
 
     // Resolve active system review flags with no matching open case (Python
     // parity: by flag_key; operator-owned flags are never touched).
-    let mut resolved = 0usize;
+    let resolved: usize;
     if desired.is_empty() {
         resolved = conn.execute(
             "UPDATE image_flags SET status = 'resolved', resolved_at = datetime('now')
