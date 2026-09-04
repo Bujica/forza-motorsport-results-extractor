@@ -91,7 +91,8 @@ pub fn replace_active_snapshot(
             message: "replace_active_snapshot requires autocommit (no outer transaction)".into(),
         });
     }
-    conn.execute_batch("BEGIN IMMEDIATE").map_err(|e| DbError::Pool(format!("BEGIN IMMEDIATE: {e}")))?;
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| DbError::Pool(format!("BEGIN IMMEDIATE: {e}")))?;
     let inner: Result<String, DbError> = (|| {
         conn.execute(
             "UPDATE external_record_imports SET active = 0 WHERE active = 1",

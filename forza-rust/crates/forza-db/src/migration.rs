@@ -88,9 +88,8 @@ pub fn upgrade(path: &Path) -> Result<(), DbError> {
             if exists.is_none() {
                 // Surface backfill failures: a silent skip leaves a DB the
                 // doctor later flags with no trace of the real cause.
-                c.execute_batch(sql).map_err(|e| {
-                    DbError::Pool(format!("backfill index {name}: {e}"))
-                })?;
+                c.execute_batch(sql)
+                    .map_err(|e| DbError::Pool(format!("backfill index {name}: {e}")))?;
             }
         }
         Ok(())

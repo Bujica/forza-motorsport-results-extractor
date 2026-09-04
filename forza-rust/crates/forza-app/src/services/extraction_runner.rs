@@ -29,15 +29,12 @@ struct WorkerImage {
 use crate::services::run_control::RunControl;
 use forza_config::AppConfig;
 use forza_db::repositories::runs::{
-    RunInsert, RunMetadata, RunInputOnly, RuntimeSnapshotInsert, complete_run,
-    find_image_id_by_hash, insert_processed_input_full,
-    insert_prompt_snapshot, insert_run, insert_run_input_full, insert_run_input_only,
-    insert_runtime_snapshot, link_run_prompt_snapshot, mark_run_running, reconcile_abandoned_runs,
-    update_run_metadata,
+    RunInputOnly, RunInsert, RunMetadata, RuntimeSnapshotInsert, complete_run,
+    find_image_id_by_hash, insert_processed_input_full, insert_prompt_snapshot, insert_run,
+    insert_run_input_full, insert_run_input_only, insert_runtime_snapshot,
+    link_run_prompt_snapshot, mark_run_running, reconcile_abandoned_runs, update_run_metadata,
 };
-use forza_db::repositories::{
-    known_hashes, known_path_hashes, list_failed_images_for_retry,
-};
+use forza_db::repositories::{known_hashes, known_path_hashes, list_failed_images_for_retry};
 use forza_lmstudio::backend::{BackendConfig, LMStudioBackend};
 use forza_lmstudio::load_config::DesiredLoadConfig;
 use forza_lmstudio::prompts;
@@ -616,7 +613,10 @@ where
         } else {
             "hash"
         };
-        let hash = dup.duplicate_of_hash.clone().unwrap_or_else(|| dup.file_hash.clone());
+        let hash = dup
+            .duplicate_of_hash
+            .clone()
+            .unwrap_or_else(|| dup.file_hash.clone());
         // For batch duplicates the canonical input was already recorded in
         // this run (first occurrence wins in planning order); for hash
         // duplicates there is no same-run canonical row.
@@ -688,15 +688,20 @@ where
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
-            let (image_file_id, _) = match upsert_image_for_run(&conn, &image.path, &image.file_hash) {
-                Ok(v) => v,
-                Err(e) => {
-                    let _ = event_tx.send(RunEvent::ImageDone { name, ok: false, laps: 0 });
-                    let _ = event_tx.send(RunEvent::Log(format!("upsert: {e}")));
-                    pre_failed += 1;
-                    continue;
-                }
-            };
+            let (image_file_id, _) =
+                match upsert_image_for_run(&conn, &image.path, &image.file_hash) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let _ = event_tx.send(RunEvent::ImageDone {
+                            name,
+                            ok: false,
+                            laps: 0,
+                        });
+                        let _ = event_tx.send(RunEvent::Log(format!("upsert: {e}")));
+                        pre_failed += 1;
+                        continue;
+                    }
+                };
             let (result_id, input_id) = match insert_processed_input_full(
                 &conn,
                 &run_id,
@@ -707,14 +712,25 @@ where
             ) {
                 Ok(v) => v,
                 Err(e) => {
-                    let _ = event_tx.send(RunEvent::ImageDone { name, ok: false, laps: 0 });
+                    let _ = event_tx.send(RunEvent::ImageDone {
+                        name,
+                        ok: false,
+                        laps: 0,
+                    });
                     let _ = event_tx.send(RunEvent::Log(format!("insert result: {e}")));
                     pre_failed += 1;
                     continue;
                 }
             };
             stamp_result_prompt(&conn, &result_id, &prompt_snapshot_id);
-            stamp_input_metadata(&conn, &run_id, input_id, &image.file_hash, &name, &image.path);
+            stamp_input_metadata(
+                &conn,
+                &run_id,
+                input_id,
+                &image.file_hash,
+                &name,
+                &image.path,
+            );
             // Link batch duplicates to their canonical same-run input.
             canonical_input
                 .entry(image.file_hash.clone())
@@ -969,7 +985,14 @@ where
             )
             .map_err(|e| e.to_string())?;
             stamp_result_prompt(&conn, &result_id, &prompt_snapshot_id);
-            stamp_input_metadata(&conn, &run_id, input_id, &image.file_hash, &name, &image.path);
+            stamp_input_metadata(
+                &conn,
+                &run_id,
+                input_id,
+                &image.file_hash,
+                &name,
+                &image.path,
+            );
 
             // Encode.
             let encoded = match encode_image_payload(
@@ -1010,10 +1033,17 @@ where
                     "UPDATE extraction_results SET status='error', error_type='model_load', error_message=?2, updated_at=datetime('now') WHERE id=?1",
                     rusqlite::params![result_id, e.to_string()],
                 );
-                on_event(RunEvent::ImageDone { name: name.clone(), ok: false, laps: 0 });
+                on_event(RunEvent::ImageDone {
+                    name: name.clone(),
+                    ok: false,
+                    laps: 0,
+                });
                 on_event(RunEvent::Log(format!("ensure_loaded: {e}")));
                 done += 1;
-                on_event(RunEvent::Progress { done, total: total_new });
+                on_event(RunEvent::Progress {
+                    done,
+                    total: total_new,
+                });
                 continue;
             }
 
@@ -1073,10 +1103,17 @@ where
                                 "UPDATE extraction_results SET status='error', error_type='laps', error_message=?2, attempt_count=?3, updated_at=datetime('now') WHERE id=?1",
                                 rusqlite::params![result_id, e.to_string(), attempt_count],
                             );
-                            on_event(RunEvent::ImageDone { name: name.clone(), ok: false, laps: 0 });
+                            on_event(RunEvent::ImageDone {
+                                name: name.clone(),
+                                ok: false,
+                                laps: 0,
+                            });
                             on_event(RunEvent::Log(format!("laps: {e}")));
                             done += 1;
-                            on_event(RunEvent::Progress { done, total: total_new });
+                            on_event(RunEvent::Progress {
+                                done,
+                                total: total_new,
+                            });
                             continue;
                         }
                     };
@@ -1098,9 +1135,16 @@ where
                             "UPDATE extraction_results SET status='error', error_type='attempt', error_message='accepted attempt row missing', attempt_count=?2, updated_at=datetime('now') WHERE id=?1",
                             rusqlite::params![result_id, attempt_count],
                         );
-                        on_event(RunEvent::ImageDone { name: name.clone(), ok: false, laps: 0 });
+                        on_event(RunEvent::ImageDone {
+                            name: name.clone(),
+                            ok: false,
+                            laps: 0,
+                        });
                         done += 1;
-                        on_event(RunEvent::Progress { done, total: total_new });
+                        on_event(RunEvent::Progress {
+                            done,
+                            total: total_new,
+                        });
                         continue;
                     };
                     forza_db::repositories::runs::finalize_result_ok(
@@ -1214,8 +1258,12 @@ fn persist_attempt_with_evidence(
     context_length: Option<i64>,
     reasoning_mode: Option<&str>,
 ) -> Option<String> {
-    let mut insert =
-        crate::services::extraction_replay::to_attempt_insert(record, model, context_length, reasoning_mode);
+    let mut insert = crate::services::extraction_replay::to_attempt_insert(
+        record,
+        model,
+        context_length,
+        reasoning_mode,
+    );
     insert.request_image_format = Some(&encoded.format);
     insert.request_image_mime_type = Some(&encoded.mime_type);
     insert.request_image_width = Some(i64::from(encoded.width_px));
@@ -1383,7 +1431,11 @@ async fn worker_loop(
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
-                let _ = event_tx.send(RunEvent::ImageDone { name, ok: false, laps: 0 });
+                let _ = event_tx.send(RunEvent::ImageDone {
+                    name,
+                    ok: false,
+                    laps: 0,
+                });
             }
             return;
         }
@@ -1403,7 +1455,11 @@ async fn worker_loop(
                     "UPDATE extraction_results SET status='error', error_type='worker_backend', error_message=?2, updated_at=datetime('now') WHERE id=?1",
                     rusqlite::params![image.result_id, e.to_string()],
                 );
-                let _ = event_tx.send(RunEvent::ImageDone { name, ok: false, laps: 0 });
+                let _ = event_tx.send(RunEvent::ImageDone {
+                    name,
+                    ok: false,
+                    laps: 0,
+                });
             }
             return;
         }
@@ -1592,7 +1648,9 @@ async fn worker_loop(
                 // a failed finalize must surface as ok:false + error row.
                 let finalize_outcome: Result<(), String> = (|| {
                     let Some(row_id) = accepted_row else {
-                        return Err("accepted attempt row missing (attempt insert failed)".to_string());
+                        return Err(
+                            "accepted attempt row missing (attempt insert failed)".to_string()
+                        );
                     };
                     forza_db::repositories::runs::finalize_result_ok(
                         &conn,

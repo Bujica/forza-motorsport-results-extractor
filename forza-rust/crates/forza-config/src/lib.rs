@@ -529,7 +529,9 @@ pub fn validate_config(cfg: &AppConfig) -> Result<(), Vec<String>> {
             cfg.llm.max_retries
         ));
     }
-    if !cfg.llm.performance_tps_floor.is_finite() || !(0.0..=500.0).contains(&cfg.llm.performance_tps_floor) {
+    if !cfg.llm.performance_tps_floor.is_finite()
+        || !(0.0..=500.0).contains(&cfg.llm.performance_tps_floor)
+    {
         errors.push(format!(
             "[lmstudio] performance_tps_floor={} must be finite and within [0, 500]",
             cfg.llm.performance_tps_floor

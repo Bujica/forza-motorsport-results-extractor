@@ -345,18 +345,9 @@ fn apply_review_detail(ui: &MainWindow) {
                 }
                 _ => "—".to_string(),
             };
-            let current_driver = c
-                .driver
-                .clone()
-                .unwrap_or_default();
-            let current_car = c
-                .car
-                .clone()
-                .unwrap_or_default();
-            let current_lap = c
-                .best_lap
-                .clone()
-                .unwrap_or_default();
+            let current_driver = c.driver.clone().unwrap_or_default();
+            let current_car = c.car.clone().unwrap_or_default();
+            let current_lap = c.best_lap.clone().unwrap_or_default();
             ui.set_review_detail_lines(
                 format!(
                     "Case: {}\nStable ID: {}\nOutcome: {}\nReason: {}\nTrigger: {}\nModel value: {}\nCorrected value: {}\nDecision: {}\nError: {}\nResolution: {}\nFile: {}\nCurrent track: {}\nCurrent class: {}\nCurrent weather: {}\nTemp: {}\nCurrent driver: {}\nCurrent car: {}\nCurrent lap: {}",
@@ -442,10 +433,9 @@ fn primary_screen_px() -> (i32, i32) {
         GetSystemMetrics, SM_CXFULLSCREEN, SM_CYFULLSCREEN,
     };
     // Trivial win32 query; no invariants to uphold.
-    (
-        unsafe { GetSystemMetrics(SM_CXFULLSCREEN) },
-        unsafe { GetSystemMetrics(SM_CYFULLSCREEN) },
-    )
+    (unsafe { GetSystemMetrics(SM_CXFULLSCREEN) }, unsafe {
+        GetSystemMetrics(SM_CYFULLSCREEN)
+    })
 }
 
 #[cfg(not(windows))]
@@ -585,9 +575,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             // off-screen. A maximized window's saved geometry is its
             // fullscreen rect, so position is only applied when not maximized.
             let maximized = p.window.maximized.unwrap_or(false);
-            if !maximized
-                && let (Some(x), Some(y)) = (p.window.x, p.window.y)
-            {
+            if !maximized && let (Some(x), Some(y)) = (p.window.x, p.window.y) {
                 let (sw, sh) = primary_screen_px();
                 let (lw, lh) = (sw as f32 / sf, sh as f32 / sf);
                 // Keep at least a 100px corner of the window visible.
@@ -595,7 +583,8 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 let x_ok = xf > -cw + 100.0 && (lw <= 0.0 || xf < lw - 100.0);
                 let y_ok = yf > -ch + 100.0 && (lh <= 0.0 || yf < lh - 100.0);
                 if x_ok && y_ok {
-                    main.window().set_position(slint::LogicalPosition::new(xf, yf));
+                    main.window()
+                        .set_position(slint::LogicalPosition::new(xf, yf));
                 }
             }
             if maximized {
@@ -2101,7 +2090,11 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 s.set(s.get().wrapping_add(1));
                 s.get()
             });
-            enqueue(Request::PreviewSettings { changes, seq }, &ui, "validating…");
+            enqueue(
+                Request::PreviewSettings { changes, seq },
+                &ui,
+                "validating…",
+            );
         });
     }
     {

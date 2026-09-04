@@ -225,7 +225,9 @@ fn cmd_db_status(db_path: &Path) -> anyhow::Result<()> {
     let external_lap_records = table_count(&conn, "external_lap_records");
 
     fn show(count: Option<i64>) -> String {
-        count.map(|n| n.to_string()).unwrap_or_else(|| "ERR (unreadable)".to_string())
+        count
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "ERR (unreadable)".to_string())
     }
     println!();
     println!("Relational store");
@@ -240,7 +242,10 @@ fn cmd_db_status(db_path: &Path) -> anyhow::Result<()> {
     println!("  export_artifacts    : {}", show(export_artifacts));
     println!("  reference_tracks    : {}", show(reference_tracks));
     println!("  reference_cars      : {}", show(reference_cars));
-    println!("  external_record_imports : {}", show(external_record_imports));
+    println!(
+        "  external_record_imports : {}",
+        show(external_record_imports)
+    );
     println!("  external_lap_records    : {}", show(external_lap_records));
 
     Ok(())
@@ -592,7 +597,10 @@ fn cmd_live_run(
 /// Lenient load + print warnings, then enforce `validate_config`: run /
 /// rebuild / export must not proceed with `workers=0`, `image_format=bmp`
 /// etc. into obscure downstream failures when `config-check` already fails.
-fn load_validated_config(config_path: &Path, strict: bool) -> anyhow::Result<forza_config::AppConfig> {
+fn load_validated_config(
+    config_path: &Path,
+    strict: bool,
+) -> anyhow::Result<forza_config::AppConfig> {
     let (cfg, warnings) = forza_config::load_config(config_path, strict)?;
     for warning in &warnings {
         eprintln!("warning: {warning}");

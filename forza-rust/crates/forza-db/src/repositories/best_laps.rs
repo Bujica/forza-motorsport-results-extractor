@@ -147,55 +147,55 @@ pub fn mark_best_laps(
     // flags half-cleared (wrong export until the next rebuild).
     conn.execute_batch("BEGIN IMMEDIATE")?;
     let outcome: Result<Vec<String>, crate::DbError> = (|| {
-    for row in &rows {
-        conn.execute(
-            "UPDATE lap_records SET is_best_lap=0 WHERE id=?1",
-            params![row.id],
-        )?;
-    }
+        for row in &rows {
+            conn.execute(
+                "UPDATE lap_records SET is_best_lap=0 WHERE id=?1",
+                params![row.id],
+            )?;
+        }
 
-    let candidates = latest_rows_per_image(&rows);
-    let winners = match gamertag.filter(|g| !g.trim().is_empty()) {
-        Some(tag) => clean_frontier_rows(&candidates, tag),
-        None => simple_best_rows(&candidates)
-            .into_iter()
-            .map(|row| forza_domain::frontier::FrontierWinner {
-                id: row.id.clone(),
-                image_file_id: row.image_file_id.clone(),
-            })
-            .collect(),
-    };
+        let candidates = latest_rows_per_image(&rows);
+        let winners = match gamertag.filter(|g| !g.trim().is_empty()) {
+            Some(tag) => clean_frontier_rows(&candidates, tag),
+            None => simple_best_rows(&candidates)
+                .into_iter()
+                .map(|row| forza_domain::frontier::FrontierWinner {
+                    id: row.id.clone(),
+                    image_file_id: row.image_file_id.clone(),
+                })
+                .collect(),
+        };
 
-    let mut winner_image_ids: Vec<&str> = Vec::new();
-    for winner in &winners {
-        conn.execute(
-            "UPDATE lap_records SET is_best_lap=1 WHERE id=?1",
-            params![winner.id],
-        )?;
-        winner_image_ids.push(winner.image_file_id.as_str());
-    }
+        let mut winner_image_ids: Vec<&str> = Vec::new();
+        for winner in &winners {
+            conn.execute(
+                "UPDATE lap_records SET is_best_lap=1 WHERE id=?1",
+                params![winner.id],
+            )?;
+            winner_image_ids.push(winner.image_file_id.as_str());
+        }
 
-    // Update derived image status for every image touched by any candidate.
-    let touched: std::collections::HashSet<&str> = candidates
-        .iter()
-        .map(|r| r.image_file_id.as_str())
-        .collect();
-    for image in touched {
-        let contributing = winner_image_ids.contains(&image);
-        conn.execute(
-            "UPDATE image_files SET best_lap_status=?2 WHERE id=?1",
-            params![
-                image,
-                if contributing {
-                    "contributing"
-                } else {
-                    "non_contributing"
-                }
-            ],
-        )?;
-    }
+        // Update derived image status for every image touched by any candidate.
+        let touched: std::collections::HashSet<&str> = candidates
+            .iter()
+            .map(|r| r.image_file_id.as_str())
+            .collect();
+        for image in touched {
+            let contributing = winner_image_ids.contains(&image);
+            conn.execute(
+                "UPDATE image_files SET best_lap_status=?2 WHERE id=?1",
+                params![
+                    image,
+                    if contributing {
+                        "contributing"
+                    } else {
+                        "non_contributing"
+                    }
+                ],
+            )?;
+        }
 
-    Ok(winners.into_iter().map(|w| w.id).collect())
+        Ok(winners.into_iter().map(|w| w.id).collect())
     })();
     match outcome {
         Ok(ids) => {

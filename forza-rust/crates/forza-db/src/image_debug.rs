@@ -594,9 +594,8 @@ pub fn get_image_debug_detail(
     // Preflight runtime snapshot behind the selected result's run (the
     // Runtime tab used to claim "No runtime snapshot linked" unconditionally
     // even though every run persists one).
-    let runtime_snapshot: Option<DebugRuntimeSnapshot> = selected
-        .map(|r| r.run_id.clone())
-        .and_then(|run_id| {
+    let runtime_snapshot: Option<DebugRuntimeSnapshot> =
+        selected.map(|r| r.run_id.clone()).and_then(|run_id| {
             conn.query_row(
                 "SELECT endpoint, configured_model, loaded_model, instance_id,
                         health_ok, health_message, model_matches_config,
@@ -612,9 +611,7 @@ pub fn get_image_debug_detail(
                         instance_id: row.get(3)?,
                         health_ok: row.get::<_, i64>(4)? != 0,
                         health_message: row.get(5)?,
-                        model_matches_config: row
-                            .get::<_, Option<i64>>(6)?
-                            .map(|v| v != 0),
+                        model_matches_config: row.get::<_, Option<i64>>(6)?.map(|v| v != 0),
                         captured_at: row.get(7)?,
                     })
                 },

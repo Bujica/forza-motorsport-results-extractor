@@ -10,9 +10,9 @@ use sha2::{Digest, Sha256};
 
 use crate::client::RuntimeClient;
 use crate::error::LlmError;
+use crate::json_repair::repair_json;
 use crate::load_config::{DesiredLoadConfig, NormalizedLoadConfig, load_config_compatible};
 use crate::protocol::{AttemptStatus, ModelAttemptRecord, ModelExtractionResult, RequestKind};
-use crate::json_repair::repair_json;
 use crate::response::{parse_and_validate_response, semantic_retry_issues};
 
 const TRANSIENT_STATUS: [u16; 7] = [409, 423, 429, 500, 502, 503, 504];
@@ -482,18 +482,24 @@ impl LMStudioBackend {
                     attempt_reason: kind.as_str().into(),
                     status: AttemptStatus::Error,
                     accepted: false,
-                    rejected_reason: Some(if retryable {
-                        "transport_error"
-                    } else {
-                        "http_error"
-                    }.into()),
+                    rejected_reason: Some(
+                        if retryable {
+                            "transport_error"
+                        } else {
+                            "http_error"
+                        }
+                        .into(),
+                    ),
                     http_status: Some(status_code as i64),
                     duration_ms: elapsed_ms,
-                    error_code: Some(if retryable {
-                        "transport_error"
-                    } else {
-                        "http_error"
-                    }.into()),
+                    error_code: Some(
+                        if retryable {
+                            "transport_error"
+                        } else {
+                            "http_error"
+                        }
+                        .into(),
+                    ),
                     error_message: Some(message),
                     retry_instruction_text: Some(user_text.clone()),
                     request_config_json: Some(Self::request_config(&payload).to_string()),
@@ -510,8 +516,7 @@ impl LMStudioBackend {
                 if retryable && attempt_no < self.cfg.max_retries {
                     kind = RequestKind::TransportRetry;
                     // Backoff so 500s aren't hammered in a tight loop.
-                    let backoff_ms =
-                        (200u64 << (attempt_no - 1).min(4)).min(5_000);
+                    let backoff_ms = (200u64 << (attempt_no - 1).min(4)).min(5_000);
                     tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
                     continue;
                 }

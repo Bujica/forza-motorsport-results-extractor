@@ -243,8 +243,15 @@ pub fn insert_processed_input(
     process_reason: &str,
     input_order: i64,
 ) -> Result<String, DbError> {
-    insert_processed_input_full(conn, run_id, image_file_id, input_path, process_reason, input_order)
-        .map(|(result_id, _)| result_id)
+    insert_processed_input_full(
+        conn,
+        run_id,
+        image_file_id,
+        input_path,
+        process_reason,
+        input_order,
+    )
+    .map(|(result_id, _)| result_id)
 }
 
 /// Same as `insert_processed_input` but also returns the `run_inputs` row id,

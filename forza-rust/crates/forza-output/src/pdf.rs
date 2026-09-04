@@ -452,22 +452,22 @@ fn winansi_bytes(s: &str) -> Vec<u8> {
             '\u{2026}' => 0x85, // …
             // Remaining WinAnsi punctuation (previously fell through to '?',
             // corrupting gamertags/covers containing €, ™, smart quotes…).
-            '\u{20AC}' => 0x80, // €
-            '\u{201A}' => 0x82, // ‚
-            '\u{0192}' => 0x83, // ƒ
-            '\u{201E}' => 0x84, // „
-            '\u{2030}' => 0x89, // ‰
-            '\u{0160}' => 0x8A, // Š
-            '\u{2039}' => 0x8B, // ‹
-            '\u{0152}' => 0x8C, // Œ
-            '\u{017D}' => 0x8E, // Ž
+            '\u{20AC}' => 0x80,                           // €
+            '\u{201A}' => 0x82,                           // ‚
+            '\u{0192}' => 0x83,                           // ƒ
+            '\u{201E}' => 0x84,                           // „
+            '\u{2030}' => 0x89,                           // ‰
+            '\u{0160}' => 0x8A,                           // Š
+            '\u{2039}' => 0x8B,                           // ‹
+            '\u{0152}' => 0x8C,                           // Œ
+            '\u{017D}' => 0x8E,                           // Ž
             '\u{2010}' | '\u{2011}' | '\u{2012}' => 0x96, // hyphen variants → –
-            '\u{2122}' => 0x99, // ™
-            '\u{0161}' => 0x9A, // š
-            '\u{203A}' => 0x9B, // ›
-            '\u{0153}' => 0x9C, // œ
-            '\u{017E}' => 0x9E, // ž
-            '\u{0178}' => 0x9F, // Ÿ
+            '\u{2122}' => 0x99,                           // ™
+            '\u{0161}' => 0x9A,                           // š
+            '\u{203A}' => 0x9B,                           // ›
+            '\u{0153}' => 0x9C,                           // œ
+            '\u{017E}' => 0x9E,                           // ž
+            '\u{0178}' => 0x9F,                           // Ÿ
             c if (' '..='~').contains(&c) => c as u8,
             c if ('\u{A0}'..='\u{FF}').contains(&c) => c as u8,
             _ => b'?',
@@ -684,12 +684,9 @@ pub fn render_pdf(plan: &PdfDocumentPlan, path: &Path) -> Result<HashSet<String>
     // TOC page count is known before rendering sections: with >52 tracks the
     // index spans several pages and every section number shifts by that many
     // (the old hardcoded `+ 1` printed wrong page numbers on full reports).
-    let toc_page_count = plan
-        .sections
-        .len()
-        .div_ceil(TOC_ENTRIES_PER_PAGE)
-        .max(1);
-    let heading_page_numbers: Vec<usize> = heading_pages.iter().map(|p| p + toc_page_count).collect();
+    let toc_page_count = plan.sections.len().div_ceil(TOC_ENTRIES_PER_PAGE).max(1);
+    let heading_page_numbers: Vec<usize> =
+        heading_pages.iter().map(|p| p + toc_page_count).collect();
 
     // ── TOC pages (each row links to its section) ────────────────────────────
     let mut toc_pages: Vec<Page> = Vec::new();
@@ -755,10 +752,7 @@ pub fn render_pdf(plan: &PdfDocumentPlan, path: &Path) -> Result<HashSet<String>
     // Ordered-page index of section i = cover + TOC pages + renderer-local.
     let mut dests: Vec<(String, usize)> = vec![("toc".to_string(), 1)];
     for (i, &renderer_page) in heading_pages.iter().enumerate() {
-        dests.push((
-            format!("sec-{i}"),
-            1 + toc_page_count + (renderer_page - 1),
-        ));
+        dests.push((format!("sec-{i}"), 1 + toc_page_count + (renderer_page - 1)));
     }
 
     // ── Footer on every page ─────────────────────────────────────────────────
@@ -1244,10 +1238,9 @@ fn write_pdf_file(
         })
         .collect::<Vec<_>>()
         .join(" ");
-    objects[catalog_id] = format!(
-        "<< /Type /Catalog /Pages {pages_id} 0 R /Dests << {dest_entries} >> >>"
-    )
-    .into_bytes();
+    objects[catalog_id] =
+        format!("<< /Type /Catalog /Pages {pages_id} 0 R /Dests << {dest_entries} >> >>")
+            .into_bytes();
 
     let kids = page_ids
         .iter()

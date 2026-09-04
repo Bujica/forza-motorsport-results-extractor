@@ -45,7 +45,9 @@ fn flag_key_lap(
     track_normalized: &str,
     race_class: &str,
 ) -> String {
-    format!("lap:{image_file_id}:{flag_type}:{lap_index}:{driver_normalized}:{track_normalized}:{race_class}")
+    format!(
+        "lap:{image_file_id}:{flag_type}:{lap_index}:{driver_normalized}:{track_normalized}:{race_class}"
+    )
 }
 
 fn flag_key_image(image_file_id: &str, flag_type: &str) -> String {
@@ -189,11 +191,7 @@ pub fn sync_review_flags(conn: &Connection) -> Result<(usize, usize), DbError> {
                 l.extraction_result_id.clone(),
                 case.run_id.clone().or(Some(l.run_id.clone())),
             ),
-            _ => (
-                None,
-                case.extraction_result_id.clone(),
-                case.run_id.clone(),
-            ),
+            _ => (None, case.extraction_result_id.clone(), case.run_id.clone()),
         };
 
         desired.insert(flag_key.clone());

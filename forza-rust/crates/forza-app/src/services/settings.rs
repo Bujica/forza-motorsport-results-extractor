@@ -452,7 +452,10 @@ mod tests {
         let path = Path::new("Z:/nonexistent/forza_config.ini");
         let (cfg, warnings) = forza_config::load_config(path, false).unwrap();
         // Only the announced "not found → defaults" warning is expected.
-        assert!(warnings.iter().all(|w| w.contains("not found")), "{warnings:?}");
+        assert!(
+            warnings.iter().all(|w| w.contains("not found")),
+            "{warnings:?}"
+        );
         cfg
     }
 

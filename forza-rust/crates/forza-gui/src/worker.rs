@@ -952,14 +952,15 @@ where
                         // the UI only resets IN_FLIGHT on a delivered response,
                         // so a silent thread death would freeze inventory/review
                         // behind "loading…" forever.
-                        let response = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-                            || handle_request(&ctx, &service, &request),
-                        )) {
-                            Ok(r) => r,
-                            Err(_) => Response::Error(
-                                "background job panicked; please retry".to_string(),
-                            ),
-                        };
+                        let response =
+                            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                handle_request(&ctx, &service, &request)
+                            })) {
+                                Ok(r) => r,
+                                Err(_) => Response::Error(
+                                    "background job panicked; please retry".to_string(),
+                                ),
+                            };
                         if let Ok(f) = on_response.lock() {
                             f(response);
                         }

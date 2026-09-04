@@ -33,8 +33,7 @@ pub fn rebuild(conn: &Connection, gamertag: &str) -> Result<RebuildOutcome, Stri
     // Every open case owns one active system flag (Python parity); without
     // this the doctor's `open_reviews_missing_active_flag` fails on any DB
     // with open cases while `stale_active_review_flags` passes trivially.
-    let (flags_ensured, flags_resolved) =
-        sync_review_flags(conn).map_err(|e| e.to_string())?;
+    let (flags_ensured, flags_resolved) = sync_review_flags(conn).map_err(|e| e.to_string())?;
 
     // Run-level review counters, per run (a bare uncorrelated subquery would
     // stamp every run with the *global* open count, clobbering `complete_run`).
