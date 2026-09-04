@@ -8,10 +8,21 @@ use forza_app::services::extraction_replay::{
     ReplayOutcome, derive_and_insert_laps, replay_recorded_response,
 };
 
-fn first_fixture(kind_prefix: &str) -> (tempfile::TempDir, String, String) {
+/// Load the first recorded-response fixture with the given prefix, or `None`
+/// when the personal fixture directory is absent.
+///
+/// `fixtures/model_responses/` is git-ignored on purpose (sampled LM Studio
+/// responses contain opponent gamertags), so fresh checkouts — including CI —
+/// don't have it. Skipping there beats failing: the inline-JSON test below
+/// still covers the replay path on every machine.
+fn first_fixture(kind_prefix: &str) -> Option<(tempfile::TempDir, String, String)> {
     let dir = tempfile::tempdir().unwrap();
     let src =
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/model_responses");
+    if !src.is_dir() {
+        eprintln!("skipping fixture test: {src:?} not present (personal data, git-ignored)");
+        return None;
+    }
     let mut chosen: Option<(String, String)> = None;
     for entry in std::fs::read_dir(&src).unwrap() {
         let path = entry.unwrap().path();
@@ -22,17 +33,26 @@ fn first_fixture(kind_prefix: &str) -> (tempfile::TempDir, String, String) {
             break;
         }
     }
-    let (_name, data) = chosen.expect("fixture present");
+    let (_name, data) = chosen?;
     let value: serde_json::Value = serde_json::from_str(&data).unwrap();
     let raw = value["raw_response"].as_str().unwrap().to_string();
-    (
+    Some((
         dir,
         raw,
         value["attempt_id"]
             .as_str()
             .unwrap_or("unknown")
             .to_string(),
-    )
+    ))
+}
+
+macro_rules! fixture_or_skip {
+    ($expr:expr) => {
+        match $expr {
+            Some(v) => v,
+            None => return,
+        }
+    };
 }
 
 fn fresh_db(path: &std::path::Path) -> rusqlite::Connection {
@@ -42,7 +62,7 @@ fn fresh_db(path: &std::path::Path) -> rusqlite::Connection {
 
 #[test]
 fn accepted_fixture_flows_through_parse_validate_and_persistence() {
-    let fixture_guard = first_fixture("accepted_");
+    let fixture_guard = fixture_or_skip!(first_fixture("accepted_"));
     let db_path = fixture_guard.0.path().join("replay.sqlite3");
     let mut conn = fresh_db(&db_path);
 
@@ -212,7 +232,7 @@ fn lap_projection_matches_python_filtering_and_session_class() {
 
 #[test]
 fn malformed_fixture_also_replays_cleanly_under_current_rules() {
-    let fixture_guard = first_fixture("malformed_");
+    let fixture_guard = fixture_or_skip!(first_fixture("malformed_"));
     let db_path = fixture_guard.0.path().join("replay-m.sqlite3");
     let mut conn = fresh_db(&db_path);
 
