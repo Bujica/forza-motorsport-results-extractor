@@ -57,7 +57,7 @@ export component MainWindow inherits Window {
     callback doctor-requested();
     callback rebuild-requested();
     callback overview-requested();
-    callback start-run(bool, bool, bool);
+    callback start-run(bool, bool, bool, bool);
     callback cancel-run();
     callback toggle-pause();
     callback open-image-detail(int);
@@ -81,6 +81,7 @@ export component MainWindow inherits Window {
     callback logs-search-changed(string);
     callback about-requested();
     callback copy-diagnostics-requested();
+    callback open-repository-requested();
     callback select-in-images();
 
     in property <[ImageItem]> images;
@@ -229,6 +230,7 @@ export component MainWindow inherits Window {
     in-out property <bool> dry-run-checked: false;
     in-out property <bool> force-checked: false;
     in-out property <bool> retry-checked: false;
+    in-out property <bool> debug-checked: false;
     in-out property <float> ui-scale: 1.0;
     in-out property <int> ui-min-px: 13;
     // Persisted layout state (window + splitters)
@@ -392,8 +394,9 @@ export component MainWindow inherits Window {
                 dry-run-checked <=> root.dry-run-checked;
                 force-checked <=> root.force-checked;
                 retry-checked <=> root.retry-checked;
+                debug-checked <=> root.debug-checked;
                 progress-h <=> root.process-progress-h;
-                start-run(dry, force, retry) => { root.start-run(dry, force, retry); }
+                start-run(dry, force, retry, debug) => { root.start-run(dry, force, retry, debug); }
                 cancel-run() => { root.cancel-run(); }
                 toggle-pause() => { root.toggle-pause(); }
                 select-in-images() => { root.select-in-images(); }
@@ -623,6 +626,7 @@ export component MainWindow inherits Window {
                         spacing: 8px;
                         Rectangle { horizontal-stretch: 1; }
                         Button { text: "Copy diagnostics"; clicked => { root.copy-diagnostics-requested(); } }
+                        Button { text: "Open repository"; clicked => { root.open-repository-requested(); } }
                         Button { text: "Close"; clicked => { root.about-visible = false; } }
                     }
                 }

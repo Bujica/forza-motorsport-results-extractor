@@ -359,12 +359,15 @@ pub fn add_result(
 pub struct ReviewCase {
     pub reason: String,
     pub trigger_name: String,
+    pub lap_id: String,
     pub image_file_id: String,
     pub lap_index: i64,
     pub driver: String,
     pub track: String,
     pub race_class: String,
     pub weather: String,
+    pub best_lap: Option<String>,
+    pub car: String,
     pub best_lap_ms: i64,
 }
 
@@ -373,29 +376,47 @@ pub fn append_rain_time_review_candidates(
     candidates: &mut Vec<ReviewCase>,
 ) -> Result<(), DbError> {
     let mut stmt = conn.prepare(
-        "SELECT track, race_class, weather, best_lap_ms, image_file_id, lap_index, driver
+        "SELECT id, track, race_class, weather, best_lap_ms, image_file_id, lap_index,
+                driver, best_lap, car
          FROM lap_records WHERE is_best_lap=1 ORDER BY track, race_class, weather, best_lap_ms",
     )?;
 
+    // Nullable text columns degrade gracefully (unknown/empty) instead of
+    // failing the whole candidate pass on one sparse row.
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, i64>(3)?,
-            row.get::<_, String>(4)?,
-            row.get::<_, i64>(5)?,
-            row.get::<_, String>(6)?,
+            row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "unknown".into()),
+            row.get::<_, i64>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, i64>(6)?,
+            row.get::<_, String>(7)?,
+            row.get::<_, Option<String>>(8)?,
+            // `car` is nullable in the schema: degrade to "" (the review
+            // upserts a `car_empty` case from it when appropriate).
+            row.get::<_, Option<String>>(9)?.unwrap_or_default(),
         ))
     })?;
 
-    let laps: Vec<(String, String, String, i64, String, i64, String)> =
-        rows.collect::<Result<_, _>>()?;
+    let laps: Vec<(
+        String,
+        String,
+        String,
+        String,
+        i64,
+        String,
+        i64,
+        String,
+        Option<String>,
+        String,
+    )> = rows.collect::<Result<_, _>>()?;
 
     // Python compares the bucket minima (best rain vs best dry on the same
     // track/class) and then flags EVERY rain best-lap row of that bucket.
     let mut best_by_key: HashMap<(String, String, String), i64> = HashMap::new();
-    for (track, race_class, weather, best_lap_ms, _, _, _) in &laps {
+    for (_, track, race_class, weather, best_lap_ms, _, _, _, _, _) in &laps {
         let key = (track.clone(), race_class.clone(), weather.clone());
         match best_by_key.get(&key) {
             Some(current) if *current <= *best_lap_ms => {}
@@ -405,7 +426,19 @@ pub fn append_rain_time_review_candidates(
         }
     }
 
-    for (track, race_class, weather, best_lap_ms, image_file_id, lap_index, driver) in &laps {
+    for (
+        lap_id,
+        track,
+        race_class,
+        weather,
+        best_lap_ms,
+        image_file_id,
+        lap_index,
+        driver,
+        best_lap,
+        car,
+    ) in &laps
+    {
         if !weather.eq_ignore_ascii_case("rain") {
             continue;
         }
@@ -419,12 +452,15 @@ pub fn append_rain_time_review_candidates(
             candidates.push(ReviewCase {
                 reason: "weather".to_string(),
                 trigger_name: "rain_time_suspicious".to_string(),
+                lap_id: lap_id.clone(),
                 image_file_id: image_file_id.clone(),
                 lap_index: *lap_index,
                 driver: driver.clone(),
                 track: track.clone(),
                 race_class: race_class.clone(),
                 weather: weather.clone(),
+                best_lap: best_lap.clone(),
+                car: car.clone(),
                 best_lap_ms: *best_lap_ms,
             });
         }

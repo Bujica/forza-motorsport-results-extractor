@@ -15,6 +15,11 @@ pub struct LoadedInstance {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RuntimeModel {
     pub id: String,
+    /// Raw `key` alias from the server row (Python matches configured models
+    /// against `{id, path, display_name, key, model_key}`).
+    pub key: String,
+    /// Raw `model_key` alias from the server row.
+    pub model_key: String,
     pub path: String,
     pub display_name: String,
     pub publisher: String,
@@ -170,6 +175,8 @@ impl RuntimeClient {
 
             out.push(RuntimeModel {
                 id,
+                key: str_field(row, &["key"]),
+                model_key: str_field(row, &["model_key"]),
                 path: str_field(row, &["path"]),
                 display_name: str_field(row, &["display_name", "name"]),
                 publisher: str_field(row, &["publisher"]),
@@ -198,9 +205,14 @@ impl RuntimeClient {
         models: &'a [RuntimeModel],
         configured: &str,
     ) -> Option<&'a RuntimeModel> {
+        // Python parity: `{id, path, display_name, key, model_key}`.
         let wanted = configured.trim();
         models.iter().find(|model| {
-            model.id == wanted || model.path == wanted || model.display_name == wanted
+            model.id == wanted
+                || model.path == wanted
+                || model.display_name == wanted
+                || (!model.key.is_empty() && model.key == wanted)
+                || (!model.model_key.is_empty() && model.model_key == wanted)
         })
     }
 

@@ -57,10 +57,13 @@ fn review_track_key(text: &str) -> String {
     };
     use unicode_normalization::UnicodeNormalization;
     let nfkd: String = text.nfkd().collect();
+    // Full `to_lowercase` like Python's `.lower()` (not ASCII-only): the
+    // downstream filter keeps ASCII alphanumerics either way, but this stays
+    // correct if the filter ever widens to Unicode.
     let clean: String = nfkd
         .chars()
         .filter(|ch| ccc(*ch) == CanonicalCombiningClass::NotReordered)
-        .map(|ch| ch.to_ascii_lowercase())
+        .flat_map(|ch| ch.to_lowercase())
         .collect();
     let mut out = String::with_capacity(clean.len());
     let mut pending_sep = false;

@@ -83,7 +83,7 @@ export component ReviewPage inherits Rectangle {
             Text { text: "Status:"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
             ComboBox {
                 min-width: 100px;
-                model: ["open", "resolved", "all"];
+                model: ["open", "resolved", "ignored", "all"];
                 current-index: 0;
                 selected => {
                     root.review-status-filter = self.current-value;

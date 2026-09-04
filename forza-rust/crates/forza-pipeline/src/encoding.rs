@@ -75,10 +75,12 @@ pub fn encode_image_payload(
     let mut rgb = img.to_rgb8();
     if rgb.width() > max_width {
         let ratio = f64::from(max_width) / f64::from(rgb.width());
-        let new_h = f64::from(rgb.height()) * ratio;
+        // Python parity: `int(h * ratio)` truncates (no rounding), so odd
+        // heights match the Python-encoded bytes exactly.
+        let new_h = (f64::from(rgb.height()) * ratio).floor() as u32;
         let resized = image::DynamicImage::ImageRgb8(rgb).resize_exact(
             max_width,
-            new_h.round() as u32,
+            new_h.max(1),
             FilterType::Lanczos3,
         );
         rgb = resized.to_rgb8();

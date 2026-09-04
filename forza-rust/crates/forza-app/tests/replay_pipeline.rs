@@ -171,6 +171,7 @@ fn lap_projection_matches_python_filtering_and_session_class() {
         &result_id,
         &parsed,
         Some("projection.png"),
+        None,
     )
     .unwrap();
 

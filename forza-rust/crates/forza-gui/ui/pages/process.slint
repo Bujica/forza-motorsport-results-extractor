@@ -19,9 +19,13 @@ export component ProcessPage inherits Rectangle {
     in-out property <bool> dry-run-checked;
     in-out property <bool> force-checked;
     in-out property <bool> retry-checked;
+    in-out property <bool> debug-checked;
+    // Two-step cancel (Python `_confirm_cancel` parity): the first click arms
+    // the confirmation inline; "Confirm" stops after the current image.
+    in-out property <bool> confirm-cancel: false;
     in-out property <length> progress-h: 90px;
 
-    callback start-run(bool, bool, bool);
+    callback start-run(bool, bool, bool, bool);
     callback select-in-images();
     callback cancel-run();
     callback toggle-pause();
@@ -50,7 +54,10 @@ export component ProcessPage inherits Rectangle {
                             checked <=> root.retry-checked;
                             toggled => { if self.checked { root.force-checked = false; } }
                         }
-                        CheckBox { text: "Debug"; enabled: false; }
+                        CheckBox {
+                            text: "Debug";
+                            checked <=> root.debug-checked;
+                        }
                     }
                     Text { text: root.run-info; color: Theme.text-muted; font-size: Theme.font-sm; }
                 }
@@ -61,7 +68,7 @@ export component ProcessPage inherits Rectangle {
                     Button {
                         text: root.run-running ? "Running…" : "Run All";
                         enabled: !root.run-running;
-                        clicked => { root.start-run(root.dry-run-checked, root.force-checked, root.retry-checked); }
+                        clicked => { root.confirm-cancel = false; root.start-run(root.dry-run-checked, root.force-checked, root.retry-checked, root.debug-checked); }
                     }
                     Button {
                         text: "Select in Images";
@@ -76,7 +83,11 @@ export component ProcessPage inherits Rectangle {
                     Button {
                         text: "Cancel";
                         enabled: root.run-running;
-                        clicked => { root.cancel-run(); }
+                        clicked => { root.confirm-cancel = true; }
+                    }
+                    if root.confirm-cancel && root.run-running: Button {
+                        text: "Confirm cancel?";
+                        clicked => { root.confirm-cancel = false; root.cancel-run(); }
                     }
                 }
             }

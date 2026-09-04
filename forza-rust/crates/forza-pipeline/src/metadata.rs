@@ -43,19 +43,21 @@ pub fn inspect_metadata(path: &Path) -> Result<ImageMetadataInfo, PipelineError>
         path: path.to_path_buf(),
         detail: e.to_string(),
     })?;
-    let img = reader
+    let reader = reader
         .with_guessed_format()
         .map_err(|e| PipelineError::Encode {
             path: path.to_path_buf(),
             detail: e.to_string(),
-        })?
-        .decode()
-        .map_err(|e| PipelineError::Encode {
-            path: path.to_path_buf(),
-            detail: e.to_string(),
         })?;
+    // Container truth first (like PIL's `img.format`): sniffed magic bytes,
+    // falling back to the extension only when sniffing yields nothing.
+    let detected = reader.format().map(container_format_name);
+    let img = reader.decode().map_err(|e| PipelineError::Encode {
+        path: path.to_path_buf(),
+        detail: e.to_string(),
+    })?;
 
-    let format = guess_format_name(path, &img);
+    let format = detected.unwrap_or_else(|| guess_format_name(path, &img));
     let mime = mime_for(&format);
     let (width_px, height_px) = (img.width(), img.height());
     let color_mode = color_mode_name(img.color());
@@ -94,6 +96,21 @@ pub fn inspect_metadata(path: &Path) -> Result<ImageMetadataInfo, PipelineError>
         race_datetime_source: "file_modified_at".to_string(),
         image_metadata_json,
     })
+}
+
+/// Container format sniffed from magic bytes (PIL `img.format` parity).
+fn container_format_name(format: image::ImageFormat) -> String {
+    use image::ImageFormat as F;
+    match format {
+        F::Png => "PNG",
+        F::Jpeg => "JPEG",
+        F::WebP => "WEBP",
+        F::Gif => "GIF",
+        F::Bmp => "BMP",
+        F::Tiff => "TIFF",
+        _ => "PNG",
+    }
+    .to_string()
 }
 
 fn guess_format_name(path: &Path, img: &image::DynamicImage) -> String {

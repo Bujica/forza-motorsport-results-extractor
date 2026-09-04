@@ -210,6 +210,8 @@ impl LMStudioBackend {
             model.id == self.cfg.model
                 || model.path == self.cfg.model
                 || model.display_name == self.cfg.model
+                || (!model.key.is_empty() && model.key == self.cfg.model)
+                || (!model.model_key.is_empty() && model.model_key == self.cfg.model)
         });
         let Some(model) = model else {
             return Ok(RuntimeSnapshot {
@@ -727,12 +729,15 @@ impl LMStudioBackend {
         let _guard = lock.lock().await;
 
         let models = self.runtime.list_models().await?;
-        // Same identity rule as preflight (`id || path || display_name`): an
-        // id-only match rejects configs that preflight just accepted.
+        // Same identity rule as preflight
+        // (`id || path || display_name || key || model_key`): a narrower
+        // match rejects configs that preflight just accepted.
         let Some(model) = models.iter().find(|m| {
             m.id == self.cfg.model
                 || m.path == self.cfg.model
                 || m.display_name == self.cfg.model
+                || (!m.key.is_empty() && m.key == self.cfg.model)
+                || (!m.model_key.is_empty() && m.model_key == self.cfg.model)
         }) else {
             return Err(LlmError::Runtime(format!(
                 "configured model not found: {}",

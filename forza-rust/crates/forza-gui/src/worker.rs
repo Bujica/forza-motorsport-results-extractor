@@ -182,9 +182,22 @@ fn review_options(conn: &rusqlite::Connection) -> Result<ReviewOptions, String> 
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?
     };
+    // Python hardcodes the outcome vocabulary before DB values so the filter
+    // is usable on an empty queue; DB-only values append after.
+    let mut outcomes = vec![
+        "pending".to_string(),
+        "confirmed".to_string(),
+        "model_error".to_string(),
+        "ignored".to_string(),
+    ];
+    for value in distinct("outcome")? {
+        if !outcomes.contains(&value) {
+            outcomes.push(value);
+        }
+    }
     Ok(ReviewOptions {
         reasons: distinct("reason")?,
-        outcomes: distinct("outcome")?,
+        outcomes,
         runs,
     })
 }
@@ -319,7 +332,10 @@ pub fn handle_request(
         }
         Request::ReopenCase { case_number } => Response::CaseReopen((|| -> Result<(), String> {
             let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
-            reopen_case(&conn, *case_number)
+            reopen_case(&conn, *case_number)?;
+            // A reopened case needs its active system flag back.
+            forza_db::repositories::sync_review_flags(&conn).map_err(|e| e.to_string())?;
+            Ok(())
         })()),
         Request::LoadPreview { image_file_id } => {
             let result = (|| -> Result<Option<String>, String> {
@@ -351,7 +367,11 @@ pub fn handle_request(
         })()),
         Request::IgnoreCase { case_number } => Response::CaseDecided((|| {
             let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
-            ignore_case(&conn, *case_number)
+            ignore_case(&conn, *case_number)?;
+            // An ignored case must not keep an active system flag behind
+            // (stale-flag doctor failure until the next run/rebuild).
+            forza_db::repositories::sync_review_flags(&conn).map_err(|e| e.to_string())?;
+            Ok(())
         })()),
         Request::ListBestLaps => Response::BestLaps((|| {
             let gamertag = ctx.gamertag();

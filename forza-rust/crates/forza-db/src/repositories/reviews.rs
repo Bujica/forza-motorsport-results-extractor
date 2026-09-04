@@ -217,8 +217,36 @@ pub fn query_review_candidates(conn: &Connection) -> Result<Vec<ReviewCandidate>
         }
     }
 
-    // Rain-time suspicious check (rain best faster than dry best per group)
-    // lands with the full review parity pass in Fase 8½.
+    // Rain-time suspicious check (Python parity): best rain faster than best
+    // dry on the same track/class flags every rain best-lap row of the bucket.
+    let mut rain_cases = Vec::new();
+    super::laps::append_rain_time_review_candidates(conn, &mut rain_cases)?;
+    for rc in rain_cases {
+        let probe = ReviewCandidate {
+            reason: "weather",
+            trigger: "rain_time_suspicious",
+            model_value: rc.weather.clone(),
+            per_image: true,
+            row: LapCandidateRow {
+                lap_id: rc.lap_id,
+                image_file_id: rc.image_file_id,
+                lap_index: rc.lap_index,
+                driver: rc.driver,
+                source_file: None,
+                best_lap: rc.best_lap,
+                track: rc.track,
+                weather: rc.weather,
+                race_class: rc.race_class,
+                car: rc.car,
+                dirty: false,
+                is_best_lap: true,
+            },
+        };
+        let key = canonical_business_key(&probe);
+        if seen.insert(key) {
+            candidates.push(probe);
+        }
+    }
 
     Ok(candidates)
 }

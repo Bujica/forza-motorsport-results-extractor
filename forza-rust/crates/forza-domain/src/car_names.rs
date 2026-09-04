@@ -39,7 +39,11 @@ impl CarCanonicalizationResult {
 }
 
 fn casefold(value: &str) -> String {
-    value.to_lowercase()
+    // `str::to_lowercase` is not full casefolding (`"ß".to_lowercase()` stays
+    // `"ß"` while Python `"ß".casefold()` gives `"ss"`). Handle the one Latin
+    // divergence that can plausibly appear in car text; the rest (Σ/İ) has no
+    // realistic car-name occurrence and std offers no casefold.
+    value.replace('ß', "ss").replace('ẞ', "SS").to_lowercase()
 }
 
 /// Conservative matching key for Forza car names: punctuation/case/year

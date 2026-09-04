@@ -113,6 +113,11 @@ pub struct RunParams {
     pub physical_batch_size: Option<i64>,
     pub flash_attention: bool,
     pub offload_kv_cache_to_gpu: bool,
+    pub temp_min_f: f64,
+    pub temp_max_f: f64,
+    /// Debug verbosity (Python per-run `debug` parity): extra per-image
+    /// diagnostic lines in the run log (hashes, ids, attempt counts).
+    pub verbose: bool,
     // image pipeline
     pub max_width: u32,
     pub encode_quality: u8,
@@ -148,6 +153,9 @@ impl RunParams {
             physical_batch_size: cfg.llm.physical_batch_size,
             flash_attention: cfg.llm.flash_attention,
             offload_kv_cache_to_gpu: cfg.llm.offload_kv_cache_to_gpu,
+            temp_min_f: cfg.validation.temp_min_f,
+            temp_max_f: cfg.validation.temp_max_f,
+            verbose: false,
             max_width: cfg.image.max_width.clamp(1, u32::MAX as i64) as u32,
             encode_quality: cfg.image.encode_quality.clamp(1, 100) as u8,
             image_format: cfg.llm.image_format.clone(),
@@ -1056,6 +1064,7 @@ where
                         &result_id,
                         &result.parsed,
                         Some(&name),
+                        Some((params.temp_min_f, params.temp_max_f)),
                     ) {
                         Ok(l) => l,
                         Err(e) => {
@@ -1118,6 +1127,12 @@ where
                     )
                     .map_err(|e| e.to_string())?;
                     succeeded += 1;
+                    if params.verbose {
+                        on_event(RunEvent::Log(format!(
+                            "[debug] {name} result={result_id} hash={} attempts={attempt_count} attempt={row_id} laps={laps}",
+                            image.file_hash,
+                        )));
+                    }
                     on_event(RunEvent::ImageDone {
                         name: name.clone(),
                         ok: true,
@@ -1540,6 +1555,7 @@ async fn worker_loop(
                     &result_id,
                     &result.parsed,
                     Some(&name),
+                    Some((params.temp_min_f, params.temp_max_f)),
                 ) {
                     Ok(l) => l,
                     Err(e) => {
@@ -1605,6 +1621,12 @@ async fn worker_loop(
                 })();
                 match finalize_outcome {
                     Ok(()) => {
+                        if params.verbose {
+                            let _ = event_tx.send(RunEvent::Log(format!(
+                                "[debug] {name} result={result_id} hash={} attempts={attempt_count} laps={laps} (worker)",
+                                image.file_hash,
+                            )));
+                        }
                         let _ = event_tx.send(RunEvent::ImageDone {
                             name: name.clone(),
                             ok: true,

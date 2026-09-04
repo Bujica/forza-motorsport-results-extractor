@@ -131,12 +131,14 @@ pub fn replay_recorded_response(
         .map_err(|e| e.to_string())?;
 
     // Derive laps from parsed entries (shared with the live extraction path).
+    // Replay carries no run config: default 40/140 plausibility window.
     let lap_rows = derive_and_insert_laps(
         conn,
         run_id,
         image_file_id,
         extraction_result_id,
         &parsed,
+        None,
         None,
     )?;
 
@@ -149,6 +151,10 @@ pub fn replay_recorded_response(
 
 /// Insert lap records derived from a validated parsed response.
 /// Shared by the recorded-replay and the live extraction paths.
+///
+/// `temp_range` is the configured `[validation] temp_min_f/temp_max_f`
+/// plausibility window (Python `process_image` honors it; the old hardcoded
+/// 40/140 ignored custom ranges). `None` keeps the 40/140 defaults (replay).
 pub fn derive_and_insert_laps(
     conn: &Connection,
     run_id: &str,
@@ -156,6 +162,7 @@ pub fn derive_and_insert_laps(
     extraction_result_id: &str,
     parsed: &serde_json::Value,
     source_file: Option<&str>,
+    temp_range: Option<(f64, f64)>,
 ) -> Result<usize, String> {
     let refs = forza_domain::reference_data::embedded_reference_data();
     let track_raw = parsed.get("t").and_then(|v| v.as_str()).unwrap_or("");
@@ -216,8 +223,9 @@ pub fn derive_and_insert_laps(
             "model_best_lap": best_lap_str,
         })
         .to_string();
+        let (temp_min, temp_max) = temp_range.unwrap_or((40.0, 140.0));
         let temp_c =
-            temp_f.and_then(|tf| forza_domain::lap::fahrenheit_to_celsius(tf, 40.0, 140.0));
+            temp_f.and_then(|tf| forza_domain::lap::fahrenheit_to_celsius(tf, temp_min, temp_max));
 
         let id = format!("lap-{image_file_id}-{extraction_result_id}-{}", index + 1);
         conn.execute(

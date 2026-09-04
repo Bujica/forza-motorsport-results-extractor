@@ -1600,7 +1600,12 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             }
             RUN_SELECTED_IDS.with(|slot| *slot.borrow_mut() = Some(selected));
             if let Some(w) = ui.upgrade() {
-                w.invoke_start_run(false, w.get_force_checked(), w.get_retry_checked());
+                w.invoke_start_run(
+                    false,
+                    w.get_force_checked(),
+                    w.get_retry_checked(),
+                    w.get_debug_checked(),
+                );
             }
         });
     }
@@ -2348,6 +2353,17 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     }
     {
         let ui = main.as_weak();
+        main.on_open_repository_requested(move || {
+            // Same repository URL as the Python About dialog.
+            if opener::open("https://github.com/Bujica/forza-motorsport-results-extractor").is_err()
+                && let Some(w) = ui.upgrade()
+            {
+                w.set_status_text("could not open repository URL".into());
+            }
+        });
+    }
+    {
+        let ui = main.as_weak();
         main.on_copy_diagnostics_requested(move || {
             if let Some(w) = ui.upgrade() {
                 let text = w.get_about_text().to_string();
@@ -2378,7 +2394,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     // ── Live extraction runner (own thread, cooperative cancel) ──────────
     {
         let ui = main.as_weak();
-        main.on_start_run(move |dry_run, force, retry| {
+        main.on_start_run(move |dry_run, force, retry, debug| {
             if dry_run {
                 let input_dir = RUN_CONFIG
                     .with(|slot| slot.borrow().as_ref().map(|p| p.input_dir.to_string_lossy().to_string()))
@@ -2408,6 +2424,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 force,
                 retry_errors: retry && !force,
                 selected_image_file_ids: RUN_SELECTED_IDS.with(|slot| slot.borrow_mut().take()),
+                verbose: debug,
                 ..params
             };
             let control = forza_app::RunControl::new();
@@ -2487,6 +2504,9 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         // Refresh derived views after a run, keeping the
                         // user's active filters (forced defaults used to show
                         // a table that no longer matched the filter bar).
+                        // Overview included: its DB snapshot is stale after a
+                        // run (Python marks diagnostics pending here).
+                        send_request(Request::RefreshOverview);
                         send_request(Request::RefreshInventory {
                             filter: current_inventory_filter(),
                         });

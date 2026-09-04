@@ -387,8 +387,11 @@ fn cmd_db_reset(db_path: &Path, yes: bool) -> anyhow::Result<()> {
         }
     }
     if !yes {
-        println!("Re-run with --yes to confirm.");
-        return Ok(());
+        // Python hard-errors here (SystemExit): a bare db-reset must fail
+        // loudly, not exit 0 as if the reset happened.
+        return Err(anyhow::anyhow!(
+            "refusing to delete without --yes (re-run with --yes to confirm)"
+        ));
     }
     for path in std::iter::once(db_path.to_path_buf()).chain(sidecars.iter().cloned()) {
         if path.exists() {
@@ -525,6 +528,8 @@ fn cmd_live_run(
     params.max_images = limit;
     let failed = Arc::new(AtomicBool::new(false));
     let failed_for_events = Arc::clone(&failed);
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancelled_for_events = Arc::clone(&cancelled);
     let handle = forza_app::spawn_extraction(params, forza_app::RunControl::new(), move |event| {
         match event {
             forza_app::RunEvent::Started { run_id, total } => {
@@ -557,6 +562,9 @@ fn cmd_live_run(
                 if failed > 0 {
                     failed_for_events.store(true, Ordering::Relaxed);
                 }
+                if cancelled {
+                    cancelled_for_events.store(true, Ordering::Relaxed);
+                }
                 println!(
                     "finished: cancelled={cancelled} processed={processed} succeeded={succeeded} failed={failed} elapsed_s={elapsed_s:.3}"
                 );
@@ -570,6 +578,11 @@ fn cmd_live_run(
     handle
         .join()
         .map_err(|_| anyhow::anyhow!("extraction thread panicked"))?;
+    // Python parity: cancelled → 130. Per-image failures still fail the
+    // command (stricter than Python, which exits 0) so scripts notice them.
+    if cancelled.load(Ordering::Relaxed) {
+        std::process::exit(130);
+    }
     if failed.load(Ordering::Relaxed) {
         return Err(anyhow::anyhow!("extraction completed with failures"));
     }
