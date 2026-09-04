@@ -3,9 +3,12 @@ name: rust
 on:
   push:
     branches: [dev, main]
-    paths: ["forza-rust/**", ".github/workflows/rust.yml"]
+    # NOTE: .gitattributes is included on purpose — it controls line endings
+    # of byte-embedded assets/fixtures, so a change there can break golden
+    # hashes without touching a single .rs file (seen 2026-09-04).
+    paths: ["forza-rust/**", ".github/workflows/rust.yml", ".gitattributes"]
   pull_request:
-    paths: ["forza-rust/**", ".github/workflows/rust.yml"]
+    paths: ["forza-rust/**", ".github/workflows/rust.yml", ".gitattributes"]
 
 defaults:
   run:
