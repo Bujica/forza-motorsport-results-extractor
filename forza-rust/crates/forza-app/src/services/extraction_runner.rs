@@ -36,7 +36,7 @@ use forza_db::repositories::runs::{
     update_run_metadata,
 };
 use forza_db::repositories::{
-    known_hashes, known_path_hashes, list_failed_images_for_retry, mark_best_laps,
+    known_hashes, known_path_hashes, list_failed_images_for_retry,
 };
 use forza_lmstudio::backend::{BackendConfig, LMStudioBackend};
 use forza_lmstudio::load_config::DesiredLoadConfig;
@@ -1154,8 +1154,26 @@ where
     let final_status = if cancelled { "cancelled" } else { "completed" };
     complete_run(&conn, &run_id, final_status).map_err(|e| e.to_string())?;
 
-    // Best laps reflect the new evidence immediately.
-    mark_best_laps(&conn, Some(&params.gamertag)).map_err(|e| e.to_string())?;
+    // Derived refresh parity with Python `_complete_run → rebuild_outputs`:
+    // best laps, review cases AND their system flags are recomputed at the
+    // end of every run — never requiring a manual Rebuild for reviews to
+    // appear. (`rebuild` re-runs `mark_best_laps` idempotently; cheap.)
+    match crate::services::rebuild::rebuild(&conn, &params.gamertag) {
+        Ok(outcome) => {
+            on_event(RunEvent::Log(format!(
+                "derived refresh: {} best-lap winner(s), reviews +{} kept {} auto-resolved {} (flags +{}/{})",
+                outcome.best_lap_winners,
+                outcome.review_inserted,
+                outcome.review_kept,
+                outcome.review_auto_resolved,
+                outcome.flags_ensured,
+                outcome.flags_resolved,
+            )));
+        }
+        Err(e) => {
+            on_event(RunEvent::Log(format!("derived refresh failed: {e}")));
+        }
+    }
 
     Ok((processed, succeeded, failed, 0, 0))
 }

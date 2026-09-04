@@ -1120,11 +1120,13 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         match result {
                             Ok(outcome) => w.set_status_text(
                                 format!(
-                                    "rebuild: {} winner(s); reviews +{} kept {} auto-resolved {}",
+                                    "rebuild: {} winner(s); reviews +{} kept {} auto-resolved {} (flags +{}/{})",
                                     outcome.best_lap_winners,
                                     outcome.review_inserted,
                                     outcome.review_kept,
-                                    outcome.review_auto_resolved
+                                    outcome.review_auto_resolved,
+                                    outcome.flags_ensured,
+                                    outcome.flags_resolved
                                 )
                                 .into(),
                             ),

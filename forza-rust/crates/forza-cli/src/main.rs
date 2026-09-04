@@ -606,11 +606,13 @@ fn main() -> anyhow::Result<()> {
             let outcome = forza_app::services::rebuild::rebuild(&conn, &cfg.gamertag)
                 .map_err(|e| anyhow::anyhow!(e))?;
             println!(
-                "rebuild: {} best-lap winner(s); reviews +{} kept {} auto-resolved {}",
+                "rebuild: {} best-lap winner(s); reviews +{} kept {} auto-resolved {} (flags +{}/{})",
                 outcome.best_lap_winners,
                 outcome.review_inserted,
                 outcome.review_kept,
-                outcome.review_auto_resolved
+                outcome.review_auto_resolved,
+                outcome.flags_ensured,
+                outcome.flags_resolved
             );
             Ok(())
         }

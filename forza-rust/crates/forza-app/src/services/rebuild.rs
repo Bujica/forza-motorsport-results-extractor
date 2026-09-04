@@ -3,7 +3,9 @@
 
 use rusqlite::Connection;
 
-use forza_db::repositories::{mark_best_laps, query_review_candidates, upsert_review_cases};
+use forza_db::repositories::{
+    mark_best_laps, query_review_candidates, sync_review_flags, upsert_review_cases,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RebuildOutcome {
@@ -12,6 +14,8 @@ pub struct RebuildOutcome {
     pub review_inserted: usize,
     pub review_kept: usize,
     pub review_auto_resolved: usize,
+    pub flags_ensured: usize,
+    pub flags_resolved: usize,
 }
 
 /// Full rebuild pass. Order matters:
@@ -26,6 +30,11 @@ pub fn rebuild(conn: &Connection, gamertag: &str) -> Result<RebuildOutcome, Stri
     let candidates = query_review_candidates(conn).map_err(|e| e.to_string())?;
     let (inserted, kept, auto_resolved) =
         upsert_review_cases(conn, &candidates).map_err(|e| e.to_string())?;
+    // Every open case owns one active system flag (Python parity); without
+    // this the doctor's `open_reviews_missing_active_flag` fails on any DB
+    // with open cases while `stale_active_review_flags` passes trivially.
+    let (flags_ensured, flags_resolved) =
+        sync_review_flags(conn).map_err(|e| e.to_string())?;
 
     // Run-level review counters, per run (a bare uncorrelated subquery would
     // stamp every run with the *global* open count, clobbering `complete_run`).
@@ -43,5 +52,7 @@ pub fn rebuild(conn: &Connection, gamertag: &str) -> Result<RebuildOutcome, Stri
         review_inserted: inserted,
         review_kept: kept,
         review_auto_resolved: auto_resolved,
+        flags_ensured,
+        flags_resolved,
     })
 }

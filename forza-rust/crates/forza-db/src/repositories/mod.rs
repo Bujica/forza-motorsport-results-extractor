@@ -5,6 +5,7 @@
 pub mod best_laps;
 pub mod corrections;
 pub mod external_records;
+pub mod flags;
 pub mod images;
 pub mod laps;
 pub mod reviews;
@@ -12,6 +13,7 @@ pub mod runs;
 
 pub use best_laps::mark_best_laps;
 pub use corrections::{apply_all, apply_manual_correction};
+pub use flags::sync_review_flags;
 pub use images::{
     ImageFileEntity, ImageFileInsert, UpsertParams, insert_image_file, known_hashes,
     known_path_hashes, list_failed_images_for_retry, upsert_image_file,
