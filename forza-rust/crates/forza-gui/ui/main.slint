@@ -30,6 +30,7 @@ export component MainWindow inherits Window {
     callback selection-toggle(int);
     callback selection-single(int);
     callback selection-range(int);
+    callback selection-drag(int, int);
     callback select-all();
     callback clear-selection();
     callback export-selected();
@@ -38,6 +39,7 @@ export component MainWindow inherits Window {
     callback sort-changed(int);
     callback process-selected();
     callback rename-selected();
+    callback execute-rename();
     callback reviews-requested();
     callback review-filter-changed(string, string, string, string);
     callback review-selected(int);
@@ -123,6 +125,9 @@ export component MainWindow inherits Window {
     in property <int> sort-column;
     in property <bool> sort-ascending;
     in-out property <bool> confirm-delete;
+    in-out property <bool> confirm-rename;
+    in property <string> rename-plan-lines;
+    in property <string> rename-summary;
     in property <string> detail-title;
     in property <string> detail-lines;
     in property <string> doctor-report;
@@ -340,6 +345,9 @@ export component MainWindow inherits Window {
                 sort-column: root.sort-column;
                 sort-ascending: root.sort-ascending;
                 confirm-delete <=> root.confirm-delete;
+                confirm-rename <=> root.confirm-rename;
+                rename-plan-lines: root.rename-plan-lines;
+                rename-summary: root.rename-summary;
                 images: root.images;
                 image-tracks: root.image-tracks;
                 image-runs: root.image-runs;
@@ -368,10 +376,12 @@ export component MainWindow inherits Window {
                 selection-toggle(i) => { root.selection-toggle(i); }
                 selection-single(i) => { root.selection-single(i); }
                 selection-range(i) => { root.selection-range(i); }
+                selection-drag(a, b) => { root.selection-drag(a, b); }
                 select-all() => { root.select-all(); }
                 clear-selection() => { root.clear-selection(); }
                 process-selected() => { root.process-selected(); }
                 rename-selected() => { root.rename-selected(); }
+                execute-rename() => { root.execute-rename(); }
                 export-selected() => { root.export-selected(); }
                 rescan-selected() => { root.rescan-selected(); }
                 delete-selected() => { root.delete-selected(); }

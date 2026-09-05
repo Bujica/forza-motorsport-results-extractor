@@ -93,6 +93,11 @@ pub enum Request {
     LoadImageDetail {
         image_id: String,
     },
+    /// Dry-run rename plan for the confirmation dialog (no filesystem or DB
+    /// writes); `RenameImages` below executes it.
+    PreviewRename {
+        image_ids: Vec<String>,
+    },
     RenameImages {
         image_ids: Vec<String>,
     },
@@ -239,6 +244,7 @@ pub enum Response {
     Rebuild(Result<forza_app::RebuildOutcome, String>),
     RunDryRunDone(String),
     ImageDetail(Result<Option<forza_app::ImageDetailData>, String>),
+    RenamePreview(Result<forza_app::RenamePreview, String>),
     RenameDone(Result<String, String>),
     /// (exported count, skipped count)
     ExportDone(Result<(usize, usize), String>),
@@ -425,6 +431,10 @@ pub fn handle_request(
             let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
             load_image_detail(&conn, image_id)
         })()),
+        Request::PreviewRename { image_ids } => Response::RenamePreview((|| {
+            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            forza_app::preview_rename(&conn, image_ids)
+        })()),
         Request::RenameImages { image_ids } => Response::RenameDone(rename_images(ctx, image_ids)),
         Request::ExportImages {
             image_ids,
@@ -547,7 +557,14 @@ pub fn handle_request(
         Request::LoadLogs => Response::Logs((|| {
             let cfg = ctx.cfg.lock().map_err(|e| e.to_string())?.clone();
             let app_log = read_log_file(&cfg.log_file);
-            let error_log = read_log_file(&errors_log_path(&cfg.log_file));
+            // An absent errors file means "no errors recorded", not a
+            // problem: say so instead of a confusing not-found path.
+            let errors_path = errors_log_path(&cfg.log_file);
+            let error_log = if errors_path.exists() {
+                read_log_file(&errors_path)
+            } else {
+                "No errors recorded yet.".to_string()
+            };
             Ok((app_log, error_log))
         })()),
         Request::ClearLogs { which } => Response::ClearLogs((|| {
@@ -588,68 +605,17 @@ pub fn handle_request(
 
 fn rename_images(ctx: &WorkerContext, image_ids: &[String]) -> Result<String, String> {
     let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
-    let mut changed = 0usize;
-    let mut skipped = 0usize;
-    let mut errors = Vec::new();
-    for image_id in image_ids {
-        let row = conn.query_row(
-            "SELECT current_path, current_name, semantic_name FROM image_files WHERE id=?1",
-            rusqlite::params![image_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                ))
-            },
-        );
-        let Ok((source_text, current_name, semantic_name)) = row else {
-            skipped += 1;
-            continue;
-        };
-        let source = std::path::PathBuf::from(&source_text);
-        if !source.exists() {
-            skipped += 1;
-            let _ = conn.execute("UPDATE image_files SET file_status='missing', missing_at=datetime('now') WHERE id=?1", rusqlite::params![image_id]);
-            continue;
-        }
-        let preferred = semantic_name
-            .or(current_name)
-            .unwrap_or_else(|| "image".into());
-        let suffix = source
-            .extension()
-            .map(|s| format!(".{}", s.to_string_lossy()))
-            .unwrap_or_default();
-        let target_name = safe_rename_filename(&preferred, &suffix);
-        let target = source.with_file_name(target_name);
-        if source == target {
-            skipped += 1;
-            continue;
-        }
-        if target.exists() {
-            errors.push(format!(
-                "{}: target exists ({})",
-                image_id,
-                target.display()
-            ));
-            continue;
-        }
-        if let Err(error) = std::fs::rename(&source, &target) {
-            errors.push(format!("{}: {}", image_id, error));
-            continue;
-        }
-        if let Err(error) = conn.execute(
-            "UPDATE image_files SET current_path=?2, current_name=?3, file_status='available', missing_at=NULL, updated_at=datetime('now') WHERE id=?1",
-            rusqlite::params![image_id, target.to_string_lossy(), target.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()],
-        ) {
-            // Roll the file back: otherwise the row keeps pointing at the old
-            // path and the image shows "missing" until a rescan.
-            let _ = std::fs::rename(&target, &source);
-            errors.push(format!("{}: DB update failed: {}", image_id, error));
-        } else {
-            changed += 1;
-        }
-    }
+    let outcomes = forza_app::rename_files(&conn, image_ids, false)?;
+    let changed = outcomes.iter().filter(|o| o.renamed).count();
+    let errors: Vec<String> = outcomes
+        .iter()
+        .filter_map(|o| {
+            o.error
+                .as_ref()
+                .map(|e| format!("{}: {e}", o.plan.image_file_id))
+        })
+        .collect();
+    let skipped = outcomes.len() - changed - errors.len();
     if errors.is_empty() {
         Ok(format!("renamed {changed}; unchanged/missing {skipped}"))
     } else {
@@ -853,36 +819,6 @@ fn delete_images(
         }
     }
     Ok((deleted, refused, refusal_sample))
-}
-
-fn safe_rename_filename(name: &str, fallback_suffix: &str) -> String {
-    let path = std::path::Path::new(name);
-    let suffix = if path.extension().is_some() {
-        path.extension()
-            .map(|s| format!(".{}", s.to_string_lossy()))
-            .unwrap_or_default()
-    } else {
-        fallback_suffix.to_string()
-    };
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(name);
-    let mut clean: String = stem
-        .chars()
-        .filter(|c| !"<>:\"/\\|?*".contains(*c) && !c.is_control())
-        .collect();
-    clean = clean
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .trim_end_matches('.')
-        .to_string();
-    if clean.is_empty() {
-        clean = "image".into();
-    }
-    if matches!(clean.to_uppercase().as_str(), "CON" | "PRN" | "AUX" | "NUL") {
-        clean.push('_');
-    }
-    format!("{}{}", clean.chars().take(200).collect::<String>(), suffix)
 }
 
 /// Canonical errors-log sibling, shared with the run-log writer in

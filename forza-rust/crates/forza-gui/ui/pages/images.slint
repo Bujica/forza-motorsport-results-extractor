@@ -33,6 +33,11 @@ export component ImagesPage inherits Rectangle {
     in property <int> sort-column;
     in property <bool> sort-ascending;
     in-out property <bool> confirm-delete;
+    // Rename plan preview (confirm dialog parity with Python
+    // `confirm_rename_plan`: totals + one `source -> target` line per change).
+    in-out property <bool> confirm-rename: false;
+    in property <string> rename-plan-lines;
+    in property <string> rename-summary;
     // Scan status label text (bound from MainWindow).
     in-out property <string> scan-status;
     // Layout state (QSplitter parity): table↔panel split, preview height.
@@ -53,10 +58,22 @@ export component ImagesPage inherits Rectangle {
     callback selection-toggle(int);
     callback selection-single(int);
     callback selection-range(int);
+    // Press-and-drag range selection (Python rubber-band parity, visible
+    // area): anchor row + row under cursor while the button is held.
+    callback selection-drag(int, int);
+    property <int> drag-anchor: -1;
+    property <int> drag-last: -1;
+    property <bool> drag-active: false;
+
+    function drag-target(anchor: int, mouse-y: length) -> int {
+        return Math.max(0, Math.min(root.images.length - 1,
+            anchor + Math.floor(mouse-y / Theme.row-h)));
+    }
     callback select-all();
     callback clear-selection();
     callback process-selected();
     callback rename-selected();
+    callback execute-rename();
     callback export-selected();
     callback rescan-selected();
     callback delete-selected();
@@ -66,6 +83,7 @@ export component ImagesPage inherits Rectangle {
 
     function fire-refresh() {
         root.confirm-delete = false;
+        root.confirm-rename = false;
         root.refresh-requested(root.image-file-filter, root.image-best-filter,
             root.image-inventory-filter, root.image-track-filter,
             root.image-run-filter, root.image-process-filter);
@@ -196,8 +214,38 @@ export component ImagesPage inherits Rectangle {
                                 height: Theme.row-h;
                                 width: lv.width;
                                 pointer-event(event) => {
-                                    if event.kind == PointerEventKind.up {
-                                        if event.modifiers.control {
+                                    if event.kind == PointerEventKind.down
+                                        && event.button == PointerEventButton.left
+                                        && !event.modifiers.control && !event.modifiers.shift {
+                                        // Arm press-and-drag; selection itself
+                                        // resolves on move/up below.
+                                        root.drag-anchor = index;
+                                        root.drag-last = index;
+                                        root.drag-active = true;
+                                    } else if event.kind == PointerEventKind.move && root.drag-active {
+                                        // The pressed area grabs the mouse, so
+                                        // moves keep flowing here with
+                                        // coordinates relative to the anchor.
+                                        // NOTE: self.mouse-y must be read on
+                                        // the TouchArea, not root.
+                                        root.drag-last = root.drag-target(root.drag-anchor, self.mouse-y);
+                                        root.selection-drag(root.drag-anchor, root.drag-last);
+                                    } else if event.kind == PointerEventKind.up {
+                                        if root.drag-active {
+                                            root.drag-active = false;
+                                            if root.drag-last == root.drag-anchor
+                                                && !event.modifiers.control && !event.modifiers.shift {
+                                                // Plain click (no drag movement).
+                                                root.selected-index = index;
+                                                root.selection-single(index);
+                                                root.selection-changed(index);
+                                            } else {
+                                                // Dragged range (or modifier
+                                                // release): follow preview.
+                                                root.selected-index = root.drag-last;
+                                                root.selection-changed(root.drag-last);
+                                            }
+                                        } else if event.modifiers.control {
                                             root.selected-index = index;
                                             root.selection-toggle(index);
                                         } else if event.modifiers.shift {
@@ -207,6 +255,8 @@ export component ImagesPage inherits Rectangle {
                                             root.selection-single(index);
                                             root.selection-changed(index);
                                         }
+                                    } else if event.kind == PointerEventKind.cancel {
+                                        root.drag-active = false;
                                     }
                                 }
                                 Rectangle {
@@ -290,6 +340,17 @@ export component ImagesPage inherits Rectangle {
                     Text { text: "Delete selected? Files + DB rows."; color: Theme.danger; font-size: Theme.font-sm; vertical-alignment: center; horizontal-stretch: 1; wrap: word-wrap; }
                     Button { text: "Confirm"; clicked => { root.confirm-delete = false; root.delete-selected(); } }
                     Button { text: "Cancel"; clicked => { root.confirm-delete = false; } }
+                }
+                if root.confirm-rename: VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Confirm Metadata Rename"; color: Theme.text; font-weight: 700; font-size: Theme.font-sm; }
+                    Text { text: root.rename-summary; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
+                    Text { text: root.rename-plan-lines; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; max-height: 140px; overflow: elide; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Button { text: "Confirm"; clicked => { root.execute-rename(); } }
+                        Button { text: "Cancel"; clicked => { root.confirm-rename = false; } }
+                    }
                 }
                 Button {
                     text: "Image details";

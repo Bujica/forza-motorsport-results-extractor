@@ -5,6 +5,7 @@ pub mod extraction_runner;
 pub mod image_debug;
 pub mod image_detail;
 pub mod image_inventory;
+pub mod image_rename;
 pub mod rebuild;
 pub mod review_queue;
 pub mod run_control;
@@ -22,6 +23,9 @@ pub use image_debug::{
 };
 pub use image_detail::{ImageDetailData, load_image_detail};
 pub use image_inventory::ImageInventoryOptions;
+pub use image_rename::{
+    RenameOutcome, RenamePlan, RenamePreview, plan_rename_many, preview_rename, rename_files,
+};
 pub use rebuild::{RebuildOutcome, rebuild};
 pub use review_queue::{
     ReviewCaseEntry, ReviewQueueFilter, decide_case, ignore_case, list_review_cases, reopen_case,

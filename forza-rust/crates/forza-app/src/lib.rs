@@ -26,10 +26,11 @@ pub use services::best_laps::{
 pub use services::{
     BestLapEntry, DoctorCheckSummary, DoctorSummary, FastDbReport, ImageDebugFilter,
     ImageDetailData, ImageInventoryEntry, ImageInventoryFilter, ImageInventoryOptions,
-    ImageInventoryService, OverviewSnapshot, RebuildOutcome, ReviewCaseEntry, ReviewQueueFilter,
-    RunControl, RunEvent, RunParams, SettingRow, SettingsSnapshot, append_log_file,
-    build_overview_snapshot, decide_case, errors_log_path, fast_db_report, ignore_case,
-    list_clean_flat_entries, list_debug_cases, list_review_cases, load_debug_detail,
-    load_debug_detail_by_result, load_image_detail, rebuild, reopen_case, run_doctor,
-    run_full_doctor_on_path, settings_snapshot, spawn_extraction,
+    ImageInventoryService, OverviewSnapshot, RebuildOutcome, RenameOutcome, RenamePlan,
+    RenamePreview, ReviewCaseEntry, ReviewQueueFilter, RunControl, RunEvent, RunParams, SettingRow,
+    SettingsSnapshot, append_log_file, build_overview_snapshot, decide_case, errors_log_path,
+    fast_db_report, ignore_case, list_clean_flat_entries, list_debug_cases, list_review_cases,
+    load_debug_detail, load_debug_detail_by_result, load_image_detail, plan_rename_many,
+    preview_rename, rebuild, rename_files, reopen_case, run_doctor, run_full_doctor_on_path,
+    settings_snapshot, spawn_extraction,
 };
