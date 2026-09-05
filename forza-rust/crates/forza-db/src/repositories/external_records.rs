@@ -1,6 +1,7 @@
 //! External/community best-lap records: active snapshot read + replacement.
 
 use rusqlite::{Connection, params};
+use sha2::{Digest, Sha256};
 
 use crate::error::DbError;
 
@@ -68,13 +69,7 @@ pub fn replace_active_snapshot(
     rejected_rows: i64,
     issues_json: Option<&str>,
 ) -> Result<String, DbError> {
-    let import_id = format!(
-        "imp-{:x}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0)
-    );
+    let import_id = super::new_id("imp");
     let accepted = i64::try_from(records.len()).unwrap_or(0);
     let issue_count = issues_json
         .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
@@ -122,16 +117,22 @@ pub fn replace_active_snapshot(
             let lap_id = format!("ext-{}-{}-{}", import_id, rec.track, rec.race_class)
                 .replace(' ', "_")
                 .to_lowercase();
-            // Ensure uniqueness across re-imports of same track/class (second import
-            // reuses same import_id, so include driver hash fallback when needed).
-            let lap_id = format!("{lap_id}-{:x}", {
-                use std::collections::hash_map::DefaultHasher;
-                use std::hash::{Hash, Hasher};
-                let mut h = DefaultHasher::new();
-                rec.driver.hash(&mut h);
-                rec.car.hash(&mut h);
-                h.finish()
-            });
+            // Ensure uniqueness across re-imports of same track/class.
+            // Stable per-record suffix: sha256 over the identity fields,
+            // truncated to 16 hex chars (64-bit namespace like before, but
+            // stable across toolchains — DefaultHasher/SipHash is explicitly
+            // unstable and caused duplicate imports after toolchain upgrades).
+            let mut hasher = Sha256::new();
+            hasher.update(rec.driver.as_bytes());
+            hasher.update([0]);
+            hasher.update(rec.car.as_bytes());
+            hasher.update([0]);
+            hasher.update(rec.track.as_bytes());
+            hasher.update([0]);
+            hasher.update(rec.race_class.as_bytes());
+            let digest = hasher.finalize();
+            let hex = format!("{digest:x}");
+            let lap_id = format!("{lap_id}-{}", &hex[..16]);
             conn.execute(
                 "INSERT INTO external_lap_records
                     (id, import_id, track, track_normalized, race_class, driver, driver_normalized, car, car_normalized, weather, best_lap, best_lap_ms, active, created_at)

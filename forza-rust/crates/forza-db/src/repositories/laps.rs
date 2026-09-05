@@ -123,6 +123,16 @@ pub fn insert_lap_record(conn: &Connection, row: &LapRecordInsert<'_>) -> Result
     Ok(())
 }
 
+/// Narrow an i64 lap index to i32 without silent zeroing.
+///
+/// Writers bound `lap_index` to small non-negative values, so out-of-range
+/// data means DB corruption. Saturating to `i32::MAX` keeps the row readable
+/// while making the corruption visible (0 would be a valid index); the doctor
+/// flags impossible indexes separately.
+fn saturating_lap_index(v: i64) -> i32 {
+    i32::try_from(v).unwrap_or(i32::MAX)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct LapRecordEntity {
     pub id: String,
@@ -152,7 +162,7 @@ pub fn list_by_run(conn: &Connection, run_id: &str) -> Result<Vec<LapRecordEntit
             id: row.get(0)?,
             extraction_result_id: row.get(1)?,
             image_file_id: row.get(2)?,
-            lap_index: row.get::<_, i64>(3)?.try_into().unwrap_or(0),
+            lap_index: saturating_lap_index(row.get::<_, i64>(3)?),
             driver: row.get(4)?,
             car: row.get(5)?,
             race_class: row.get(6)?,
@@ -182,7 +192,7 @@ pub fn for_image_file(
             id: row.get(0)?,
             extraction_result_id: row.get(1)?,
             image_file_id: row.get(2)?,
-            lap_index: row.get::<_, i64>(3)?.try_into().unwrap_or(0),
+            lap_index: saturating_lap_index(row.get::<_, i64>(3)?),
             driver: row.get(4)?,
             car: row.get(5)?,
             race_class: row.get(6)?,
@@ -222,7 +232,38 @@ pub struct LapRecordInsertWithRun {
     pub dirty: bool,
 }
 
+/// Insert a result (with fallback input/result rows) plus all its laps
+/// atomically: previously a mid-loop failure left a result with a partial lap
+/// set and no way to tell it was incomplete.
 pub fn add_result(
+    conn: &Connection,
+    result: &ExtractionResultEntity,
+    run_id: &str,
+    image_file_id: &str,
+    entries: &[LapRecordInsertWithRun],
+) -> Result<Vec<LapRecordEntity>, DbError> {
+    if !conn.is_autocommit() {
+        return Err(DbError::SchemaState {
+            message: "add_result requires autocommit (no outer transaction)".into(),
+        });
+    }
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| DbError::Pool(format!("BEGIN IMMEDIATE: {e}")))?;
+    let inner = add_result_inner(conn, result, run_id, image_file_id, entries);
+    match inner {
+        Ok(created) => {
+            conn.execute_batch("COMMIT")
+                .map_err(|e| DbError::Pool(format!("COMMIT add_result: {e}")))?;
+            Ok(created)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
+fn add_result_inner(
     conn: &Connection,
     result: &ExtractionResultEntity,
     run_id: &str,
@@ -245,13 +286,7 @@ pub fn add_result(
         match existing {
             Some(id) => id,
             None => {
-                let new_id = format!(
-                    "res-{:x}",
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_nanos() as u64)
-                        .unwrap_or(0)
-                );
+                let new_id = super::new_id("res");
                 // `extraction_results.run_input_id` is NOT NULL: create the
                 // owning `process` input first so this fallback insert is
                 // valid instead of always failing on the constraint.
@@ -337,7 +372,7 @@ pub fn add_result(
             id: id.clone(),
             extraction_result_id: Some(extraction_result_id.clone()),
             image_file_id: image_file_id.to_string(),
-            lap_index: entry.lap_index.try_into().unwrap_or(0),
+            lap_index: saturating_lap_index(entry.lap_index),
             driver: entry.driver.clone(),
             car: entry.car.clone(),
             race_class: entry.race_class.clone(),

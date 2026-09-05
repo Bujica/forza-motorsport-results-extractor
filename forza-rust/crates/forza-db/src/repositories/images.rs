@@ -233,15 +233,10 @@ pub fn upsert_image_file(
         .clone()
         .or(existing_path.clone())
         .unwrap_or_else(|| {
-            params.image_id.map(|s| s.to_string()).unwrap_or_else(|| {
-                format!(
-                    "img-{:x}",
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_nanos() as u64)
-                        .unwrap_or(0)
-                )
-            })
+            params
+                .image_id
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| super::new_id("img"))
         });
 
     let existing = existing_id.or(existing_path);

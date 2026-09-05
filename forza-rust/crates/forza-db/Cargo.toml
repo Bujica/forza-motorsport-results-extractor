@@ -13,6 +13,7 @@ r2d2_sqlite = "0.35"
 thiserror = "2"
 sha2 = "0.10"
 serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
 forza-domain = { path = "../forza-domain" }
 
 [dev-dependencies]

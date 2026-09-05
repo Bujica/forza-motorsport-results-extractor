@@ -145,13 +145,20 @@ pub fn mark_best_laps(
     let rows = LapExportRow::load_all(conn)?;
     // All-or-nothing: a crash between clear and set used to leave best-lap
     // flags half-cleared (wrong export until the next rebuild).
-    conn.execute_batch("BEGIN IMMEDIATE")?;
+    // When called inside an outer transaction (e.g. full `rebuild`), the
+    // caller owns atomicity and we run inline; otherwise manage our own txn.
+    let owns_txn = conn.is_autocommit();
+    if owns_txn {
+        conn.execute_batch("BEGIN IMMEDIATE")?;
+    }
     let outcome: Result<Vec<String>, crate::DbError> = (|| {
-        for row in &rows {
-            conn.execute(
-                "UPDATE lap_records SET is_best_lap=0 WHERE id=?1",
-                params![row.id],
-            )?;
+        // Batch clear: one UPDATE per id-chunk instead of one per row.
+        let clear_ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        for chunk in crate::id_chunks(&clear_ids) {
+            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!("UPDATE lap_records SET is_best_lap=0 WHERE id IN ({placeholders})");
+            let mut stmt = conn.prepare(&sql)?;
+            stmt.execute(rusqlite::params_from_iter(chunk.iter()))?;
         }
 
         let candidates = latest_rows_per_image(&rows);
@@ -167,11 +174,14 @@ pub fn mark_best_laps(
         };
 
         let mut winner_image_ids: Vec<&str> = Vec::new();
+        let winner_ids: Vec<&str> = winners.iter().map(|w| w.id.as_str()).collect();
+        for chunk in crate::id_chunks(&winner_ids) {
+            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!("UPDATE lap_records SET is_best_lap=1 WHERE id IN ({placeholders})");
+            let mut stmt = conn.prepare(&sql)?;
+            stmt.execute(rusqlite::params_from_iter(chunk.iter()))?;
+        }
         for winner in &winners {
-            conn.execute(
-                "UPDATE lap_records SET is_best_lap=1 WHERE id=?1",
-                params![winner.id],
-            )?;
             winner_image_ids.push(winner.image_file_id.as_str());
         }
 
@@ -199,11 +209,15 @@ pub fn mark_best_laps(
     })();
     match outcome {
         Ok(ids) => {
-            conn.execute_batch("COMMIT")?;
+            if owns_txn {
+                conn.execute_batch("COMMIT")?;
+            }
             Ok(ids)
         }
         Err(e) => {
-            let _ = conn.execute_batch("ROLLBACK");
+            if owns_txn {
+                let _ = conn.execute_batch("ROLLBACK");
+            }
             Err(e)
         }
     }

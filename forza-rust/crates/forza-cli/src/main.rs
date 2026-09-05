@@ -433,10 +433,19 @@ fn cmd_run(
     let mut plan = if retry_errors {
         let failed = forza_db::repositories::images::list_failed_images_for_retry(&conn)?;
         let mut new_images = Vec::new();
-        for (path, hash) in failed {
+        for (path, _stored_hash) in failed {
             let candidate = PathBuf::from(&path);
             if candidate.exists() {
-                let live_hash = forza_pipeline::file_hash(&candidate).unwrap_or(hash);
+                // Never silently reuse the stored hash: a failed re-hash means
+                // the file cannot be trusted for dedup, so skip loudly instead
+                // of planning it under a stale identity.
+                let live_hash = match forza_pipeline::file_hash(&candidate) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        eprintln!("  SKIP  {}  (re-hash failed: {e})", candidate.display());
+                        continue;
+                    }
+                };
                 new_images.push(forza_pipeline::planning::DiscoveredImage {
                     path: candidate,
                     file_hash: live_hash,
@@ -494,7 +503,7 @@ fn cmd_run(
             println!(
                 "  PROCESS  {}  [{}]",
                 image.path.display(),
-                &image.file_hash[..12]
+                image.file_hash.get(..12).unwrap_or(&image.file_hash)
             );
         }
         for dup in &plan.duplicates {

@@ -11,7 +11,6 @@
 //! with open cases — the writer/checker drift the crate audit flagged.
 
 use std::collections::HashSet;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -30,11 +29,7 @@ pub const REVIEW_FLAG_TYPES: &[&str] = &[
 ];
 
 fn nanos_id(prefix: &str, counter: usize) -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("{prefix}-{nanos:x}-{counter}")
+    format!("{prefix}-{}-{counter}", uuid::Uuid::new_v4().simple())
 }
 
 fn flag_key_lap(

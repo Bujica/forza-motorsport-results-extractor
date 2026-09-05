@@ -205,6 +205,10 @@ pub fn update_run_metadata(
 
 /// Insert a run_input plus its matching extraction_result, returning the
 /// generated result id.
+///
+/// Both rows are written in one `BEGIN IMMEDIATE` transaction: a crash between
+/// them used to leave an input `process` row without any result, which the
+/// doctor reports as `run_inputs_process_without_one_result`.
 pub fn insert_input_and_result(
     conn: &Connection,
     run_id: &str,
@@ -213,23 +217,43 @@ pub fn insert_input_and_result(
     result_status: &str,
     input_order: i64,
 ) -> Result<String, DbError> {
-    // `run_inputs.id` is `INTEGER PRIMARY KEY AUTOINCREMENT` (atomic,
-    // worker-safe): never compute `MAX(id)+1` client-side — concurrent
-    // workers snapshotting the same MAX would collide on the PK.
-    conn.execute(
-        "INSERT INTO run_inputs (run_id, image_file_id, decision, input_order, input_path, created_at)
-         VALUES (?1, ?2, ?3, ?4, 'seed/path.png', datetime('now'))",
-        params![run_id, image_file_id, decision, input_order],
-    )?;
-    let input_id: i64 = conn.last_insert_rowid();
-    let result_id = format!("res-{run_id}-{input_id}");
-    conn.execute(
-        "INSERT INTO extraction_results
-            (id, run_id, run_input_id, image_file_id, status, attempt_count, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0, datetime('now'), datetime('now'))",
-        params![result_id, run_id, input_id, image_file_id, result_status],
-    )?;
-    Ok(result_id)
+    if !conn.is_autocommit() {
+        return Err(DbError::SchemaState {
+            message: "insert_input_and_result requires autocommit (no outer transaction)".into(),
+        });
+    }
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| DbError::Pool(format!("BEGIN IMMEDIATE: {e}")))?;
+    let inner: Result<String, DbError> = (|| {
+        // `run_inputs.id` is `INTEGER PRIMARY KEY AUTOINCREMENT` (atomic,
+        // worker-safe): never compute `MAX(id)+1` client-side — concurrent
+        // workers snapshotting the same MAX would collide on the PK.
+        conn.execute(
+            "INSERT INTO run_inputs (run_id, image_file_id, decision, input_order, input_path, created_at)
+             VALUES (?1, ?2, ?3, ?4, 'seed/path.png', datetime('now'))",
+            params![run_id, image_file_id, decision, input_order],
+        )?;
+        let input_id: i64 = conn.last_insert_rowid();
+        let result_id = format!("res-{run_id}-{input_id}");
+        conn.execute(
+            "INSERT INTO extraction_results
+                (id, run_id, run_input_id, image_file_id, status, attempt_count, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, datetime('now'), datetime('now'))",
+            params![result_id, run_id, input_id, image_file_id, result_status],
+        )?;
+        Ok(result_id)
+    })();
+    match inner {
+        Ok(id) => {
+            conn.execute_batch("COMMIT")
+                .map_err(|e| DbError::Pool(format!("COMMIT input+result: {e}")))?;
+            Ok(id)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
 }
 
 /// Run input for an actually-processed image: real source path plus the
@@ -265,27 +289,47 @@ pub fn insert_processed_input_full(
     process_reason: &str,
     input_order: i64,
 ) -> Result<(String, i64), DbError> {
-    conn.execute(
-        "INSERT INTO run_inputs (run_id, image_file_id, decision, input_order,
-                                 input_path, process_reason, created_at)
-         VALUES (?1, ?2, 'process', ?3, ?4, ?5, datetime('now'))",
-        params![
-            run_id,
-            image_file_id,
-            input_order,
-            input_path,
-            process_reason
-        ],
-    )?;
-    let input_id: i64 = conn.last_insert_rowid();
-    let result_id = format!("res-{run_id}-{input_id}");
-    conn.execute(
-        "INSERT INTO extraction_results
-            (id, run_id, run_input_id, image_file_id, status, attempt_count, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, 'running', 0, datetime('now'), datetime('now'))",
-        params![result_id, run_id, input_id, image_file_id],
-    )?;
-    Ok((result_id, input_id))
+    if !conn.is_autocommit() {
+        return Err(DbError::SchemaState {
+            message: "insert_processed_input_full requires autocommit (no outer transaction)".into(),
+        });
+    }
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| DbError::Pool(format!("BEGIN IMMEDIATE: {e}")))?;
+    let inner: Result<(String, i64), DbError> = (|| {
+        conn.execute(
+            "INSERT INTO run_inputs (run_id, image_file_id, decision, input_order,
+                                     input_path, process_reason, created_at)
+             VALUES (?1, ?2, 'process', ?3, ?4, ?5, datetime('now'))",
+            params![
+                run_id,
+                image_file_id,
+                input_order,
+                input_path,
+                process_reason
+            ],
+        )?;
+        let input_id: i64 = conn.last_insert_rowid();
+        let result_id = format!("res-{run_id}-{input_id}");
+        conn.execute(
+            "INSERT INTO extraction_results
+                (id, run_id, run_input_id, image_file_id, status, attempt_count, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'running', 0, datetime('now'), datetime('now'))",
+            params![result_id, run_id, input_id, image_file_id],
+        )?;
+        Ok((result_id, input_id))
+    })();
+    match inner {
+        Ok(pair) => {
+            conn.execute_batch("COMMIT")
+                .map_err(|e| DbError::Pool(format!("COMMIT processed input: {e}")))?;
+            Ok(pair)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
 }
 
 /// Primitive attempt row for persistence — converted from the backend's
@@ -584,7 +628,7 @@ pub fn insert_accepted_attempt(
     image_file_id: &str,
 ) -> Result<String, DbError> {
     let attempt_id = format!("att-{result_id}");
-    conn.execute(
+    let changed = conn.execute(
         "INSERT INTO extraction_attempts
             (id, extraction_result_id, run_id, image_file_id, attempt_number,
              attempt_reason, status, accepted, created_at)
@@ -593,6 +637,15 @@ pub fn insert_accepted_attempt(
                        WHERE r.id = ?2 AND r.status IN ('ok', 'error', 'cancelled'))",
         params![attempt_id, result_id, run_id, image_file_id],
     )?;
+    // The WHERE EXISTS guard inserts zero rows for pending/running results:
+    // returning Ok then would make the caller believe the attempt exists.
+    if changed == 0 {
+        return Err(DbError::SchemaState {
+            message: format!(
+                "insert_accepted_attempt: result {result_id} is not terminal (pending/running/missing)"
+            ),
+        });
+    }
     Ok(attempt_id)
 }
 

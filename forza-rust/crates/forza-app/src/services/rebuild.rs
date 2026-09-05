@@ -23,7 +23,33 @@ pub struct RebuildOutcome {
 /// 2. recompute the frontier over current lap rows;
 /// 3. refresh review candidates against the new derived state
 ///    (operator-resolved cases are preserved by business key).
+///
+/// All five steps run in one `BEGIN IMMEDIATE` transaction: a failure between
+/// the frontier rewrite and the review refresh used to leave a new frontier
+/// paired with stale review cases. Inner writers that manage their own txn
+/// (`mark_best_laps`) join this outer one instead of nesting.
 pub fn rebuild(conn: &Connection, gamertag: &str) -> Result<RebuildOutcome, String> {
+    if !conn.is_autocommit() {
+        return Err("rebuild requires autocommit (no outer transaction)".to_string());
+    }
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| e.to_string())?;
+    let inner: Result<RebuildOutcome, String> = (|| {
+        rebuild_inner(conn, gamertag)
+    })();
+    match inner {
+        Ok(outcome) => {
+            conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
+            Ok(outcome)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
+fn rebuild_inner(conn: &Connection, gamertag: &str) -> Result<RebuildOutcome, String> {
     let corrections_applied =
         forza_db::repositories::corrections::apply_all(conn).map_err(|e| e.to_string())?;
     let winners = mark_best_laps(conn, Some(gamertag)).map_err(|e| e.to_string())?;

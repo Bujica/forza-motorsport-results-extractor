@@ -145,14 +145,22 @@ pub fn upgrade(path: &Path) -> Result<(), DbError> {
     Ok(())
 }
 
-/// Seed `reference_tracks` / `reference_cars` from embedded assets when empty.
-/// Idempotent and safe to call on every open.
+/// Seed `reference_tracks` / `reference_cars` from embedded assets.
+/// Idempotent and safe to call on every open: `INSERT OR IGNORE` runs
+/// unconditionally inside one transaction, so a previously interrupted seed
+/// (partial catalog: old code skipped when `count != 0`) resumes instead of
+/// staying partial forever.
 pub fn seed_reference_catalog(conn: &rusqlite::Connection) -> Result<(), crate::error::DbError> {
-    let track_count: i64 =
-        conn.query_row("SELECT COUNT(*) FROM reference_tracks", [], |r| r.get(0))?;
-    if track_count == 0 {
+    if !conn.is_autocommit() {
+        return Err(crate::error::DbError::SchemaState {
+            message: "seed_reference_catalog requires autocommit (no outer transaction)".into(),
+        });
+    }
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| DbError::Pool(format!("BEGIN IMMEDIATE: {e}")))?;
+    let inner: Result<(), DbError> = (|| {
         let data = forza_domain::reference_data::embedded_reference_data();
-        for name in data.tracks {
+        for name in &data.tracks {
             let id = format!("track-{}", name.to_lowercase().replace(' ', "_"));
             conn.execute(
                 "INSERT OR IGNORE INTO reference_tracks (id, name, normalized_name, active, created_at, updated_at)
@@ -160,11 +168,7 @@ pub fn seed_reference_catalog(conn: &rusqlite::Connection) -> Result<(), crate::
                 rusqlite::params![id, name],
             )?;
         }
-    }
-    let car_count: i64 = conn.query_row("SELECT COUNT(*) FROM reference_cars", [], |r| r.get(0))?;
-    if car_count == 0 {
-        let data = forza_domain::reference_data::embedded_reference_data();
-        for name in data.cars {
+        for name in &data.cars {
             let id = format!("car-{}", name.to_lowercase().replace(' ', "_"));
             conn.execute(
                 "INSERT OR IGNORE INTO reference_cars (id, name, normalized_name, active, created_at, updated_at)
@@ -172,6 +176,17 @@ pub fn seed_reference_catalog(conn: &rusqlite::Connection) -> Result<(), crate::
                 rusqlite::params![id, name],
             )?;
         }
+        Ok(())
+    })();
+    match inner {
+        Ok(()) => {
+            conn.execute_batch("COMMIT")
+                .map_err(|e| DbError::Pool(format!("COMMIT catalog seed: {e}")))?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
     }
-    Ok(())
 }

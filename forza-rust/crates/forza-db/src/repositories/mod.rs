@@ -35,6 +35,15 @@ pub use runs::{
 use crate::error::DbError;
 use rusqlite::Connection;
 
+/// Generate an opaque row id: `{prefix}-{uuid4 simple}`.
+///
+/// Replaces the old `SystemTime::now().as_nanos()` scheme, which collided for
+/// calls within the same clock tick (Windows granularity ~15ms) and could go
+/// backwards on clock adjustments. UUIDv4 needs no clock and no coordination.
+pub(crate) fn new_id(prefix: &str) -> String {
+    format!("{prefix}-{}", uuid::Uuid::new_v4().simple())
+}
+
 /// Populate a fresh database with a small, coherent demo graph:
 /// one run -> two inputs/results (one accepted attempt each) -> laps,
 /// plus one open review case. Used to make constraint/query tests and
