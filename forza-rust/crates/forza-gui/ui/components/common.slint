@@ -183,7 +183,8 @@ export component FilterCombo inherits HorizontalLayout {
     }
 }
 
-// Batch action bar: selection count + 5 action buttons, all disabled when count=0.
+// Batch action bar: selection count + action buttons (Select All is always
+// enabled; the rest need a non-empty selection).
 export component BatchActionBar inherits HorizontalLayout {
     in property <int> selected-count;
     callback process-selected();
@@ -191,6 +192,7 @@ export component BatchActionBar inherits HorizontalLayout {
     callback export();
     callback rescan-selected();
     callback delete();
+    callback select-all();
     
     width: 100%;
     height: 32px;
@@ -203,6 +205,12 @@ export component BatchActionBar inherits HorizontalLayout {
         font-size: Theme.font-sm;
     }
     Rectangle { horizontal-stretch: 1; }
+    Button {
+        text: "All";
+        min-width: 70px;
+        height: 28px;
+        clicked => { root.select-all(); }
+    }
     Button {
         text: "Process selected";
         min-width: 140px;

@@ -1546,6 +1546,12 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                     .map(|slice| slice.iter().map(|e| e.id.clone()).collect())
                     .unwrap_or_default()
             });
+            // No-op guard: drag fires per mouse-move (and from two handlers),
+            // so skip the model rebuild when the range didn't actually change.
+            let unchanged = SELECTED_IMAGE_IDS.with(|selected| *selected.borrow() == ids);
+            if unchanged {
+                return;
+            }
             SELECTED_IMAGE_IDS.with(|selected| *selected.borrow_mut() = ids);
             if let Some(w) = ui.upgrade() {
                 update_image_selection(&w);
