@@ -30,7 +30,6 @@ export component MainWindow inherits Window {
     callback selection-toggle(int);
     callback selection-single(int);
     callback selection-range(int);
-    callback selection-drag(int, int);
     callback select-all();
     callback clear-selection();
     callback export-selected();
@@ -376,7 +375,6 @@ export component MainWindow inherits Window {
                 selection-toggle(i) => { root.selection-toggle(i); }
                 selection-single(i) => { root.selection-single(i); }
                 selection-range(i) => { root.selection-range(i); }
-                selection-drag(a, b) => { root.selection-drag(a, b); }
                 select-all() => { root.select-all(); }
                 clear-selection() => { root.clear-selection(); }
                 process-selected() => { root.process-selected(); }

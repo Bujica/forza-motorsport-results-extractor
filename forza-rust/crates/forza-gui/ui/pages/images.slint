@@ -58,17 +58,6 @@ export component ImagesPage inherits Rectangle {
     callback selection-toggle(int);
     callback selection-single(int);
     callback selection-range(int);
-    // Press-and-drag range selection (Python rubber-band parity, visible
-    // area): anchor row + row under cursor while the button is held.
-    callback selection-drag(int, int);
-    property <int> drag-anchor: -1;
-    property <int> drag-last: -1;
-    property <bool> drag-active: false;
-
-    function drag-target(anchor: int, mouse-y: length) -> int {
-        return Math.max(0, Math.min(root.images.length - 1,
-            anchor + Math.floor(mouse-y / Theme.row-h)));
-    }
     callback select-all();
     callback clear-selection();
     callback process-selected();
@@ -156,7 +145,6 @@ export component ImagesPage inherits Rectangle {
                     export() => { root.export-selected(); }
                     rescan-selected() => { root.rescan-selected(); }
                     delete() => { root.confirm-delete = true; }
-                    select-all() => { root.select-all(); }
                 }
 
         HorizontalLayout {
@@ -195,63 +183,28 @@ export component ImagesPage inherits Rectangle {
                         }
 
                         // Table body
-                        // NOTE: deliberately no FocusScope around the rows. A
-                        // scope swallows the first pointer `down` whenever it
-                        // lacks focus (after any button/combo click), which
-                        // silently broke press-and-drag arming while plain
-                        // clicks kept working (release still forwards).
-                        // Select-all lives on the action bar instead; the
-                        // Ctrl+A shortcut is not available on this page.
-                        Rectangle {
+                        focus-scope := FocusScope {
                             width: 100%;
                             height: 100%;
                             vertical-stretch: 1;
+                            key-pressed(event) => {
+                                if event.modifiers.control && event.text == "a" {
+                                    root.select-all();
+                                    accept
+                                } else {
+                                    reject
+                                }
+                            }
+                            init => { self.focus(); }
                             lv := ListView {
                                 width: parent.width;
                                 height: parent.height;
                             for item[index] in root.images: TouchArea {
                                 height: Theme.row-h;
                                 width: lv.width;
-                                // Drag extension: `moved` fires while pressed
-                                // (the pressed area grabs the mouse, so moves
-                                // keep flowing with coordinates relative to
-                                // the anchor row). The pointer-event `move`
-                                // branch below is a fallback — both compute
-                                // the same idempotent target.
-                                moved => {
-                                    if root.drag-active {
-                                        root.drag-last = root.drag-target(root.drag-anchor, self.mouse-y);
-                                        root.selection-drag(root.drag-anchor, root.drag-last);
-                                    }
-                                }
                                 pointer-event(event) => {
-                                    if event.kind == PointerEventKind.down
-                                        && event.button == PointerEventButton.left
-                                        && !event.modifiers.control && !event.modifiers.shift {
-                                        // Arm press-and-drag; selection itself
-                                        // resolves on move/up below.
-                                        root.drag-anchor = index;
-                                        root.drag-last = index;
-                                        root.drag-active = true;
-                                    } else if event.kind == PointerEventKind.move && root.drag-active {
-                                        root.drag-last = root.drag-target(root.drag-anchor, self.mouse-y);
-                                        root.selection-drag(root.drag-anchor, root.drag-last);
-                                    } else if event.kind == PointerEventKind.up {
-                                        if root.drag-active {
-                                            root.drag-active = false;
-                                            if root.drag-last == root.drag-anchor
-                                                && !event.modifiers.control && !event.modifiers.shift {
-                                                // Plain click (no drag movement).
-                                                root.selected-index = index;
-                                                root.selection-single(index);
-                                                root.selection-changed(index);
-                                            } else {
-                                                // Dragged range (or modifier
-                                                // release): follow preview.
-                                                root.selected-index = root.drag-last;
-                                                root.selection-changed(root.drag-last);
-                                            }
-                                        } else if event.modifiers.control {
+                                    if event.kind == PointerEventKind.up {
+                                        if event.modifiers.control {
                                             root.selected-index = index;
                                             root.selection-toggle(index);
                                         } else if event.modifiers.shift {
@@ -261,8 +214,6 @@ export component ImagesPage inherits Rectangle {
                                             root.selection-single(index);
                                             root.selection-changed(index);
                                         }
-                                    } else if event.kind == PointerEventKind.cancel {
-                                        root.drag-active = false;
                                     }
                                 }
                                 Rectangle {

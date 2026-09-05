@@ -1521,46 +1521,6 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     }
     {
         let ui = main.as_weak();
-        main.on_selection_drag(move |anchor, target| {
-            // Press-and-drag range: same row window as Shift+click, but the
-            // anchor travels with the press point instead of the last click.
-            // Clamped defensively: the cache may refresh mid-drag, and slint
-            // ints arrive signed.
-            let ids = ROW_CACHE.with(|rows| {
-                let rows = rows.borrow();
-                if rows.is_empty() {
-                    return Vec::new();
-                }
-                let max_idx = rows.len() - 1;
-                let anchor = (anchor.max(0) as usize).min(max_idx);
-                let target = (target.max(0) as usize).min(max_idx);
-                SELECTION_ANCHOR.with(|slot| *slot.borrow_mut() = anchor);
-                // Same off-by-one rule as Shift+click: the target row is
-                // always included, in both directions.
-                let (lo, hi) = if anchor <= target {
-                    (anchor, target + 1)
-                } else {
-                    (target, anchor + 1)
-                };
-                rows.get(lo..hi.min(rows.len()))
-                    .map(|slice| slice.iter().map(|e| e.id.clone()).collect())
-                    .unwrap_or_default()
-            });
-            // No-op guard: drag fires per mouse-move (and from two handlers),
-            // so skip the model rebuild when the range didn't actually change.
-            let unchanged = SELECTED_IMAGE_IDS.with(|selected| *selected.borrow() == ids);
-            if unchanged {
-                return;
-            }
-            SELECTED_IMAGE_IDS.with(|selected| *selected.borrow_mut() = ids);
-            if let Some(w) = ui.upgrade() {
-                update_image_selection(&w);
-                update_selection_summary(&w);
-            }
-        });
-    }
-    {
-        let ui = main.as_weak();
         main.on_select_all(move || {
             let ids = ROW_CACHE.with(|rows| {
                 rows.borrow()
