@@ -531,6 +531,10 @@ fn cmd_live_run(
     let mut params = forza_app::RunParams::from_config(cfg, force);
     params.retry_errors = retry_errors;
     params.max_images = limit;
+    // File logging (Python `logging_setup` parity): the CLI mirrors the GUI
+    // and persists its event stream to the configured log file.
+    let log_file = params.log_file.clone();
+    let errors_file = forza_app::errors_log_path(&params.log_file);
     let failed = Arc::new(AtomicBool::new(false));
     let failed_for_events = Arc::clone(&failed);
     let cancelled = Arc::new(AtomicBool::new(false));
@@ -538,7 +542,9 @@ fn cmd_live_run(
     let handle = forza_app::spawn_extraction(params, forza_app::RunControl::new(), move |event| {
         match event {
             forza_app::RunEvent::Started { run_id, total } => {
-                println!("started: run={run_id} total={total}");
+                let line = format!("started: run={run_id} total={total}");
+                println!("{line}");
+                forza_app::append_log_file(&log_file, &line);
             }
             forza_app::RunEvent::Plan {
                 new,
@@ -547,16 +553,30 @@ fn cmd_live_run(
                 existing,
                 skipped,
             } => {
-                println!(
+                let line = format!(
                     "plan: new={new} cached={cached} batch={batch} existing={existing} skipped={skipped}"
                 );
+                println!("{line}");
+                forza_app::append_log_file(&log_file, &line);
             }
-            forza_app::RunEvent::ImageStarted { name } => println!("processing: {name}"),
+            forza_app::RunEvent::ImageStarted { name } => {
+                let line = format!("processing: {name}");
+                println!("{line}");
+                forza_app::append_log_file(&log_file, &line);
+            }
             forza_app::RunEvent::ImageDone { name, ok, laps } => {
-                println!("done: {name} ok={ok} laps={laps}");
+                let line = format!("done: {name} ok={ok} laps={laps}");
+                println!("{line}");
+                forza_app::append_log_file(&log_file, &line);
+                if !ok {
+                    forza_app::append_log_file(&errors_file, &line);
+                }
             }
             forza_app::RunEvent::Progress { done, total } => println!("progress: {done}/{total}"),
-            forza_app::RunEvent::Log(message) => println!("log: {message}"),
+            forza_app::RunEvent::Log(message) => {
+                println!("log: {message}");
+                forza_app::append_log_file(&log_file, &message);
+            }
             forza_app::RunEvent::Finished {
                 cancelled,
                 processed,
@@ -570,13 +590,21 @@ fn cmd_live_run(
                 if cancelled {
                     cancelled_for_events.store(true, Ordering::Relaxed);
                 }
-                println!(
+                let line = format!(
                     "finished: cancelled={cancelled} processed={processed} succeeded={succeeded} failed={failed} elapsed_s={elapsed_s:.3}"
                 );
+                println!("{line}");
+                forza_app::append_log_file(&log_file, &line);
+                if failed > 0 {
+                    forza_app::append_log_file(&errors_file, &line);
+                }
             }
             forza_app::RunEvent::Failed(message) => {
                 failed_for_events.store(true, Ordering::Relaxed);
                 eprintln!("run failed: {message}");
+                let line = format!("run failed: {message}");
+                forza_app::append_log_file(&log_file, &line);
+                forza_app::append_log_file(&errors_file, &line);
             }
         }
     });
@@ -843,12 +871,55 @@ fn cmd_db_heal(db_path: &Path) -> anyhow::Result<()> {
         }
     }
 
+    // 4. Images: backfill human-readable semantic names ("Track - Class.ext")
+    //    for rows produced before the runner stamped them (readers prefer
+    //    them over current_name; only NULL rows are touched).
+    let candidates: Vec<(String, Option<String>, String)> = conn
+        .prepare(
+            "SELECT i.id, i.current_path, r.id
+             FROM image_files i
+             JOIN extraction_results r ON r.image_file_id = i.id
+             WHERE i.semantic_name IS NULL AND r.status = 'ok'
+             ORDER BY r.created_at DESC",
+        )?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut names_healed = 0usize;
+    for (image_id, current_path, result_id) in &candidates {
+        let Some(current_path) = current_path else {
+            continue;
+        };
+        let before: Option<String> = conn.query_row(
+            "SELECT semantic_name FROM image_files WHERE id = ?1",
+            rusqlite::params![image_id],
+            |r| r.get(0),
+        )?;
+        if before.is_some() {
+            continue;
+        }
+        forza_app::services::extraction_runner::stamp_semantic_name(
+            &conn,
+            image_id,
+            std::path::Path::new(current_path),
+            result_id,
+        );
+        let after: Option<String> = conn.query_row(
+            "SELECT semantic_name FROM image_files WHERE id = ?1",
+            rusqlite::params![image_id],
+            |r| r.get(0),
+        )?;
+        if after.is_some() {
+            names_healed += 1;
+        }
+    }
+
     println!("db-heal: evidence backfill complete");
     println!("  abandoned runs reconciled  : {reconciled} run(s)");
     println!("  run counters recomputed    : {counters_healed} run(s)");
     println!("  results.prompt_snapshot_id : {results_healed} row(s)");
     println!("  attempts.runtime_snapshot  : {runtime_healed} row(s)");
     println!("  attempts.request_hash      : {hashes_healed} row(s)");
+    println!("  images.semantic_name       : {names_healed} row(s)");
     println!("next step: run `forza rebuild` to refresh best-lap status and review cases");
     Ok(())
 }

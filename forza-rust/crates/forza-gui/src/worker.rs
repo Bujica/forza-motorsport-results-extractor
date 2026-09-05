@@ -885,19 +885,10 @@ fn safe_rename_filename(name: &str, fallback_suffix: &str) -> String {
     format!("{}{}", clean.chars().take(200).collect::<String>(), suffix)
 }
 
+/// Canonical errors-log sibling, shared with the run-log writer in
+/// `forza-app` (single definition of the `<stem>_errors<suffix>` rule).
 fn errors_log_path(log_file: &Path) -> PathBuf {
-    let stem = log_file
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "forza".into());
-    let suffix = log_file
-        .extension()
-        .map(|e| format!(".{}", e.to_string_lossy()))
-        .unwrap_or_default();
-    log_file
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(format!("{stem}_errors{suffix}"))
+    forza_app::errors_log_path(log_file)
 }
 
 fn read_log_file(path: &Path) -> String {

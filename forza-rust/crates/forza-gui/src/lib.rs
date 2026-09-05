@@ -2426,17 +2426,30 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 w.set_run_total(0);
                 w.set_run_percent(0.0);
             }
-            append_run_log(format!(
+            let start_line = format!(
                 "[start] {} model={} force={} retry_errors={}",
                 forza_app::APP_VERSION, params.model, params.force, params.retry_errors
-            ));
+            );
+            append_run_log(start_line.clone());
+            forza_app::append_log_file(&params.log_file, &start_line);
 
+            // File logging (Python `logging_setup` parity): without this the
+            // configured log file stays empty and the Logs page shows
+            // "Log file not found" forever. The errors sibling gets failures.
+            let log_file = params.log_file.clone();
+            let errors_file = forza_app::errors_log_path(&params.log_file);
             let ui = ui.clone();
             let _handle = forza_app::spawn_extraction(params, control, move |event| {
                 let ui = ui.clone();
+                // Cloned per event: the inner callback must stay `'static`.
+                let log_file = log_file.clone();
+                let errors_file = errors_file.clone();
                 let _ = slint::invoke_from_event_loop(move || match event {
                     forza_app::RunEvent::Started { run_id, total } => {
-                        append_run_log(format!("[run {run_id}] {total} file(s) considered"));
+                        let line =
+                            format!("[run {run_id}] {total} file(s) considered");
+                        append_run_log(line.clone());
+                        forza_app::append_log_file(&log_file, &line);
                         RUN_START.with(|slot| {
                             *slot.borrow_mut() = Some(std::time::Instant::now());
                         });
@@ -2447,18 +2460,27 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         }
                     }
                     forza_app::RunEvent::Plan { new, cached, batch, existing, skipped } => {
-                        append_run_log(format!(
+                        let line = format!(
                             "plan: new={new} cached={cached} batch={batch} existing={existing} skipped={skipped}"
-                        ));
+                        );
+                        append_run_log(line.clone());
+                        forza_app::append_log_file(&log_file, &line);
                     }
                     forza_app::RunEvent::ImageStarted { name } => {
-                        append_run_log(format!("→ {name}"));
+                        let line = format!("→ {name}");
+                        append_run_log(line.clone());
+                        forza_app::append_log_file(&log_file, &line);
                     }
                     forza_app::RunEvent::ImageDone { name, ok, laps } => {
-                        append_run_log(format!(
+                        let line = format!(
                             "  {} {name} ({laps} lap(s))",
                             if ok { "✓" } else { "✗" }
-                        ));
+                        );
+                        append_run_log(line.clone());
+                        forza_app::append_log_file(&log_file, &line);
+                        if !ok {
+                            forza_app::append_log_file(&errors_file, &line);
+                        }
                     }
                     forza_app::RunEvent::Progress { done, total } => {
                         if let Some(w) = ui.upgrade() {
@@ -2477,11 +2499,19 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                             w.set_run_eta(eta.into());
                         }
                     }
-                    forza_app::RunEvent::Log(line) => append_run_log(line),
+                    forza_app::RunEvent::Log(line) => {
+                        append_run_log(line.clone());
+                        forza_app::append_log_file(&log_file, &line);
+                    }
                     forza_app::RunEvent::Finished { cancelled, processed, succeeded, failed, elapsed_s } => {
-                        append_run_log(format!(
+                        let line = format!(
                             "[done] cancelled={cancelled} processed={processed} ok={succeeded} fail={failed} in {elapsed_s:.1}s"
-                        ));
+                        );
+                        append_run_log(line.clone());
+                        forza_app::append_log_file(&log_file, &line);
+                        if failed > 0 {
+                            forza_app::append_log_file(&errors_file, &line);
+                        }
                         RUN_CONTROL.with(|slot| *slot.borrow_mut() = None);
                         RUN_START.with(|slot| *slot.borrow_mut() = None);
                         if let Some(w) = ui.upgrade() {
@@ -2506,7 +2536,10 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                         });
                     }
                     forza_app::RunEvent::Failed(message) => {
-                        append_run_log(format!("[failed] {message}"));
+                        let line = format!("[failed] {message}");
+                        append_run_log(line.clone());
+                        forza_app::append_log_file(&log_file, &line);
+                        forza_app::append_log_file(&errors_file, &line);
                         RUN_CONTROL.with(|slot| *slot.borrow_mut() = None);
                         RUN_START.with(|slot| *slot.borrow_mut() = None);
                         if let Some(w) = ui.upgrade() {

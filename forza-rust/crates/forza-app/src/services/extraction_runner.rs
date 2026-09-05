@@ -115,6 +115,9 @@ pub struct RunParams {
     /// Debug verbosity (Python per-run `debug` parity): extra per-image
     /// diagnostic lines in the run log (hashes, ids, attempt counts).
     pub verbose: bool,
+    /// Run log file (Python `logging_setup` parity): front-ends append run
+    /// events here; without it the Logs page stays empty forever.
+    pub log_file: PathBuf,
     // image pipeline
     pub max_width: u32,
     pub encode_quality: u8,
@@ -153,6 +156,7 @@ impl RunParams {
             temp_min_f: cfg.validation.temp_min_f,
             temp_max_f: cfg.validation.temp_max_f,
             verbose: false,
+            log_file: cfg.log_file.clone(),
             max_width: cfg.image.max_width.clamp(1, u32::MAX as i64) as u32,
             encode_quality: cfg.image.encode_quality.clamp(1, 100) as u8,
             image_format: cfg.llm.image_format.clone(),
@@ -1170,6 +1174,7 @@ where
                     )
                     .map_err(|e| e.to_string())?;
                     succeeded += 1;
+                    stamp_semantic_name(&conn, &image_file_id, &image.path, &result_id);
                     if params.verbose {
                         on_event(RunEvent::Log(format!(
                             "[debug] {name} result={result_id} hash={} attempts={attempt_count} attempt={row_id} laps={laps}",
@@ -1330,6 +1335,40 @@ fn stamp_input_metadata(
             mtime_ns,
             run_id,
         ],
+    );
+}
+
+/// Stamp the human-readable `semantic_name` ("Track - Class.ext", Python
+/// `build_semantic_name` parity) once laps are known. Readers everywhere
+/// (inventory, detail, export) prefer it over `current_name`, but nothing
+/// wrote it — every runner-created row stayed NULL.
+///
+/// Public so maintenance/sync flows can backfill it without re-running
+/// extraction.
+pub fn stamp_semantic_name(
+    conn: &Connection,
+    image_file_id: &str,
+    image_path: &std::path::Path,
+    result_id: &str,
+) {
+    let row: Option<(String, String)> = conn
+        .query_row(
+            "SELECT track, race_class FROM lap_records WHERE extraction_result_id = ?1 LIMIT 1",
+            rusqlite::params![result_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok();
+    let Some((track, race_class)) = row else {
+        return;
+    };
+    let suffix = image_path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    let name = forza_pipeline::semantic_filename(&track, &race_class, &suffix);
+    let _ = conn.execute(
+        "UPDATE image_files SET semantic_name = ?2 WHERE id = ?1",
+        rusqlite::params![image_file_id, name],
     );
 }
 
@@ -1678,6 +1717,7 @@ async fn worker_loop(
                 })();
                 match finalize_outcome {
                     Ok(()) => {
+                        stamp_semantic_name(&conn, &image_file_id, &image.path, &result_id);
                         if params.verbose {
                             let _ = event_tx.send(RunEvent::Log(format!(
                                 "[debug] {name} result={result_id} hash={} attempts={attempt_count} laps={laps} (worker)",

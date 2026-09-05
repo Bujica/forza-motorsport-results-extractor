@@ -42,6 +42,7 @@ fn params(db: &std::path::Path, input: &std::path::Path) -> RunParams {
         temp_min_f: 40.0,
         temp_max_f: 140.0,
         verbose: false,
+        log_file: db.with_extension("log"),
         max_width: 1600,
         encode_quality: 85,
         image_format: "png".into(),

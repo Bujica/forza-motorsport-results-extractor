@@ -8,6 +8,7 @@ pub mod image_inventory;
 pub mod rebuild;
 pub mod review_queue;
 pub mod run_control;
+pub mod run_log;
 pub mod settings;
 
 use std::net::ToSocketAddrs;
@@ -26,6 +27,7 @@ pub use review_queue::{
     ReviewCaseEntry, ReviewQueueFilter, decide_case, ignore_case, list_review_cases, reopen_case,
 };
 pub use run_control::RunControl;
+pub use run_log::{append_log_file, errors_log_path};
 pub use settings::{SettingRow, SettingsSnapshot, settings_snapshot};
 
 /// Best-lap row for GUI/output consumers (thin projection of ExportFlatRow).
