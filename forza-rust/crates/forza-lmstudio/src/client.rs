@@ -4,7 +4,9 @@
 use serde_json::Value;
 
 use crate::error::LlmError;
-use crate::load_config::{DesiredLoadConfig, NormalizedLoadConfig, normalized_load_config};
+use crate::load_config::{
+    DesiredLoadConfig, NormalizedLoadConfig, load_config_compatible, normalized_load_config,
+};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LoadedInstance {
@@ -252,16 +254,23 @@ impl RuntimeClient {
 
         let mut warnings: Vec<String> = Vec::new();
         let loaded = !model.loaded_instances.is_empty();
-        let effective = if loaded {
-            normalized_load_config(&model.loaded_instances[0].config)
-        } else {
-            NormalizedLoadConfig::default()
-        };
-        let instance_id = if loaded {
-            model.loaded_instances[0].id.clone()
-        } else {
-            String::new()
-        };
+        // Diagnose the same instance `ensure_loaded` would accept: the first
+        // load-config-compatible one. Using [0] reported a false mismatch
+        // when [0] was stale but [1] was compatible.
+        let diagnosed = model
+            .loaded_instances
+            .iter()
+            .find(|inst| load_config_compatible(&inst.config, desired))
+            .or(model.loaded_instances.first());
+        if loaded && diagnosed.is_none_or(|d| d.id != model.loaded_instances[0].id) {
+            warnings.push("First loaded instance is not load-config compatible; diagnosing a compatible one".into());
+        }
+        let effective = diagnosed
+            .map(|inst| normalized_load_config(&inst.config))
+            .unwrap_or_default();
+        let instance_id = diagnosed
+            .map(|inst| inst.id.clone())
+            .unwrap_or_default();
 
         if !loaded {
             warnings.push("Model is available but not loaded".into());
