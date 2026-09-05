@@ -1,15 +1,46 @@
 # GUI Contract
 
+Implementation: Rust (forza-rust/) — current. Legacy Python (forza/) frozen at 0.21.0-beta.1.
 Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: permanent
 Scope: GUI architecture, state ownership, threading, navigation, and usability
-Last verified: 2026-06-21
+Last verified: 2026-09-05
 Supersedes: GUI rules scattered across developer guide and workflow notes
-Related tests: `tests/test_gui_*`
+Related tests: unit tests in `forza-rust/crates/forza-gui` and `forza-app` service tests
 
 The desktop GUI is the primary product surface. It must present current database
 state clearly and keep long-running work off the UI thread.
+
+## Architecture
+
+The desktop GUI is a Slint front-end (`forza-gui` crate). The shell and pages
+are declared in `forza-gui/ui/` (`main.slint` plus `pages/`, `components/`,
+`models.slint`, `theme.slint`); behavior lives in `forza-gui/src/lib.rs`.
+
+Threading contract:
+
+- Slint callbacks are synchronous and only enqueue typed `Request` values
+  over an mpsc channel (`forza-gui/src/worker.rs`).
+- A dedicated worker thread hosts request handling. Each request runs on its
+  own short-lived job thread so a heavy job (e.g. full DB Doctor) never
+  blocks a light one (e.g. image detail); a panicking job yields
+  `Response::Error` instead of wedging the UI behind "loading…".
+- Results return as plain-data `Response` values marshaled to the UI thread
+  via `slint::invoke_from_event_loop`. The worker never touches widget types.
+- The worker owns the live `AppConfig` plus the INI path
+  (`WorkerContext`), so every handler observes the current configuration.
+- Live extraction runs on a separate dedicated thread
+  (`forza-app/src/services/extraction_runner.rs::spawn_extraction`) with a
+  cooperative `RunControl` (cancel / pause) and a `RunEvent` stream
+  (`Started`, `Plan`, `ImageStarted`, `ImageDone`, `Progress`, `Log`,
+  `Finished`, `Failed`) marshaled to the event loop. When `workers > 1`,
+  images are processed in parallel across Tokio tasks.
+- Widget-adjacent state (Slint models, row caches, selection, filter state)
+  lives in UI-thread locals and is never shared across threads.
+
+See `docs/contracts/gui_signal_payloads.md` for the full callback →
+request → response inventory.
 
 ## Primary Workflow
 
@@ -46,44 +77,61 @@ surfaces:
 - Image Details is a normal operator detail surface. It may show metadata,
   laps, linked Review cases, extraction summaries, and attempts, but it must
   not expose raw internal `image_flags` as a normal tab.
-- Image Debug / Developer Tools owns raw diagnostic evidence, including any
+- Image Debug / Diagnostics owns raw diagnostic evidence, including any
   future display of internal image flags.
 
 ## Layer Rules
 
-- Views emit user-intent signals only.
-- Controllers coordinate state, readers, writers, and workers.
+- Views emit user-intent callbacks only (declared in `main.slint`).
+- `lib.rs` page-callback handlers coordinate state and enqueue worker
+  `Request` values; they never touch the database or the filesystem directly
+  (except local UI concerns: file-picker dialogs, clipboard, opening URLs).
 - Long-running I/O, database scans, LM Studio calls, and file copying run in
-  workers or application/lab services invoked by workers.
-- Controllers that own workers implement `close()` and stop threads on
-  application shutdown.
-- GUI readers are read-only. GUI writers perform explicit mutations and emit
-  events so controllers can refresh affected views.
-- GUI screens and controllers must use the established GUI facade layer for
-  database reads. A visible-scope refresh policy does not justify adding a
-  screen-specific SQL service that bypasses `GuiReadService` or another existing
-  application/lab facade.
-- Best Laps display reads must use the GUI read facade, not the generic
-  `ExportLap`/PDF-CSV export path.
-- database fixer surface is a controlled application-service surface for named database
-  fixers. It must not become a generic SQLite table editor.
-- Read-only controllers must not own a `GuiWriteService`. Write operations that
-  must be coordinated across controllers belong to `MainWindow` or a dedicated
-  write controller. The approved pattern for cross-cutting write orchestration
-  is a named signal emitted by the originating controller and handled by
-  `MainWindow`, which owns the write service for that operation.
-- `GuiWriteService` instances must resolve `user.gamertag` via a live provider
-  callable — a zero-argument lambda closed over the current config object —
-  rather than a frozen string captured at construction time. This prevents a
-  stale gamertag from corrupting the best-lap frontier when the config is
-  reloaded in the background without rebuilding the service.
+  worker job threads, the extraction runner thread, or application services
+  invoked by workers.
+- Read paths go through the worker's pure `handle_request` plus application
+  services (`ImageInventoryService`, `list_review_cases`, `list_best_laps`,
+  `load_image_detail`, debug/overview/doctor services). Screens must not add
+  a parallel database access layer that bypasses them.
+- Best Laps display reads use `Request::ListBestLaps` plus in-memory
+  filtering, not the `ExportRow`/CSV export path. CSV/PDF export uses the
+  currently filtered rows via `forza_output`.
+- Read-only views must not trigger best-lap recomputes. Recomputes caused by
+  external events (gamertag change via `SaveSettings` →
+  `SettingsOutcome.gamertag_recomputed`, manual `RunRebuild`, run-finalized
+  `rebuild()`) are followed by `ListBestLaps` (plus Review/Images) reloads.
+- The worker must resolve `user.gamertag` from its live mutex-guarded
+  `AppConfig` at request time, never from a frozen string captured at
+  construction time. This prevents a stale gamertag from corrupting the
+  best-lap frontier when the config is reloaded in the background.
 
 ## Visible-Scope Refresh Contract
 
 The GUI must update the smallest scope that is currently useful to the user. A
-navigation event, tab activation, row selection, detail-tab activation, completed
-user action, configuration change, or pipeline event must not automatically cause
-unrelated hidden panes to reload heavy state.
+navigation event, row selection, detail-tab switch, completed user action,
+configuration change, or pipeline event must not automatically cause
+unrelated hidden views to reload heavy state.
+
+Verified mechanisms in `forza-gui/src/lib.rs` + `worker.rs`:
+
+- Request coalescing: rapid Images filter changes collapse through
+  `INVENTORY_REFRESH_IN_FLIGHT` / `PENDING_INVENTORY_FILTER` (same for Review
+  via `REVIEW_REFRESH_IN_FLIGHT` / `PENDING_REVIEW_FILTER`); only the latest
+  pending filter is issued when the in-flight request completes. A worker
+  `Response::Error` resets both flags so the UI can never wedge behind
+  "loading…".
+- Filter preservation: the last-issued inventory filter is remembered
+  (`CURRENT_INVENTORY_FILTER`) so background refreshes (post-decision,
+  rescan, delete, rename, rebuild, run finish) reload with the user's active
+  filter bar, never forced defaults. The Review reloads reuse the active
+  `REVIEW_FILTER`.
+- Lazy page entry: startup issues one inventory request plus open-bucket
+  Reviews plus Best Laps. Settings, Logs, and Diagnostics payloads load on
+  first page entry (`page-changed`); entering Diagnostics also preloads the
+  overview snapshot and Image Debug cases. Heavy pages must initialize on
+  first entry, not at window startup.
+- Settings previews carry a monotonic sequence number; a preview response
+  older than the latest edit is dropped instead of restoring stale rows.
 
 Use these terms for GUI refresh state:
 
@@ -100,10 +148,9 @@ state. `dirty` is reserved for the domain concept of dirty laps.
 
 Refresh decisions are scoped in this order:
 
-1. section, such as Process, Review, Images, Best Laps, Records, or Developer
-   Tools;
-2. tab inside a section, such as Developer Tools Overview, Image Debug, DB
-   Doctor, database fixer surface, or Logs;
+1. section, such as Process, Review, Images, Best Laps, or Diagnostics;
+2. tab inside a section, such as Diagnostics Overview, Image Debug, DB
+   Doctor, or Logs;
 3. list/detail selection, such as an extraction result row in Image Debug;
 4. detail subtab, such as Metadata, Response, Raw model JSON, Extracted data, or
    Error.
@@ -114,25 +161,31 @@ an authoritative event requires immediate update.
 
 ### Event policy
 
-- During an active run, non-visible sections must not reload on per-image events
-  such as `image_started`, `image_finished`, attempt events, or intermediate
-  review/flag events.
-- Visible sections may update during a run, but frequent events should be
-  debounced or coalesced where the refresh is expensive.
-- `run_finished`, rebuild completion, configuration changes, and explicit user
-  refresh actions are authoritative refresh triggers.
-- Explicit Refresh buttons bypass staleness and execute immediately.
-- User actions that mutate visible data, such as image rename/hide/missing state
-  or Review decisions, must update the visible workflow immediately and mark
-  affected hidden workflows `refresh_pending`.
+- During an active run, non-visible views must not reload on per-image events
+  (`ImageStarted`, `ImageDone`, `Progress`); the Process page appends run-log
+  lines and updates progress in place.
+- `Finished` (and `Failed`) are authoritative refresh triggers: the handler
+  sends `RefreshOverview`, `RefreshInventory` (current filter),
+  `ListBestLaps`, and `ListReviews` (current filter).
+- Rebuild completion reloads Reviews (all bucket) and Best Laps.
+- Review apply/ignore/reopen reload Reviews and Best Laps, plus Images with
+  the current filter (decisions can change best-lap/processing columns).
+- Rescan/delete/rename reload Images with the current filter.
+- External import reloads Best Laps and surfaces the import summary in the
+  status line.
+- Explicit user refresh actions (scan folder, refresh buttons, reload)
+  bypass coalescing and execute immediately.
+- User actions that mutate visible data, such as image rename/export/rescan/
+  delete or Review decisions, must update the visible workflow immediately
+  via the response handlers above.
 
 ### List/detail policy
 
 Entry into a screen loads only the top-level list or summary needed for that
 screen. It must not pre-load detail payloads for unselected rows.
 
-Selection loads only the currently visible detail scope. Detail subtab switches
-load only the newly visible subtab, reusing cached data when valid.
+Selection loads only the currently selected detail scope via a worker request
+(`LoadImageDetail`, `LoadImageDebugDetail`, `LoadPreview`).
 
 For Image Details specifically:
 
@@ -159,27 +212,25 @@ For Review specifically:
 
 For Image Debug specifically:
 
-- entering Developer Tools > Image Debug loads the extraction-results list;
-- list refresh must not load the first result detail automatically;
-- selecting an extraction result loads only the active detail subtab;
-- switching among Metadata, Response, Raw model JSON, Extracted data, and Error
-  loads only the selected subtab;
-- opening Image Debug from Image Details may select the target extraction result,
-  but it must still follow the same visible-subtab loading rule;
-- scoped reads still go through `GuiReadService`; the controller/view may cache
-  and display only the active subtab, but they must not introduce a parallel
+- entering Diagnostics preloads the debug case list;
+- selecting a case sends `LoadImageDebugDetail` for that image;
+- selecting a result reloads the detail with that result selected;
+- opening Image Debug from Image Details navigates to Diagnostics and loads
+  the target image detail plus the case list;
+- scoped reads still go through the worker; the UI may cache and display
+  only the active detail scope, but it must not introduce a parallel
   database access layer for Image Debug.
 
 ### Best Laps policy
 
-- Opening Best Laps loads the current best-lap table through the GUI read facade
-  and then applies filters in memory until a relevant event or explicit reload.
+- Opening Best Laps sends `ListBestLaps`; rows are cached (`BESTLAP_ALL`) and
+  filters apply in memory until a relevant event or explicit reload.
 - Best Laps filters define the visible output set. `Generate PDF` and
   `Export CSV` must use the currently filtered rows, not the unfiltered database
   frontier.
 - External spreadsheet import belongs to Best Laps because it feeds the final
-  table/output workflow. Records may summarize imported data but must not own the
-  import action.
+  table/output workflow (`bestlaps-import` → `Request::ImportExternalRecords`
+  → `import_to_db` → `ListBestLaps` reload with the import summary).
 - External import may mutate reference data by adding newly observed car names to
   `reference_cars`; the import result must report canonicalized cars, new cars,
   ambiguous cars, unmapped tracks, and invalid laps in the Best Laps page.
@@ -188,16 +239,14 @@ For Image Debug specifically:
 - Best Laps may show a top summary/action surface and an image-detail action
   for selected screenshot rows, but it must not duplicate the same table summary
   in a lower text panel.
-- `BestLapsController` is a read-only controller. It must not own a
-  `GuiWriteService` or trigger best-lap recomputes directly. Recomputes caused
-  by external events (gamertag change, rebuild) are orchestrated by `MainWindow`
-  or the relevant write controller, which calls `BestLapsController.reload()`
-  after the recompute commits.
+- The Best Laps view is read-only. It must not trigger best-lap recomputes
+  directly. Recomputes caused by external events (gamertag change, rebuild,
+  run finish, Review decisions) are followed by a `ListBestLaps` reload.
 - Changing `user.gamertag` in Settings must trigger a best-lap recompute before
-  `BestLapsController` reloads its cache. The approved path is:
-  `SettingsController.best_laps_recompute_needed` signal → `MainWindow`
-  recomputes via `GuiWriteService.recompute_best_laps()` → calls
-  `BestLapsController.reload()`.
+  Best Laps refreshes its cache. The approved path is:
+  `SaveSettings` → worker `rebuild()` with the new gamertag →
+  `SettingsOutcome.gamertag_recomputed` → UI reloads Best Laps (plus Review
+  and Images).
 
 ### Expensive-state policy
 
@@ -208,12 +257,13 @@ hidden section exists:
 - LM Studio HTTP model/runtime probes;
 - large raw-response or JSON payload reads;
 - large logs or artifact reads;
-- bulk table refreshes for Records, Best Laps, Images, or Debug views during a
+- bulk table refreshes for Best Laps, Images, or Debug views during a
   run when the section is hidden.
 
-Developer Tools Overview may use fast relational/database checks on entry, but it
+Diagnostics Overview may use fast relational/database checks on entry, but it
 must label those checks as fast checks and must not present them as a full DB
-Doctor audit. Full DB Doctor runs only from an explicit DB Doctor action.
+Doctor audit. Full DB Doctor runs only from an explicit DB Doctor action
+(`doctor-requested` → `Request::RunFullDoctor`).
 
 ## Usability Rules
 
@@ -235,10 +285,10 @@ Doctor audit. Full DB Doctor runs only from an explicit DB Doctor action.
 - Manual refresh buttons should be avoided whenever possible. GUI state should
   refresh on page/tab entry, relevant filter changes, completed user actions,
   configuration changes, and application events. A visible refresh action is an
-  exception for external or expensive state that cannot be observed reliably,
-  and the reason must be clear from the surrounding workflow. DB Doctor,
-  Developer Tools Overview and Records may expose explicit
-  refresh actions because they summarize database files, external spreadsheets,
+   exception for external or expensive state that cannot be observed reliably,
+   and the reason must be clear from the surrounding workflow. DB Doctor,
+   Diagnostics Overview, and Best Laps import may expose explicit
+   refresh actions because they summarize database files, external spreadsheets,
   LM Studio, or other programs that can change outside the current GUI event
   stream. Logs are internal read-only evidence files and must load on
   entry/configuration/events rather than exposing a manual reload button.
@@ -248,9 +298,9 @@ Doctor audit. Full DB Doctor runs only from an explicit DB Doctor action.
 
 ## State Rules
 
-GUI startup must avoid opening expensive database-backed services for screens
-that have not been visited. Heavy pages and heavy service reads should initialize
-on first page entry or first refresh, not in `MainWindow` startup.
+GUI startup must avoid opening expensive database-backed reads for screens
+that have not been visited. Heavy pages and heavy worker reads should initialize
+on first page entry or first refresh, not at window startup.
 
 ## Raw image flags are not a GUI product surface
 
@@ -258,4 +308,4 @@ on first page entry or first refresh, not in `MainWindow` startup.
 
 The Images screen may expose product-level inventory filters only. The duplicate-groups filter is backed by the `image_files.duplicate_of_image_file_id` relationship; duplicate flags remain lifecycle evidence and DB Doctor material, not the inventory authority.
 
-The Review queue owns human correction and dismissal of model/domain issues. A future Developer Tools debug surface may show read-only internal flag evidence only after a dedicated contract is added; it is not part of the current GUI contract.
+The Review queue owns human correction and dismissal of model/domain issues. A future Diagnostics debug surface may show read-only internal flag evidence only after a dedicated contract is added; it is not part of the current GUI contract.

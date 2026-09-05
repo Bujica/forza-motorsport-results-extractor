@@ -54,6 +54,24 @@ for what is current.
 4. Relevant user or developer guide
 5. Historical record only when past evidence is needed
 
+## Implementation Status (2026-09-04)
+
+Living docs are Rust-current unless marked otherwise. `history/` and `plans/`
+are frozen records by policy — never cite them as behavior contracts.
+
+| Document(s) | Status |
+| --- | --- |
+| `project_status.md`, this index | Rust-current |
+| `architecture/overview.md`, `architecture/pipeline.md`, `architecture/gui.md` | Rust-current |
+| `contracts/` (all topic files) | Rust-current |
+| `developer/guide.md`, `developer/guide/*`, `developer/testing-policy.md` | Rust-current |
+| `user/guide.md`, `user/advanced_tools.md`, `release/beta_packaging.md` | Rust-current |
+| `architecture/database.md` (+ shards), `architecture/README.md` | Index only; shards predate the migration — verify against `forza-rust/crates/forza-db/` before use |
+| `history/`, `plans/` | Frozen records, intentionally Python-era |
+
+When any topic file disagrees with `forza-rust/crates/` source, the source wins;
+file a docs fix rather than working around it in code.
+
 ## Source Of Truth
 
 | Question | Read |

@@ -1,13 +1,14 @@
+Implementation: Rust (forza-rust/) — current. Legacy Python (forza/) frozen at 0.21.0-beta.1.
+
 # Developer Maintenance Guide
 
 Status: current
 Audience: developer, maintainer, LLM
 Lifecycle: permanent
 Scope: technical maintenance guide and package conventions
-Last verified: 2026-06-06
+Last verified: 2026-09-05
 Supersedes: `docs/DEVELOPER_GUIDE.md`
-Related tests: `python -m pytest -q`
-Last verified: 2026-06-14
+Related tests: `cargo test --workspace` (run in `forza-rust/`)
 
 This file is an index for developer maintenance guidance after the clean-break removal. Operational setup, validation, package boundaries, configuration, LM Studio, GUI, testing, and release guidance are split into smaller topic files.
 

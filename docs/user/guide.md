@@ -4,7 +4,8 @@ Status: current
 Audience: user
 Lifecycle: permanent
 Scope: External behavior
-Last verified: 2026-07-27
+Last verified: 2026-09-05
+Implementation: Rust (forza-rust/) — current. Legacy Python (forza/) frozen at 0.21.0-beta.1.
 Supersedes: `docs/USER_GUIDE.md`
 Related tests: manual GUI workflow checks
 
@@ -22,8 +23,9 @@ Forza Motorsport Results Extractor targets screenshots from the post-race Result
 The application processes Forza Motorsport race-result screenshots, stores
 state in SQLite, and produces user-facing reports and exports.
 
-The GUI is the recommended interface. CLI commands are intentionally limited
-to automation, maintenance, and controlled reruns.
+The GUI (`forza-gui.exe`) is the recommended interface. CLI commands
+(`forza.exe`) are intentionally limited to automation, maintenance, and
+controlled reruns.
 
 Runtime source of truth:
 
@@ -31,24 +33,26 @@ Runtime source of truth:
 data/forza.sqlite3
 ```
 
-Normal extraction does not move, rename, or delete source screenshots.
+Normal extraction does not move, rename, or delete source screenshots. Never
+share one SQLite file between the Rust app and the legacy Python tree; each
+implementation owns its own database.
 
 ## First Run
 
-1. Install dependencies.
+1. Build the Rust workspace.
 2. Start LM Studio.
 3. Configure `forza_config.ini`.
 4. Upgrade or create the database explicitly.
 5. Open the GUI.
 
-Commands:
+Commands (run from `forza-rust/`; binaries land in `target/debug/` or
+`target/release/`):
 
-```bash
-python install.py
-pip install -e .[dev,gui]
-python -m forza maintenance db-upgrade
-python -m forza maintenance db-doctor --json
-python -m forza gui
+```cmd
+cargo build -p forza-cli -p forza-gui
+.\target\debug\forza.exe maintenance db-upgrade
+.\target\debug\forza.exe maintenance db-doctor --json
+.\target\debug\forza-gui.exe
 ```
 
 ## GUI Sections
@@ -58,7 +62,6 @@ Images           input-folder inventory, selection, preview, flags, rename, expo
 Process          selected extraction runs, progress, and operator log
 Review           review queue and correction workflow
 Best Laps        best-lap frontier, external-record import, PDF, and CSV
-Records          performance records, community coverage, cars, progress, and rivals
 Diagnostics      runtime overview, image debug, DB Doctor, and logs
 Settings         validated configuration editor
 ```
@@ -74,16 +77,31 @@ event log. GUI extraction starts from `Images` with `Process selected`. Use
 configured input folder. Full-folder runs also remain available through the CLI
 commands below.
 
+Run controls on the Process page:
+
+```text
+Dry-run        plan the run without model calls or new results
+Force          reprocess images the database already knows
+Retry errors   reprocess only images whose latest result is an error
+Debug          extra per-image diagnostic lines in the run log
+Pause/Resume   pause at safe checkpoints between work units
+Cancel         two-step confirm; stops after the current image
+```
+
+Reviews are auto-created at the end of runs. A manual `Rebuild` (Diagnostics
+button or `forza.exe rebuild`) recomputes derived state without model calls.
+
 Common CLI equivalents:
 
-```bash
-python -m forza
-python -m forza --limit 5
-python -m forza --dry-run
-python -m forza --force
-python -m forza --retry-errors
-python -m forza rebuild
-python -m forza export
+```cmd
+forza.exe run
+forza.exe run --limit 5
+forza.exe run --dry-run
+forza.exe run --force
+forza.exe run --retry-errors
+forza.exe rebuild
+forza.exe export
+forza.exe export --pdf
 ```
 
 `--limit N` processes only the first supported input screenshots by file modified time.
@@ -111,10 +129,12 @@ errors`.
 import external spreadsheets or generate a PDF; those are explicit Best Laps
 actions.
 
+A cancelled CLI run exits with code 130.
+
 ## Settings
 
-The Settings page validates pending values before saving. Saving creates a
-timestamped backup of `forza_config.ini` and writes through a temporary file.
+The Settings page validates pending values before saving. Saving writes the
+updated `forza_config.ini`.
 
 Important settings include:
 
@@ -125,7 +145,7 @@ Important settings include:
 - Image format, max width, quality, and grayscale.
 - Context length, reasoning mode, batch settings, max tokens, temperature, and
   read timeout.
-- Worker count. Keep `[llm] workers = 1` as the safe LM Studio default unless
+- Worker count. Keep workers at 1 as the safe LM Studio default unless
   local validation shows a higher value is stable for the selected model and
   hardware.
 
@@ -135,7 +155,7 @@ application.
 ## Review
 
 Use `Review` for SQL-backed review cases. Review decisions are persisted to the
-database. The application no longer uses manual override JSON as the runtime
+database. The application no longer uses manual override files as the runtime
 review mechanism.
 
 Keyboard review flow:
@@ -173,7 +193,7 @@ Supported actions include:
 - Preview image and extraction evidence.
 - Rescan selected files against the filesystem.
 - Rename or export selected files explicitly.
-- Delete selected image assets explicitly.
+- Delete selected image assets explicitly (two-step confirm).
 
 Normal extraction never deletes source files. Physical deletion is limited to
 the explicit Delete action. When a selected file still exists inside the
@@ -218,6 +238,13 @@ The PDF report is written to:
 output/reports/forza_bestlaps.pdf
 ```
 
+The same outputs are available from the CLI:
+
+```cmd
+forza.exe export --out output/exports/results.csv
+forza.exe export --pdf
+```
+
 ## External Records
 
 External leaderboard records are not screenshot lap rows. They are imported into
@@ -253,29 +280,17 @@ matches are left unchanged and reported, and new car names from valid spreadshee
 rows are added to `reference_cars` even when they are not the final best external
 time for a track/class group.
 
-## Records
-
-Use `Records` for player-centric performance analysis. The table is grouped by
-track, class, and weather, and shows your best lap, the fastest rival seen in
-your shared clean-lap contexts, dry non-TCR community-record coverage from Best
-Laps external records, most-used cars, dominant cars, progress history, and
-rivals matching the active Records filters. Rival and community gaps are shown as
-absolute time plus relative percentage where a comparison lap exists.
-
-Community comparisons are available only for dry non-TCR combinations because
-the imported spreadsheet represents dry leaderboard records and does not include
-TCR. External spreadsheet import remains in Best Laps; Records summarizes the
-imported data but does not own the import action.
-
 ## Diagnostics
 
 The `Diagnostics` GUI section is the advanced operator area for reproducible
-runtime overview, image debug, DB Doctor, and logs. Former Lab/workbench and
-benchmark surfaces are not public product tools.
+runtime overview, image debug, DB Doctor, and logs.
 
 In Image Debug, `Model Response` shows raw model-response evidence, `Parsed Data`
 shows structured extraction data, and `Image Metadata` shows screenshot physical
 metadata such as dimensions, format, MIME type, size, race date, and metadata JSON.
+
+The Diagnostics page also offers `Rebuild derived state`, the manual equivalent
+of `forza.exe rebuild`.
 
 Read the dedicated tutorial:
 
@@ -288,23 +303,23 @@ docs/user/advanced_tools.md
 Use maintenance commands when the database or runtime artifacts need explicit
 operator action.
 
-```bash
-python -m forza maintenance db-status
-python -m forza maintenance db-upgrade
-python -m forza maintenance db-doctor
-python -m forza maintenance db-doctor --json
-python -m forza maintenance db-reset --yes
+```cmd
+forza.exe maintenance db-status
+forza.exe maintenance db-upgrade
+forza.exe maintenance db-doctor
+forza.exe maintenance db-doctor --json
+forza.exe maintenance db-heal
+forza.exe maintenance db-reset --yes
 ```
 
-`db-upgrade` is explicit for CLI maintenance. GUI startup may prompt before
-creating/upgrading a missing or outdated database, and may offer a confirmed
-reset when the configured database is incompatible with the current schema.
+`db-upgrade` creates schema v2 when the database is missing, and applies
+pending migrations otherwise. It refuses unmanaged databases. `db-heal`
+backfills missing extraction evidence on rows produced by older builds.
 
 `db-doctor` is the integrity screen before clean reruns, releases, or serious
-troubleshooting conclusions. It is read-only and verifies run/input/result counters,
-schema state, artifact integrity, prompt snapshots, Review identity, and related
-runtime contracts. Review identity repair is no longer a public CLI workflow;
-maintainers should treat it as an internal service-level recovery path.
+troubleshooting conclusions. It is read-only and runs the full battery:
+run/input/result counters, schema state, artifact integrity, prompt snapshots,
+Review identity, and related runtime contracts.
 
 ### SQLite file size after cleanup
 

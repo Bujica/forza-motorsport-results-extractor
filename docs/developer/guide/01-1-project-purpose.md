@@ -1,10 +1,12 @@
+Implementation: Rust (forza-rust/) — current. Legacy Python (forza/) frozen at 0.21.0-beta.1.
+
 # Developer Maintenance Guide: 1. Project purpose
 
 Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: permanent
 Scope: Developer maintenance guidance shard generated from the former oversized `guide.md` document
-Last verified: 2026-06-15
+Last verified: 2026-09-05
 
 Back to index: [`../guide.md`](../guide.md).
 
@@ -16,59 +18,69 @@ The project is not a generic OCR wrapper. It has domain-specific correction, val
 
 ## 2. First local setup
 
-Use Python 3.10 or newer.
+Install the Rust toolchain, then build from `forza-rust/`:
 
 ```bash
-python install.py
-pip install -e .[dev,gui]
-python -m forza maintenance db-upgrade
-python -m forza maintenance db-doctor --json
-python -m forza gui
+cd forza-rust
+cargo build -p forza-cli -p forza-gui
+./target/debug/forza maintenance db-upgrade
+./target/debug/forza maintenance db-doctor --json
+./target/debug/forza gui
 ```
 
-A local LM Studio server must also be running. The project uses the native LM Studio REST API only; compatibility paths for OpenAI-style endpoints and Ollama were removed. Model values live in the `[lmstudio]` section of `forza_config.ini`, so runs can control model instance loading, context length, reasoning mode, image format, and response stats.
+This produces `forza.exe` (CLI, clap arg parsing) and `forza-gui.exe` (Slint
+UI). CLI commands: `forza.exe run [--dry-run|--force|--retry-errors|--limit N]
+| rebuild | export [--out PATH] [--pdf] | config-check | gui | maintenance
+<db-status|db-doctor|db-upgrade|db-reset|db-heal>`.
 
-`json-repair` is a runtime dependency, not an optional feature. Model parsing should always use the same deterministic sequence: strict JSON parse first, then one `json_repair` pass, then an explicit parse error.
+A local LM Studio server must also be running. The project uses the native LM Studio REST API only (reqwest+tokio HTTP backend in `forza-lmstudio`); compatibility paths for OpenAI-style endpoints and Ollama were removed. Model values live in the `[lmstudio]` section of `forza_config.ini`, loaded and validated by the `forza-config` crate (`load_config`, `validate_config`).
+
+Model-response parsing, validation, and repair live in Rust too
+(`forza-lmstudio::response` strict parse+validation plus
+`forza-lmstudio::json_repair::repair_json`, used by the backend), keeping the
+deterministic strict-parse-then-repair behavior.
 
 ## 3. Validation before merging or releasing
 
-Run the validation set from the repository root:
+Run the validation set from `forza-rust/`:
 
 ```bash
-python -m compileall -q forza
-python -m pytest -q
-python -m pytest -q -W error::ResourceWarning
-python -m pytest --cov=forza --cov-report=term-missing
-python -m forza --help
-python -m forza maintenance db-doctor --json
-python -m forza --dry-run
-python -m forza gui
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all --check
+./target/debug/forza --help
+./target/debug/forza maintenance db-doctor --json
+./target/debug/forza run --dry-run
+./target/debug/forza gui
 ```
+
+Fixtures live in `forza-rust/fixtures/`: `expected/` is committed;
+`model_responses/` + `images/` are git-ignored personal data.
 
 Notes:
 
 - Coverage is a risk signal, not a blind goal. Prioritize coverage for orchestration, persistence, config, parsing, and regression-prone GUI contracts.
-- GUI tests are partly static by design. Do not rely only on them for behavior. Add behavioral tests when a workflow can be tested without a full Qt interaction harness.
+- GUI tests are partly static by design. Do not rely only on them for behavior. Add behavioral tests when a workflow can be tested without a full UI interaction harness.
 - The repository may not have remote GitHub Actions checks. Absence of remote status is not equivalent to validation.
 - Test profiles, marker taxonomy, coverage gates, and cleanup rules live in `docs/developer/testing-policy.md`; the original rollout plan was internal pre-beta evidence and is not published.
 - Detailed local test profiles, marker taxonomy, and test-debt cleanup rules live in `docs/developer/testing-policy.md`. Keep that policy current before deleting or reclassifying tests.
 
 Versioning rules:
 
-- `pyproject.toml` `[project].version` is the only version source of truth.
-- `forza.version` exposes that version to GUI and package code.
-- Release tags, changelog sections, and displayed GUI version must match.
+- Workspace `Cargo.toml` `[workspace.package].version` (`0.1.0`) is the only version source of truth.
+- `forza-app::APP_VERSION` exposes that version (plus git hash/build time) to CLI and GUI code, and every run row carries it.
+- `forza.exe --version`, the GUI title, run rows, release tags, and changelog sections must match.
 - Follow `docs/contracts/versioning.md` before any release or version bump.
 
 ## 4. Runtime source of truth
 
-The runtime database is `data/forza.sqlite3`.
+The runtime database defaults to `data/forza.sqlite3`.
 
 Core rules:
 
 - SQLite is the operational source of truth.
-- Alembic owns schema migration.
-- Normal CLI and GUI startup must not auto-run migrations.
+- Schema version is tracked via `PRAGMA user_version` (`SCHEMA_VERSION = 2`); `migration::upgrade()` in `forza-db` builds the schema from zero or applies pending migrations.
+- Normal CLI and GUI startup must not auto-run migrations (the GUI errors and points at `maintenance db-upgrade` when the database is missing).
 - Schema upgrades must be explicit maintenance actions.
 - Runtime source screenshots are not renamed, moved, or deleted by extraction.
 - File rename, export, and selected asset deletion are explicit GUI actions.
@@ -91,6 +103,7 @@ extraction_attempts  per-call retry/debug records, redacted request payloads, ra
 model_artifacts      hash/size tracked registered model artifacts
 lap_records          extracted lap rows and persisted best-lap frontier
 review_cases         human-review queue
+review_corrections   persisted human decisions applied by rebuild
 image_flags          debug/image-management flags
 export_artifacts     explicit export outputs
 reference_tracks     SQL runtime track references seeded explicitly
@@ -103,14 +116,13 @@ external_lap_records active/inactive external records
 
 ```text
 data/input/*.png
-  -> RunService
-  -> ImageInventoryService
-  -> ExtractionService
-  -> pipeline.process_image
-  -> LLMBackend
+  -> RunParams / spawn_extraction
+  -> image inventory
+  -> extraction_runner (sequential or multi-worker with pre-allocated inputs)
+  -> forza-pipeline + forza-lmstudio backend
   -> run_inputs + image_files + extraction_results + extraction_attempts + model_artifacts + lap_records
   -> review_cases + image_flags
-  -> RebuildService
+  -> rebuild()
   -> persisted best-lap frontier
   + external_lap_records
   -> Best Laps GUI + CSV/PDF exports
@@ -119,23 +131,25 @@ data/input/*.png
 Important behavior:
 
 - A run must fail if a model result cannot be persisted to SQLite.
-- After image discovery, `RunService` records `run_inputs` for every considered
-  file. Dry-run rows use `decision='skip'` with `skip_reason='dry_run'`.
-- Before extraction, `RunService` performs an LM Studio preflight and records a
+- After image discovery, the runner records `run_inputs` for every considered
+  file. `--dry-run` persists nothing: it only prints the discovery plan, with
+  no LM Studio calls.
+- Before extraction, the runner performs an LM Studio preflight and records a
   `model_runtime_snapshots(snapshot_kind='preflight')` row when runtime
-  diagnostic data is available. The preflight must enter `build_backend(cfg)` so
-  the configured model is loaded and validated with the requested runtime
-  parameters.
+  diagnostic data is available. The preflight must load and validate the
+  configured model with the requested runtime parameters through the native
+  backend.
 - If preflight fails, the run is marked failed as an operational backend error,
-  a failed `run_finished` event is emitted, and no new image extraction errors
+  a failed `RunEvent::Failed` is emitted, and no new image extraction errors
   are created for screenshots that were never submitted to chat.
-- `ExtractionResult` must not be mutated by persistence services.
-- CLI `run` must return non-zero for failed or cancelled runs.
-- Main extraction concurrency is controlled by `[llm] workers`. Keep
+- CLI `run` must return non-zero for failed runs, and exit 130 for cancelled runs.
+- Main extraction concurrency is controlled by the `workers` setting. Keep
   `workers = 1` as the safe LM Studio default unless local validation shows a
   higher value is stable for the selected model and hardware.
   Cancellation stops new work and prevents not-yet-checkpointed results from
   being persisted, but it does not force-kill an in-flight LLM request.
+- The end of every run calls `rebuild()`: best laps (`mark_best_laps`) +
+  review cases + system review flags (`sync_review_flags`) + per-run counters.
 - Best Laps reads the persisted frontier. It must not invent an in-memory fallback as canonical output.
 - Image race date is derived from the file modified timestamp, not Windows file creation time or empty `Date taken` metadata.
 - Runtime IDs use UTC timestamp prefixes so logs, SQLite timestamps, and output directories can be correlated across time zones.

@@ -1,15 +1,35 @@
 # Best Laps Contract
 
+Implementation: Rust (forza-rust/) — current. Legacy Python (forza/) frozen at 0.21.0-beta.1.
 Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: permanent
 Scope: internal best-lap frontier and image-file best-lap participation status
-Last verified: 2026-06-21
+Last verified: 2026-09-05
 Supersedes: best-lap notes embedded in developer guide and history
-Related tests: `tests/test_db_lap_repository.py`, `tests/test_gui_best_laps_static.py`, `tests/test_gui_write_dirty_decisions.py`
+Related tests: unit tests in `forza-rust/crates/forza-domain/src/frontier.rs`
 
 Best-lap state is persisted derived state. Screens read it, but read-only
 screens must not silently recompute or mutate it.
+
+## Frontier Algorithm
+
+The frontier is pure domain logic in `forza-domain/src/frontier.rs`:
+
+- `FrontierLap` is the minimal row projection (`id`, `image_file_id`,
+  `track`, `race_class`, `weather`, `temp_f`, `driver`, `car`,
+  `best_lap_ms`, `dirty`).
+- `clean_frontier_rows(rows, gamertag)` computes the player-side frontier per
+  `(track, class, car, condition)` with dominance by time then temperature,
+  plus opponents faster than the player's overall limit, deduplicated per
+  opponent identity. Condition is `weather` or `"unknown"`; temperature is
+  rounded to 0.1 °F. Winners return as `FrontierWinner { id, image_file_id }`,
+  sorted by id.
+- `simple_best_rows(rows)` is the fallback used when no gamertag is set:
+  best clean row per `(track, class, driver, car)`.
+- Dirty rows are NOT filtered on the player side of `clean_frontier_rows`: a
+  dirty player lap sets the overall limit and can win the frontier — which is
+  exactly why `dirty_lap` review cases matter for output.
 
 ## Canonical State
 
@@ -42,16 +62,44 @@ scheduled by an explicit recompute/rebuild flow.
 
 ## Recompute Contract
 
-Best-lap recomputation is explicit. It happens through run finalization,
-rebuild, or a dedicated recompute action. The recompute flow updates
-`lap_records.is_best_lap` and `image_files.best_lap_status` together.
+Best-lap recomputation is explicit and transactional. It happens through run
+finalization, rebuild, or a gamertag-change save:
 
-Review decisions that affect frontier membership or grouping must recompute the
-frontier in the normal GUI Review write path. This includes corrections to
-`dirty`, `gamertag`, `car`, `track`, `weather`, and `race_class`. The GUI Review
-path must not silently leave clean available images as `pending`; if a future
-workflow cannot recompute immediately, it must expose an explicit pending
-recompute state instead of presenting stale status as complete.
+- `forza-db/src/repositories/best_laps.rs::mark_best_laps(conn, gamertag)`
+  recomputes the frontier: it clears all `lap_records.is_best_lap` flags,
+  restricts candidates to each image's latest run (lexicographic max `run_id`),
+  runs `clean_frontier_rows` (or `simple_best_rows` when the gamertag is
+  empty), sets the winners, and updates `image_files.best_lap_status`
+  (`contributing` / `non_contributing`) for every touched image — all inside
+  one `BEGIN IMMEDIATE` / `COMMIT` transaction (`ROLLBACK` on error), so a
+  crash can never leave flags half-cleared.
+- `forza-app/src/services/rebuild.rs::rebuild(conn, gamertag)` is the manual
+  Rebuild path: apply all persisted corrections → `mark_best_laps` →
+  refresh review candidates → sync review flags → refresh run counters.
+- End-of-run derived refresh lives in
+  `forza-app/src/services/extraction_runner.rs`: after `complete_run`, every
+  run calls `rebuild()` so best laps, review cases, and system flags are
+  recomputed without requiring a manual Rebuild.
+
+Review decisions that affect frontier membership or grouping recompute the
+frontier in the normal GUI Review write path: `DecideCase` applies the
+correction via `repositories::corrections::apply_manual_correction` and then
+runs `rebuild()` before the UI reloads Review, Best Laps, and Images. This
+includes corrections to `dirty`, `driver`, `car`, `track`, `weather`, and
+`race_class`. The GUI Review path must not silently leave clean available
+images as `pending`; if a future workflow cannot recompute immediately, it
+must expose an explicit pending recompute state instead of presenting stale
+status as complete.
+
+## Export Contract
+
+Export rows come from `repositories::laps::list_clean_flat`:
+`is_best_lap = 1` rows joined with their image metadata, ordered by track,
+class, driver, and time. The GUI Best Laps page filters those rows in memory
+(`forza-app/src/services/best_laps.rs`: `apply_filters`, `filter_options`,
+`summary`); CSV export (`forza-output/src/csv.rs::export_csv`) and PDF
+rendering (`forza-output/src/pdf.rs::build_pdf_plan_ext` / `render_pdf`) must
+use the currently filtered rows, not the unfiltered database frontier.
 
 ## Gamertag Recompute Contract
 
@@ -65,9 +113,10 @@ The following invariants must hold at all times:
 
 - The gamertag used at recompute time must match the value in the current
   `forza_config.ini` on disk.
-- Write services must not capture the gamertag as a frozen string at
-  construction time. They must resolve it via a live provider callable that
-  reads from the current config object so background config reloads cannot
+- Rust code must not capture the gamertag as a frozen string at
+  construction time. The approved pattern is the worker's live-config rule:
+  read `user.gamertag` from the mutex-guarded `AppConfig` owned by
+  `WorkerContext` at request time, so background config reloads cannot
   silently introduce a stale value.
 - Changing `user.gamertag` in Settings must trigger a best-lap recompute
   before any downstream read of `is_best_lap` or `best_lap_status`. The
@@ -76,13 +125,16 @@ The following invariants must hold at all times:
 
 ### GUI gamertag-change flow
 
-`SettingsController` emits `best_laps_recompute_needed` after a successful
-save that includes `user.gamertag`. `MainWindow` owns the `GuiWriteService`
-used for this recompute and handles the signal:
+The worker thread owns the live configuration
+(`forza-gui/src/worker.rs::WorkerContext.cfg: Mutex<AppConfig>`) and reads
+the gamertag fresh for every request (`gamertag()`), so a background config
+reload can never silently introduce a stale value — there is no frozen
+gamertag string captured at construction time.
 
-1. `GuiWriteService.recompute_best_laps()` runs and commits the updated frontier.
-2. `BestLapsController.reload()` re-reads the updated rows from SQLite.
-
-`BestLapsController` must remain read-only. It must not own a write service or
-trigger the recompute directly. The recompute ownership belongs to the write
-layer; the notification path is the `best_laps_recompute_needed` signal.
+Changing `user.gamertag` in Settings sets `SaveOutcome.gamertag_changed`
+(`forza-config/src/save.rs`); the worker then runs `rebuild()` with the new
+gamertag and reports `gamertag_recomputed` in the `SettingsOutcome`, after
+which the UI reloads Best Laps (plus Review and Images) from the recommitted
+frontier. The Best Laps view itself stays read-only: it lists via
+`Request::ListBestLaps` and filters in memory, and never triggers recomputes
+directly.
