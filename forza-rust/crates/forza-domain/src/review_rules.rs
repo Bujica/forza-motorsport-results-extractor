@@ -3,6 +3,8 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
+use crate::normalizer::track_key as review_track_key;
+
 macro_rules! lazy_regex {
     ($pattern:expr) => {
         LazyLock::new(|| match Regex::new($pattern) {
@@ -49,36 +51,6 @@ pub fn ambiguous_raw_track(track: Option<&str>) -> String {
             .unwrap_or_default(),
         None => String::new(),
     }
-}
-
-fn review_track_key(text: &str) -> String {
-    use unicode_canonical_combining_class::{
-        CanonicalCombiningClass, get_canonical_combining_class as ccc,
-    };
-    use unicode_normalization::UnicodeNormalization;
-    let nfkd: String = text.nfkd().collect();
-    // Full `to_lowercase` like Python's `.lower()` (not ASCII-only): the
-    // downstream filter keeps ASCII alphanumerics either way, but this stays
-    // correct if the filter ever widens to Unicode.
-    let clean: String = nfkd
-        .chars()
-        .filter(|ch| ccc(*ch) == CanonicalCombiningClass::NotReordered)
-        .flat_map(|ch| ch.to_lowercase())
-        .collect();
-    let mut out = String::with_capacity(clean.len());
-    let mut pending_sep = false;
-    for ch in clean.chars() {
-        if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
-            if pending_sep {
-                out.push(' ');
-                pending_sep = false;
-            }
-            out.push(ch);
-        } else {
-            pending_sep = !out.is_empty();
-        }
-    }
-    out
 }
 
 /// Known tracks whose normalized key starts with the ambiguous raw key,

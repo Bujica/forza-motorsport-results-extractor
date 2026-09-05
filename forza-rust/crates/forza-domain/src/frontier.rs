@@ -5,6 +5,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::lap::UNKNOWN_WEATHER;
+
 /// Minimal row projection required by the frontier.
 pub trait FrontierLap {
     fn id(&self) -> &str;
@@ -26,6 +28,11 @@ pub struct FrontierWinner {
 }
 
 /// Simple best clean row per (track, class, driver, car).
+///
+/// Identity keys are intentionally exact-case, mirroring Python
+/// `simple_best_rows` (`key = (track, class, driver, car)`): only the
+/// player-identity comparisons lowercase. Do not "fix" this without a joint
+/// Python+Rust change, or the two frontiers diverge.
 pub fn simple_best_rows<L>(rows: &[L]) -> Vec<&L>
 where
     L: FrontierLap,
@@ -49,7 +56,7 @@ where
 }
 
 fn condition_key(row: &impl FrontierLap) -> String {
-    row.weather().unwrap_or("unknown").to_string()
+    row.weather().unwrap_or(UNKNOWN_WEATHER).to_string()
 }
 
 fn temp_key(row: &impl FrontierLap) -> Option<f64> {

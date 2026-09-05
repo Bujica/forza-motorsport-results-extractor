@@ -38,7 +38,13 @@ pub const TCR_CARS: &[&str] = &[
 static TCR_CAR_SET: LazyLock<HashSet<&'static str>> =
     LazyLock::new(|| TCR_CARS.iter().copied().collect());
 
-static DIRTY_TRAILING: LazyLock<Regex> = lazy_regex!(r"\s*[▲⚠!△]+\s*$");
+/// Canonical label for unrecognized/missing weather. Shared with
+/// `frontier::condition_key` so grouping and correction agree (ordering keys
+/// intentionally keep `""` for missing weather — Python parity, pinned by
+/// `ordering_keys_match_python`).
+pub const UNKNOWN_WEATHER: &str = "unknown";
+
+static DIRTY_TRAILING: LazyLock<Regex> = lazy_regex!(r"\s*[▲⚠!△†]+\s*$");
 
 static VARIATION_SELECTORS: LazyLock<Regex> = lazy_regex!("[\u{FE00}-\u{FE0F}]");
 
@@ -187,7 +193,7 @@ pub fn normalize_weather(value: Option<&str>) -> &'static str {
     match text.as_str() {
         "rain" | "wet" | "chuva" | "molhado" | "raining" => "rain",
         "dry" | "seco" | "clear" | "sunny" => "dry",
-        _ => "unknown",
+        _ => UNKNOWN_WEATHER,
     }
 }
 
@@ -274,4 +280,25 @@ pub fn detect_race_class(raw_entries: &[RawGridEntry]) -> String {
         .into_iter()
         .next()
         .unwrap_or_else(|| "Unknown".to_string())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dagger_is_a_dirty_symbol_like_config_default() {
+        // `dirty_lap_symbol` defaults to † (U+2020) in both Python and Rust
+        // configs, and exports write it: parsing must round-trip it.
+        assert!(is_dirty_lap(Some("1:32.500 †")));
+        assert_eq!(strip_dirty_symbol("1:32.500 †"), "1:32.500");
+        assert_eq!(parse_lap_time_ms(Some("1:32.500 †")), Some(92_500));
+    }
+
+    #[test]
+    fn unknown_weather_has_one_shared_spelling() {
+        assert_eq!(normalize_weather(None), UNKNOWN_WEATHER);
+        assert_eq!(normalize_weather(Some("storm")), UNKNOWN_WEATHER);
+    }
 }

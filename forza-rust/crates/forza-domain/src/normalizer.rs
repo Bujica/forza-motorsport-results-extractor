@@ -58,7 +58,10 @@ fn normalize(text: &str, spaces: bool) -> String {
     text_utils::normalize_ascii_compare(text, spaces)
 }
 
-fn track_key(text: &str) -> String {
+/// Punctuation-insensitive track key: NFKD-strip + lowercase + keep only
+/// ASCII alphanumerics, collapsing separators to single spaces.
+/// Shared with `review_rules` suggestions so both rank the same way.
+pub(crate) fn track_key(text: &str) -> String {
     let norm = normalize(text, true);
     let mut out = String::with_capacity(norm.len());
     let mut pending_sep = false;
