@@ -61,9 +61,9 @@ data/forza.sqlite3-wal
 # Rust migration fixtures: personal/large artifacts stay out of Git (see forza-rust/fixtures/README.md)
 forza-rust/fixtures/images/
 forza-rust/fixtures/model_responses/
-forza-rust/fixtures/python_outputs/best_laps.csv
-forza-rust/fixtures/python_outputs/best_laps.pdf
-forza-rust/fixtures/python_outputs/artifacts/
+# Local run outputs/telemetry have no place in the public tree (nothing reads
+# them; schema baseline is frozen in code, catalog compiled from assets/).
+forza-rust/fixtures/python_outputs/*
 forza-rust/target/
 /forza-rust/docs/migration
 

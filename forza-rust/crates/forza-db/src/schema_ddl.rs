@@ -1,8 +1,10 @@
-//! Generated DDL for the Rust port — DO NOT EDIT BY HAND.
+//! Frozen DDL for the Rust port — DO NOT EDIT BY HAND.
 //!
-//! Source of truth: `fixtures/python_outputs/schema_inventory.json`,
-//! captured from a real 0.21.0-beta.1 SQLite database.
-//! Regenerate with: `py -3.11 tools/generate_db_schema.py`
+//! Originally generated from the 0.21.0-beta.1 SQLite baseline; the retired
+//! generator (`tools/generate_db_schema.py`) and its inventory snapshot were
+//! removed from the public tree after the migration. The `frozen_schema_*`
+//! doctor checks enforce this baseline at runtime, so this file plus those
+//! checks are the source of truth now.
 
 /// CREATE TABLE statements in dependency order (parents first).
 pub const TABLE_DDL: &[&str] = &[

@@ -13,18 +13,15 @@ Python 0.21.0-beta.1 baseline database.
 
 | Path | Content |
 | --- | --- |
-| `python_outputs/schema_inventory.json` | Tables, columns, indexes (with partial `WHERE` clauses), foreign keys with `ON DELETE` actions, check constraints, triggers — extracted from SQLite. |
-| `python_outputs/counts.json` | Row counts per table of the baseline database. |
-| `python_outputs/reference_data.json` | Reference tracks and cars catalog rows. |
-| `python_outputs/runs_performance_summary.json` | Per-run status/performance fields plus attempt aggregates (TPS, parse errors). No driver names. |
+| `expected/` | Small sanitized expectations used by Rust unit tests (only synthetic or anonymized values). |
 | `README.md` | This file. |
 
-Regeneration: the one-shot exporter (`tools/export_rust_baseline.py`,
-retired after the migration — see git history, e.g. commit `e454fdc`) is no
-longer part of the public baseline. Fixtures are stable; if regeneration is
-ever needed again, restore the script from history into a private checkout
-(it must not return to `tools/`, which the open-source readiness gate keeps
-release-build-only).
+The migration-era `python_outputs/*.json` snapshots (schema inventory, counts,
+reference catalog, run telemetry) were retired: nothing reads them (the schema
+baseline lives frozen in `crates/forza-db/src/schema_ddl.rs` plus the
+`frozen_schema_*` doctor checks; the reference catalog is compiled from
+`forza-rust/assets/`), and local run telemetry has no place in a public repo.
+See git history if they are ever needed again.
 
 ## Kept out of Git (personal or large)
 
