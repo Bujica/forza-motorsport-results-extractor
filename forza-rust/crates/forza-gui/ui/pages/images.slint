@@ -213,6 +213,17 @@ export component ImagesPage inherits Rectangle {
                             for item[index] in root.images: TouchArea {
                                 height: Theme.row-h;
                                 width: lv.width;
+                                // Drag extension lives here (not in
+                                // pointer-event): Slint delivers moves to the
+                                // `moved` callback, and the pressed area
+                                // grabs the mouse, so moves keep flowing with
+                                // coordinates relative to the anchor row.
+                                moved => {
+                                    if root.drag-active {
+                                        root.drag-last = root.drag-target(root.drag-anchor, self.mouse-y);
+                                        root.selection-drag(root.drag-anchor, root.drag-last);
+                                    }
+                                }
                                 pointer-event(event) => {
                                     if event.kind == PointerEventKind.down
                                         && event.button == PointerEventButton.left
@@ -222,14 +233,6 @@ export component ImagesPage inherits Rectangle {
                                         root.drag-anchor = index;
                                         root.drag-last = index;
                                         root.drag-active = true;
-                                    } else if event.kind == PointerEventKind.move && root.drag-active {
-                                        // The pressed area grabs the mouse, so
-                                        // moves keep flowing here with
-                                        // coordinates relative to the anchor.
-                                        // NOTE: self.mouse-y must be read on
-                                        // the TouchArea, not root.
-                                        root.drag-last = root.drag-target(root.drag-anchor, self.mouse-y);
-                                        root.selection-drag(root.drag-anchor, root.drag-last);
                                     } else if event.kind == PointerEventKind.up {
                                         if root.drag-active {
                                             root.drag-active = false;

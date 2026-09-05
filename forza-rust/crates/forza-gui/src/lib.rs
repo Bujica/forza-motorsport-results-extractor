@@ -1497,10 +1497,13 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             let (ids, anchor) = ROW_CACHE.with(|rows| {
                 let rows = rows.borrow();
                 let anchor = SELECTION_ANCHOR.with(|slot| *slot.borrow());
+                // Both directions include the target row: down is
+                // [anchor, end], up is [end, anchor]. (The old up-branch
+                // started at end+1 and silently dropped the clicked row.)
                 let (lo, hi) = if anchor <= end as usize {
                     (anchor, end as usize + 1)
                 } else {
-                    (end as usize + 1, anchor + 1)
+                    (end as usize, anchor + 1)
                 };
                 let ids: Vec<String> = rows
                     .get(lo..hi.min(rows.len()))
@@ -1532,10 +1535,12 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                 let anchor = (anchor.max(0) as usize).min(max_idx);
                 let target = (target.max(0) as usize).min(max_idx);
                 SELECTION_ANCHOR.with(|slot| *slot.borrow_mut() = anchor);
+                // Same off-by-one rule as Shift+click: the target row is
+                // always included, in both directions.
                 let (lo, hi) = if anchor <= target {
                     (anchor, target + 1)
                 } else {
-                    (target + 1, anchor + 1)
+                    (target, anchor + 1)
                 };
                 rows.get(lo..hi.min(rows.len()))
                     .map(|slice| slice.iter().map(|e| e.id.clone()).collect())
