@@ -588,6 +588,9 @@ pub fn handle_request(
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .to_path_buf();
+            // The folder may not exist yet (fresh install, no run logged):
+            // create it so the OS dialog never reports "cannot find".
+            std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
             opener::open(&folder).map_err(|e| e.to_string())?;
             Ok(format!("opened {}", folder.display()))
         })()),

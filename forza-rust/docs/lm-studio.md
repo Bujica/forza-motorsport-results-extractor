@@ -35,6 +35,17 @@ reuses a compatible loaded instance (context length satisfied,
 POSTs `/models/load`. `PerformancePolicy` defaults: 20.0 tok/s floor, 45 s
 elapsed, streak 3.
 
+## Overview snapshot (`runtime_status`)
+
+Diagnostics Overview uses the real `RuntimeClient::runtime_status` (Python
+parity), not a TCP ping: matched model display name, effective load line
+(`ctx · eval · phys · flash · kv · parallel · experts`, with `(want …)`
+mismatches), capabilities line (`vision · tool_use · reasoning=… allowed…`),
+model info line (publisher through `max ctx`), and warnings. `parallel` /
+`num_experts` are parsed for display only; compat checks are unchanged.
+`build_overview_snapshot` (`forza-app`) drives it on a throwaway
+current-thread runtime (sync worker threads only).
+
 ## Evidence
 
 Every attempt persists encoded-image dimensions, runtime snapshot id,

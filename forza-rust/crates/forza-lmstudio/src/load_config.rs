@@ -22,6 +22,8 @@ fn aliases(key: &str) -> &'static [&'static str] {
         "context_length" => &["context_length", "contextLength", "n_ctx", "nCtx"],
         "eval_batch_size" => &["eval_batch_size", "evalBatchSize"],
         "physical_batch_size" => &["physical_batch_size", "physicalBatchSize"],
+        "parallel" => &["parallel"],
+        "num_experts" => &["num_experts", "numExperts"],
         "flash_attention" => &["flash_attention", "flashAttention"],
         "offload_kv_cache_to_gpu" => &[
             "offload_kv_cache_to_gpu",
@@ -64,11 +66,15 @@ fn bool_or_none(value: Option<&Value>) -> Option<bool> {
 }
 
 /// Normalized view of an instance config with alias resolution applied.
+/// `parallel`/`num_experts` are display-only (runtime summary); compat checks
+/// stay on the original four fields so mismatch warnings don't change.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct NormalizedLoadConfig {
     pub context_length: Option<i64>,
     pub eval_batch_size: Option<i64>,
     pub physical_batch_size: Option<i64>,
+    pub parallel: Option<i64>,
+    pub num_experts: Option<i64>,
     pub flash_attention: Option<bool>,
     pub offload_kv_cache_to_gpu: Option<bool>,
 }
@@ -78,6 +84,8 @@ pub fn normalized_load_config(config: &Value) -> NormalizedLoadConfig {
         context_length: int_or_none(value(config, "context_length")),
         eval_batch_size: int_or_none(value(config, "eval_batch_size")),
         physical_batch_size: int_or_none(value(config, "physical_batch_size")),
+        parallel: int_or_none(value(config, "parallel")),
+        num_experts: int_or_none(value(config, "num_experts")),
         flash_attention: bool_or_none(value(config, "flash_attention")),
         offload_kv_cache_to_gpu: bool_or_none(value(config, "offload_kv_cache_to_gpu")),
     }

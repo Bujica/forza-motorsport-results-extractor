@@ -40,6 +40,11 @@ images (inventory + detail) · process (run controls, progress, log) · review
   save/discard invalidate in-flight previews.
 - Window geometry persists (DPI-aware); off-screen restores are rejected;
   maximized geometry is not saved as position.
+- Selection uses strong-blue row tints (`Theme.selection-bg` focused,
+  `Theme.row-selected` multi) so selected rows read clearly on light cards.
+- Logs tab reads `cfg.log_file` (+ `<stem>_errors` sibling); a missing
+  errors file renders "No errors recorded yet.". "Open folder" creates the
+  folder first. The duplicate "Open full page" shortcut was removed.
 
 ## Debug views
 

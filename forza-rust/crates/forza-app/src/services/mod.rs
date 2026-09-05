@@ -12,8 +12,6 @@ pub mod run_control;
 pub mod run_log;
 pub mod settings;
 
-use std::net::ToSocketAddrs;
-
 use rusqlite::Connection;
 
 pub use extraction_replay::{ReplayOutcome, replay_recorded_response};
@@ -320,117 +318,6 @@ pub struct OverviewSnapshot {
     pub review_open: i64,
 }
 
-fn api_base(url: &str) -> String {
-    let clean = url.trim_end_matches('/');
-    if let Some(idx) = clean.find("/api/v1/") {
-        return format!("{}/api/v1", &clean[..idx]);
-    }
-    if clean.ends_with("/api/v1") {
-        return clean.to_string();
-    }
-    if let Some(idx) = clean.find("/v1/") {
-        return format!("{}/api/v1", &clean[..idx]);
-    }
-    clean.to_string()
-}
-
-fn lm_ping_blocking(url: &str) -> (bool, String, String) {
-    // Manual TCP ping to avoid blocking the Tokio runtime with reqwest::blocking.
-    // Parses the URL's host/port and performs a 1s HTTP GET to /api/v1/models.
-    let endpoint = format!("{}/models", api_base(url));
-    // Extract host/port from endpoint
-    let host_port = endpoint
-        .strip_prefix("http://")
-        .or_else(|| endpoint.strip_prefix("https://"))
-        .unwrap_or(&endpoint)
-        .split('/')
-        .next()
-        .unwrap_or("");
-    let (host, port) = if let Some((h, p)) = host_port.split_once(':') {
-        (h, p.parse::<u16>().unwrap_or(80))
-    } else {
-        (host_port, 80)
-    };
-    if host.is_empty() {
-        return (
-            false,
-            "error".to_string(),
-            "invalid LM Studio URL".to_string(),
-        );
-    }
-    let addr_str = format!("{host}:{port}");
-    let addrs: Vec<std::net::SocketAddr> = match addr_str.to_socket_addrs() {
-        Ok(v) => v.collect(),
-        Err(e) => return (false, "error".to_string(), format!("dns failed: {e}")),
-    };
-    let Some(addr) = addrs.into_iter().next() else {
-        return (false, "error".to_string(), "no address".to_string());
-    };
-    let mut stream =
-        match std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(1)) {
-            Ok(s) => s,
-            Err(e) => return (false, "error".to_string(), format!("unreachable: {e}")),
-        };
-    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(1)));
-    let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(1)));
-    let path = endpoint
-        .splitn(4, '/')
-        .nth(3)
-        .map(|p| format!("/{p}"))
-        .unwrap_or_else(|| "/api/v1/models".to_string());
-    let req = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
-    if std::io::Write::write_all(&mut stream, req.as_bytes()).is_err() {
-        return (false, "error".to_string(), "write failed".to_string());
-    }
-    let mut resp = String::new();
-    let mut buf = [0u8; 4096];
-    loop {
-        match std::io::Read::read(&mut stream, &mut buf) {
-            Ok(0) => break,
-            Ok(n) => resp.push_str(&String::from_utf8_lossy(&buf[..n])),
-            Err(e)
-                if e.kind() == std::io::ErrorKind::WouldBlock
-                    || e.kind() == std::io::ErrorKind::TimedOut =>
-            {
-                break;
-            }
-            Err(_) => break,
-        }
-        if resp.len() > 8192 {
-            break;
-        }
-    }
-    let status_ok = resp.starts_with("HTTP/1.1 200") || resp.starts_with("HTTP/1.0 200");
-    if !status_ok {
-        let status_line = resp.lines().next().unwrap_or("no response");
-        return (false, "error".to_string(), format!("HTTP {status_line}"));
-    }
-    // Try to count models from JSON body (after blank line)
-    let body = resp.split("\r\n\r\n").nth(1).unwrap_or("");
-    let count = serde_json::from_str::<serde_json::Value>(body)
-        .ok()
-        .map(|v| match &v {
-            serde_json::Value::Array(a) => a.len(),
-            serde_json::Value::Object(m) => m
-                .get("data")
-                .and_then(|d| d.as_array())
-                .map(|a| a.len())
-                .unwrap_or_else(|| {
-                    m.get("models")
-                        .and_then(|d| d.as_array())
-                        .map(|a| a.len())
-                        .unwrap_or(0)
-                }),
-            _ => 0,
-        })
-        .unwrap_or(0);
-    (
-        true,
-        "ok".to_string(),
-        format!("{} model(s) available", count),
-    )
-}
-
 pub fn build_overview_snapshot(
     conn: &rusqlite::Connection,
     cfg: &forza_config::AppConfig,
@@ -438,7 +325,80 @@ pub fn build_overview_snapshot(
     let fast = fast_db_report_from_conn(conn);
     let lm_endpoint = cfg.llm.url.clone();
     let lm_model = cfg.llm.model.clone();
-    let (lm_ok, lm_level, lm_message) = lm_ping_blocking(&cfg.llm.url);
+    // Real runtime status (Python `runtime_status` parity): model list,
+    // configured-model match, effective load config, capabilities, model
+    // info, warnings. Runs on a throwaway current-thread runtime — this
+    // function is only called from sync worker threads, never async code.
+    let desired = forza_lmstudio::load_config::DesiredLoadConfig {
+        context_length: cfg.llm.context_length.unwrap_or(5000),
+        eval_batch_size: cfg.llm.eval_batch_size,
+        physical_batch_size: cfg.llm.physical_batch_size,
+        flash_attention: cfg.llm.flash_attention,
+        offload_kv_cache_to_gpu: cfg.llm.offload_kv_cache_to_gpu,
+    };
+    let lm_status = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())
+        .and_then(|rt| {
+            rt.block_on(async {
+                let client = forza_lmstudio::client::RuntimeClient::new(
+                    &cfg.llm.url,
+                    cfg.llm.timeout_connect.max(1) as u64,
+                );
+                client
+                    .runtime_status(&cfg.llm.model, &desired, cfg.llm.reasoning_mode.as_deref())
+                    .await
+                    .map_err(|e| e.to_string())
+            })
+        });
+    let (lm_ok, lm_level, lm_message, lm_loaded_instance, lm_loaded_runtime) = match &lm_status {
+        Ok(diag) => (
+            diag.ok,
+            diag.level.clone(),
+            diag.message.clone(),
+            if diag.loaded {
+                if diag.instance_id.is_empty() {
+                    "loaded".to_string()
+                } else {
+                    diag.instance_id.clone()
+                }
+            } else {
+                "not loaded".to_string()
+            },
+            diag.runtime_config_summary.clone(),
+        ),
+        Err(message) => (
+            false,
+            "error".to_string(),
+            message.clone(),
+            "Not checked".to_string(),
+            "—".to_string(),
+        ),
+    };
+    let (lm_capabilities, lm_model_info, lm_warnings, lm_model) = match &lm_status {
+        Ok(diag) => (
+            diag.capabilities_summary.clone(),
+            diag.model_info_summary.clone(),
+            if diag.warnings.is_empty() {
+                "None".to_string()
+            } else {
+                diag.warnings.join("; ")
+            },
+            // Python shows the matched display name next to the id.
+            if !diag.matched_display.is_empty() && diag.matched_display != lm_model {
+                format!("{lm_model} -> {}", diag.matched_display)
+            } else {
+                lm_model.clone()
+            },
+        ),
+        Err(message) => (
+            "—".to_string(),
+            "—".to_string(),
+            message.clone(),
+            lm_model.clone(),
+        ),
+    };
     // Config-derived summaries (mirror Python _configured_*_line)
     let lm_configured_load = format!(
         "ctx {} · eval {} · phys {} · flash {} · kv {}",
@@ -501,23 +461,15 @@ pub fn build_overview_snapshot(
     OverviewSnapshot {
         lm_endpoint,
         lm_model: lm_model.clone(),
-        lm_loaded_instance: if lm_ok {
-            "checked".to_string()
-        } else {
-            "Not checked".to_string()
-        },
+        lm_loaded_instance,
         lm_configured_load,
         lm_configured_request,
         lm_configured_image,
         lm_runtime_policy,
-        lm_loaded_runtime: "—".to_string(),
-        lm_capabilities: "—".to_string(),
-        lm_model_info: "—".to_string(),
-        lm_warnings: if lm_ok {
-            "None".to_string()
-        } else {
-            lm_message.clone()
-        },
+        lm_loaded_runtime,
+        lm_capabilities,
+        lm_model_info,
+        lm_warnings,
         lm_level,
         lm_message,
         lm_ok,

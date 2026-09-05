@@ -254,7 +254,6 @@ export component DiagnosticsPage inherits Rectangle {
                 ComboBox { model: ["app","errors"]; current-value: root.logs-tab; min-width: 130px; height: 28px; selected(v) => { root.logs-tab = v; } }
                 LineEdit { placeholder-text: "Search…"; text <=> root.logs-search; horizontal-stretch: 1; edited(v) => { root.logs-search-changed(v); } }
                 Text { text: root.logs-status; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                Button { text: "Open full page"; clicked => { root.page-change-requested("logs"); } }
             }
             Card {
                 vertical-stretch: 1;

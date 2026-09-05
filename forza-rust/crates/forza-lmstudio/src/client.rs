@@ -54,6 +54,15 @@ pub struct RuntimeDiagnostic {
     pub loaded_instances: usize,
     pub instance_id: String,
     pub warnings: Vec<String>,
+    /// `"ctx … · eval … · …"` desired-vs-effective line (Python
+    /// `_runtime_config_summary` parity).
+    pub runtime_config_summary: String,
+    /// `"vision=… · tool_use=… · reasoning=…"` line.
+    pub capabilities_summary: String,
+    /// `"publisher · arch · format · params · quant · size · max ctx …"` line.
+    pub model_info_summary: String,
+    /// Display name of the matched model (`"id -> Display"` overview line).
+    pub matched_display: String,
 }
 
 fn api_base(url: &str) -> String {
@@ -226,6 +235,10 @@ impl RuntimeClient {
         let models = self.list_models().await?;
         let Some(model) = self.find_model(&models, configured_model) else {
             return Ok(RuntimeDiagnostic {
+                runtime_config_summary: "No loaded runtime config".into(),
+                capabilities_summary: String::new(),
+                model_info_summary: String::new(),
+                matched_display: String::new(),
                 level: "error".into(),
                 ok: false,
                 message: format!("Configured model not found ({configured_model})"),
@@ -347,6 +360,214 @@ impl RuntimeClient {
             loaded_instances: model.loaded_instances.len(),
             instance_id,
             warnings,
+            runtime_config_summary: runtime_config_summary(desired, &effective),
+            capabilities_summary: capabilities_summary(&model.capabilities, reasoning_mode),
+            model_info_summary: model_info_summary(model),
+            matched_display: model.display_name.clone(),
         })
+    }
+}
+
+fn display_bool(value: Option<bool>) -> &'static str {
+    match value {
+        None => "unknown",
+        Some(true) => "yes",
+        Some(false) => "no",
+    }
+}
+
+/// Desired-vs-effective load line (Python `_runtime_config_summary` parity).
+pub fn runtime_config_summary(
+    desired: &DesiredLoadConfig,
+    effective: &NormalizedLoadConfig,
+) -> String {
+    let int_text = |v: Option<i64>| v.map(|n| n.to_string());
+    // Python `str(bool)` spells `True`/`False`.
+    let bool_text = |v: Option<bool>| {
+        v.map(|b| {
+            if b {
+                "True".to_string()
+            } else {
+                "False".to_string()
+            }
+        })
+    };
+    let rows: [(&str, Option<String>, Option<String>); 7] = [
+        (
+            "ctx",
+            Some(desired.context_length.to_string()),
+            int_text(effective.context_length),
+        ),
+        (
+            "eval",
+            desired.eval_batch_size.map(|v| v.to_string()),
+            int_text(effective.eval_batch_size),
+        ),
+        (
+            "phys",
+            desired.physical_batch_size.map(|v| v.to_string()),
+            int_text(effective.physical_batch_size),
+        ),
+        (
+            "flash",
+            bool_text(Some(desired.flash_attention)),
+            bool_text(effective.flash_attention),
+        ),
+        (
+            "kv",
+            bool_text(Some(desired.offload_kv_cache_to_gpu)),
+            bool_text(effective.offload_kv_cache_to_gpu),
+        ),
+        ("parallel", None, int_text(effective.parallel)),
+        ("experts", None, int_text(effective.num_experts)),
+    ];
+    let mut parts = Vec::new();
+    for (label, wanted, loaded) in rows {
+        if loaded.is_none() && wanted.is_none() {
+            continue;
+        }
+        match (wanted, loaded) {
+            (Some(w), Some(l)) if l != w => parts.push(format!("{label} {l} (want {w})")),
+            (w, l) => parts.push(format!("{label} {}", l.or(w).unwrap_or_default())),
+        }
+    }
+    if parts.is_empty() {
+        return "No loaded runtime config".into();
+    }
+    parts.join(" · ")
+}
+
+fn format_size(value: Option<i64>) -> String {
+    match value {
+        None => String::new(),
+        Some(bytes) => format!("{:.1} GiB", bytes as f64 / 1_073_741_824.0),
+    }
+}
+
+/// `"publisher · arch · format · params · quant · size · max ctx …"` line
+/// (Python `_model_info_summary` parity).
+pub fn model_info_summary(model: &RuntimeModel) -> String {
+    let mut parts = vec![
+        model.publisher.clone(),
+        model.architecture.clone(),
+        model.format.clone(),
+        model.params_string.clone(),
+        model.quantization.clone(),
+        format_size(model.size_bytes),
+    ];
+    if let Some(max_ctx) = model.max_context_length {
+        parts.push(format!("max ctx {max_ctx}"));
+    }
+    if !model.selected_variant.is_empty() {
+        parts.push(format!("variant {}", model.selected_variant));
+    }
+    let joined = parts
+        .into_iter()
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    if joined.is_empty() {
+        model.id.clone()
+    } else {
+        joined
+    }
+}
+
+fn reasoning_options(capabilities: &Value) -> Vec<String> {
+    capabilities
+        .get("reasoning")
+        .and_then(|r| r.as_object())
+        .and_then(|map| map.get("allowed_options").or_else(|| map.get("allowed")))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `"vision=… · tool_use=… · reasoning=…"` line (Python
+/// `_capabilities_summary` parity).
+pub fn capabilities_summary(capabilities: &Value, reasoning_mode: Option<&str>) -> String {
+    let vision = capabilities.get("vision").and_then(Value::as_bool);
+    let tool_use = capabilities
+        .get("trained_for_tool_use")
+        .and_then(Value::as_bool);
+    let mut parts = vec![
+        format!("vision={}", display_bool(vision)),
+        format!("tool_use={}", display_bool(tool_use)),
+    ];
+    let options = reasoning_options(capabilities);
+    if !options.is_empty() {
+        parts.push(format!(
+            "reasoning={} allowed[{}]",
+            reasoning_mode.unwrap_or("-"),
+            options.join(", ")
+        ));
+    } else if let Some(default) = capabilities
+        .get("reasoning")
+        .and_then(|r| r.as_object())
+        .and_then(|map| map.get("default"))
+        .and_then(Value::as_str)
+    {
+        parts.push(format!("reasoning default={default}"));
+    }
+    parts.join(" · ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn summaries_match_python_format() {
+        let desired = DesiredLoadConfig {
+            context_length: 5120,
+            eval_batch_size: Some(2048),
+            physical_batch_size: None,
+            flash_attention: true,
+            offload_kv_cache_to_gpu: true,
+        };
+        let effective = normalized_load_config(&json!({
+            "context_length": 262144,
+            "eval_batch_size": 2048,
+            "physical_batch_size": 512,
+            "parallel": 4,
+            "num_experts": 12,
+            "flash_attention": true,
+            "offload_kv_cache_to_gpu": true,
+        }));
+        assert_eq!(
+            runtime_config_summary(&desired, &effective),
+            "ctx 262144 (want 5120) \u{b7} eval 2048 \u{b7} phys 512 \u{b7} flash True \u{b7} kv True \u{b7} parallel 4 \u{b7} experts 12"
+        );
+        let caps = json!({
+            "vision": true,
+            "trained_for_tool_use": true,
+            "reasoning": {"allowed_options": ["off", "on"]},
+        });
+        assert_eq!(
+            capabilities_summary(&caps, Some("off")),
+            "vision=yes \u{b7} tool_use=yes \u{b7} reasoning=off allowed[off, on]"
+        );
+        let model = RuntimeModel {
+            id: "qwen3.6-35b-a3b".into(),
+            publisher: "unsloth".into(),
+            architecture: "qwen35moe".into(),
+            format: "gguf".into(),
+            params_string: "35B-A3B".into(),
+            quantization: "Q2_K_XL".into(),
+            size_bytes: Some(14_072_174_592),
+            max_context_length: Some(262144),
+            ..Default::default()
+        };
+        assert_eq!(
+            model_info_summary(&model),
+            "unsloth \u{b7} qwen35moe \u{b7} gguf \u{b7} 35B-A3B \u{b7} Q2_K_XL \u{b7} 13.1 GiB \u{b7} max ctx 262144"
+        );
     }
 }
