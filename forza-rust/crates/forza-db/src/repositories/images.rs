@@ -15,12 +15,17 @@ pub fn known_path_hashes(conn: &Connection) -> Result<HashMap<String, String>, D
                          AND r.status IN ('ok', 'error'))",
     )?;
     let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        Ok((
+            row.get::<_, Option<String>>(0)?,
+            row.get::<_, String>(1)?,
+        ))
     })?;
     let mut out = HashMap::new();
     for item in rows {
         let (path, hash) = item?;
-        out.insert(path, hash);
+        if let Some(path) = path {
+            out.insert(path, hash);
+        }
     }
     Ok(out)
 }
@@ -62,9 +67,19 @@ pub fn list_failed_images_for_retry(conn: &Connection) -> Result<Vec<(String, St
          ORDER BY i.current_name, i.id",
     )?;
     let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        Ok((
+            row.get::<_, Option<String>>(0)?,
+            row.get::<_, String>(1)?,
+        ))
     })?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+    let mut out = Vec::new();
+    for item in rows {
+        let (path, hash) = item?;
+        if let Some(path) = path {
+            out.push((path, hash));
+        }
+    }
+    Ok(out)
 }
 
 pub struct ImageFileInsert<'a> {
@@ -234,10 +249,30 @@ pub fn upsert_image_file(
     if let Some(existing) = existing {
         let path_exists = !resolved_path.is_empty() && std::fs::metadata(&resolved_path).is_ok();
         let file_status = if path_exists { "available" } else { "missing" };
+        // Only overwrite the stored name when the caller actually supplied
+        // name material (explicit name, file_name, or a path basename).
+        // Otherwise preserve the existing `current_name` (COALESCE NULL).
+        let has_name_source = params.current_name.is_some()
+            || params.file_name.is_some()
+            || params
+                .current_path
+                .or(params.path)
+                .is_some_and(|p| !p.is_empty());
+        let current_name_opt: Option<&str> = if has_name_source {
+            Some(resolved_name.as_str())
+        } else {
+            None
+        };
+        let current_path_opt: Option<&str> = if resolved_path.is_empty() {
+            None
+        } else {
+            Some(resolved_path.as_str())
+        };
 
         let mut stmt = conn.prepare(
             "UPDATE image_files SET
-                current_name=COALESCE(?2, current_name),
+                current_name=COALESCE(?1, current_name),
+                current_path=COALESCE(?2, current_path),
                 semantic_name=COALESCE(?3, semantic_name),
                 best_lap_status=COALESCE(?4, best_lap_status),
                 size_bytes=COALESCE(?5, size_bytes),
@@ -261,7 +296,8 @@ pub fn upsert_image_file(
         )?;
 
         stmt.execute(params![
-            resolved_name.as_str(),
+            current_name_opt,
+            current_path_opt,
             params.semantic_name,
             params.best_lap_status,
             params.metadata_size_bytes,
@@ -292,18 +328,24 @@ pub fn upsert_image_file(
             Ok(ImageFileEntity {
                 id: row.get(0)?,
                 file_hash: row.get(1)?,
-                current_path: row.get(2)?,
-                current_name: row.get(3)?,
-                semantic_name: row.get(4)?,
+                current_path: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                current_name: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                semantic_name: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
                 file_status: row.get(5)?,
                 best_lap_status: row.get(6)?,
                 duplicate_of_image_file_id: row.get(7)?,
                 size_bytes: row.get(8)?,
                 image_format: row.get(9)?,
                 mime_type: row.get(10)?,
-                width_px: row.get::<_, i64>(11)?.try_into().ok(),
-                height_px: row.get::<_, i64>(12)?.try_into().ok(),
-                bit_depth: row.get::<_, i32>(13)?.try_into().ok(),
+                width_px: row
+                    .get::<_, Option<i64>>(11)?
+                    .and_then(|v| v.try_into().ok()),
+                height_px: row
+                    .get::<_, Option<i64>>(12)?
+                    .and_then(|v| v.try_into().ok()),
+                bit_depth: row
+                    .get::<_, Option<i32>>(13)?
+                    .and_then(|v| v.try_into().ok()),
                 color_mode: row.get(14)?,
             })
         })?;

@@ -6,8 +6,11 @@ use sha2::{Digest, Sha256};
 /// Python-compatible canonical JSON:
 /// `json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))`.
 ///
-/// serde_json's default object map is a `BTreeMap`, so nested keys serialize
-/// in sorted order exactly like `sort_keys=True`.
+/// Object keys are sorted explicitly (byte-lexicographic, matching Python's
+/// string ordering for the ASCII keys used in evidence payloads) instead of
+/// relying on `serde_json::Map` iteration order, which is sorted only for the
+/// default `BTreeMap` backend and becomes insertion-ordered when any workspace
+/// member enables serde_json's `preserve_order` feature.
 pub fn python_json_dumps(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::Null => "null".to_string(),
@@ -19,7 +22,9 @@ pub fn python_json_dumps(value: &serde_json::Value) -> String {
             format!("[{}]", parts.join(","))
         }
         serde_json::Value::Object(map) => {
-            let parts: Vec<String> = map
+            let mut entries: Vec<(&String, &serde_json::Value)> = map.iter().collect();
+            entries.sort_by(|a, b| a.0.cmp(b.0));
+            let parts: Vec<String> = entries
                 .iter()
                 .map(|(k, v)| format!("{}:{}", python_json_string(k), python_json_dumps(v)))
                 .collect();
@@ -124,8 +129,9 @@ pub fn canonical_request_hash(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
-    use super::canonical_request_hash;
+    use super::{canonical_request_hash, python_json_dumps};
 
     // Golden value generated with Python:
     // json.dumps(canonical, ensure_ascii=True, sort_keys=True,
@@ -148,5 +154,20 @@ mod tests {
             got,
             "c32760b55db2e032aea8f379825a129a4f55d145e38771ff3985a87dae83b363"
         );
+    }
+
+    #[test]
+    fn dumps_sorts_nested_keys_regardless_of_insertion_order() {
+        // Insertion order is b,a at both levels; output must be sorted.
+        let value: serde_json::Value =
+            serde_json::from_str(r#"{"b":1,"a":{"d":4,"c":3}}"#).unwrap();
+        assert_eq!(python_json_dumps(&value), r#"{"a":{"c":3,"d":4},"b":1}"#);
+    }
+
+    #[test]
+    fn dumps_escapes_astral_as_surrogate_pair() {
+        // U+1F600 must be \ud83d\ude00 like Python ensure_ascii, not \u1f600.
+        let value = serde_json::Value::String("😀".to_string());
+        assert_eq!(python_json_dumps(&value), r#""\ud83d\ude00""#);
     }
 }
