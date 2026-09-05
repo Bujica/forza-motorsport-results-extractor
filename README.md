@@ -5,6 +5,10 @@ Forza Motorsport Results Extractor is a Windows desktop tool for extracting lap-
 
 Status: public beta. The current release target is `0.21.0-beta.1`.
 
+Implementation: Rust (`forza-rust/` workspace — `forza.exe` CLI + `forza-gui`
+desktop app) is the current product code. The Python implementation (`forza/`)
+is frozen at the 0.21.0-beta.1 baseline and kept for reference only.
+
 ## Target and support scope
 
 - Game: Forza Motorsport, 2023 release.
@@ -50,24 +54,33 @@ See [README_BETA.md](README_BETA.md) for tester setup instructions.
 
 ## Source install
 
-From a source checkout:
+From a source checkout (Rust toolchain required):
 
 ```cmd
-pip install -e ".[dev,gui]"
-python -m forza maintenance db-upgrade
-python -m forza maintenance db-doctor --json
-python -m forza gui
+cd forza-rust
+cargo build -p forza-cli -p forza-gui
+.\target\debug\forza.exe maintenance db-upgrade
+.\target\debug\forza.exe maintenance db-doctor
+.\target\debug\forza-gui.exe
 ```
 
 Normal CLI processing is still available for operational use:
 
 ```cmd
-python -m forza --help
-python -m forza --version
-python -m forza run --limit 5
+.\target\debug\forza.exe --help
+.\target\debug\forza.exe --version
+.\target\debug\forza.exe run --limit 5
 ```
 
 The GUI is the primary product surface. The CLI is retained for operational commands such as database setup, validation, and controlled processing.
+
+Legacy Python install (`forza/` frozen at 0.21.0-beta.1, reference only):
+
+```cmd
+pip install -e ".[dev,gui]"
+python -m forza maintenance db-upgrade
+python -m forza gui
+```
 
 ## Runtime data
 

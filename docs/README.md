@@ -11,6 +11,22 @@ Related tests: none
 This file is only a documentation map. Substantial content lives in topic files.
 Architecture and developer guide indexes intentionally stay small; detailed material belongs in topic shards linked from each index.
 
+## Implementation Status (2026-09-04)
+
+The current implementation is the Rust workspace in `forza-rust/` (9 crates:
+`forza-domain/config/db/pipeline/lmstudio/output/app/cli/gui`; Slint GUI,
+clap CLI, rusqlite storage). The Python tree in `forza/` is frozen at the
+0.21.0-beta.1 baseline — reference only, see
+`history/2026-08-25_0.21.0-beta.1_final_python_line_release.md`.
+
+Many `architecture/`, `contracts/`, `developer/` and `user/` topic files still
+show Python-era commands, paths and class names (`python -m forza`, PySide6,
+SQLModel/Alembic). Their *behavioral* content (rules, vocabularies, flows)
+still applies where the Rust port kept parity; code pointers do not. Topic
+files are being updated opportunistically — when in doubt, read the Rust
+source (`forza-rust/crates/`) as authoritative and `docs/project_status.md`
+for what is current.
+
 ## Start Here
 
 | Document | Use |
