@@ -10,7 +10,6 @@ import { ProcessPage } from "pages/process.slint";
 import { ReviewPage } from "pages/review.slint";
 import { BestLapsPage } from "pages/bestlaps.slint";
 import { DiagnosticsPage } from "pages/diagnostics.slint";
-import { LogsPage } from "pages/logs.slint";
 import { ImageDetailPage } from "pages/image_detail.slint";
 import { SettingsPage } from "pages/settings.slint";
 
@@ -543,20 +542,6 @@ export component MainWindow inherits Window {
                 debug-result-selected(id) => { root.debug-result-selected(id); }
                 debug-open-image-detail() => { root.debug-open-image-detail(); }
                 debug-filter-changed(s,b,m,p,r) => { root.debug-filter-changed(s,b,m,p,r); }
-                logs-reload-requested() => { root.logs-reload-requested(); }
-                logs-clear-requested(which) => { root.logs-clear-requested(which); }
-                logs-open-folder() => { root.logs-open-folder(); }
-                logs-search-changed(text) => { root.logs-search-changed(text); }
-                page-change-requested(page) => { root.page = page; root.page-changed(page); }
-            }
-
-            // Logs page (kept for backward route, but primary access is Diagnostics → Logs tab)
-            if root.page == "logs": LogsPage {
-                app-log-text: root.app-log-text;
-                error-log-text: root.error-log-text;
-                logs-tab <=> root.logs-tab;
-                logs-search <=> root.logs-search;
-                logs-status: root.logs-status;
                 logs-reload-requested() => { root.logs-reload-requested(); }
                 logs-clear-requested(which) => { root.logs-clear-requested(which); }
                 logs-open-folder() => { root.logs-open-folder(); }

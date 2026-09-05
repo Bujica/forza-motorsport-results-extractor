@@ -7,6 +7,19 @@ import { Card, Badge, EmptyState, TableHeaderCell, TableCell, TabBar } from "../
 import { DoctorCheckItem, DebugCaseItem, DebugResultComboItem } from "../models.slint";
 import { ImageDebugPage } from "image_debug.slint";
 
+// One compact overview row: fixed height, muted label + value, no stretching
+// (rows pack at the top instead of spreading across the panel).
+component OverviewRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    height: 22px;
+    HorizontalLayout {
+        spacing: 8px;
+        Text { text: root.label; color: Theme.text; font-size: Theme.font-sm; vertical-alignment: center; min-width: 130px; }
+        Text { text: root.value; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; wrap: word-wrap; }
+    }
+}
+
 export component DiagnosticsPage inherits Rectangle {
     background: transparent;
 
@@ -86,7 +99,6 @@ export component DiagnosticsPage inherits Rectangle {
     callback logs-clear-requested(string);
     callback logs-open-folder();
     callback logs-search-changed(string);
-    callback page-change-requested(string);
 
     // Doctor/badge colors live in Theme (doctor-badge-*, doctor-row-*) —
     // single source shared with the DB Doctor table below.
@@ -113,39 +125,46 @@ export component DiagnosticsPage inherits Rectangle {
 
         if root.diagnostics-tab == "overview": Card {
             vertical-stretch: 1;
-            VerticalLayout {
-                padding: 12px;
-                spacing: 8px;
-                // Summary badges row
-                HorizontalLayout {
-                    spacing: 8px;
-                    height: 22px;
-                    Text { text: "LM Studio"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; min-width: 70px; }
-                    Badge { label: root.overview-lm-level; bg: Theme.doctor-badge-bg(root.overview-lm-level); fg: Theme.doctor-badge-fg(root.overview-lm-level); }
-                    Text { text: root.overview-lm-message; color: Theme.text; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                }
-                HorizontalLayout {
-                    spacing: 8px;
-                    height: 22px;
-                    Text { text: "Database"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; min-width: 70px; }
-                    Badge { label: root.overview-db-status == "ok" ? "PASS" : root.overview-db-status; bg: Theme.doctor-badge-bg(root.overview-db-status == "ok" ? "PASS" : "WARN"); fg: Theme.doctor-badge-fg(root.overview-db-status == "ok" ? "PASS" : "WARN"); }
-                    Text { text: root.overview-schema + " · " + root.overview-inventory + " · " + root.overview-review; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                }
-                Rectangle { height: 1px; background: Theme.divider; }
-                // Detail grid (two columns label/value)
-                VerticalLayout {
-                    spacing: 4px;
-                    Text { text: "Endpoint: " + root.overview-endpoint; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
-                    Text { text: "Configured model: " + root.overview-model; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
-                    Text { text: "Loaded instance: " + root.overview-loaded-instance; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
-                    Text { text: "Configured load: " + root.overview-configured-load; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
-                    Text { text: "Configured request: " + root.overview-configured-request; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
-                    Text { text: "Image request: " + root.overview-configured-image; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
-                    Text { text: "Runtime policy: " + root.overview-runtime-policy; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
-                    Text { text: "Loaded runtime: " + root.overview-loaded-runtime; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
-                    Text { text: "Capabilities: " + root.overview-capabilities; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
-                    Text { text: "Model info: " + root.overview-model-info; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
-                    Text { text: "Warnings: " + root.overview-warnings; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
+            clip: true;
+            Flickable {
+                width: parent.width;
+                height: parent.height;
+                viewport-width: self.width;
+                viewport-height: content-layout.preferred-height;
+                content-layout := VerticalLayout {
+                    padding: 12px;
+                    spacing: 2px;
+                    alignment: start;
+                    // Summary badges row
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 22px;
+                        Text { text: "LM Studio"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; min-width: 70px; }
+                        Badge { label: root.overview-lm-level; bg: Theme.doctor-badge-bg(root.overview-lm-level); fg: Theme.doctor-badge-fg(root.overview-lm-level); }
+                        Text { text: root.overview-lm-message; color: Theme.text; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 22px;
+                        Text { text: "Database"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; min-width: 70px; }
+                        Badge { label: root.overview-db-status == "ok" ? "PASS" : root.overview-db-status; bg: Theme.doctor-badge-bg(root.overview-db-status == "ok" ? "PASS" : "WARN"); fg: Theme.doctor-badge-fg(root.overview-db-status == "ok" ? "PASS" : "WARN"); }
+                        Text { text: root.overview-schema + " · " + root.overview-inventory + " · " + root.overview-review; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    }
+                    Rectangle { height: 8px; }
+                    // Detail grid (two columns label/value), compact rows
+                    // packed at the top like the Python overview.
+                    OverviewRow { label: "Endpoint"; value: root.overview-endpoint; }
+                    OverviewRow { label: "Configured model"; value: root.overview-model; }
+                    OverviewRow { label: "Loaded instance"; value: root.overview-loaded-instance; }
+                    OverviewRow { label: "Configured load"; value: root.overview-configured-load; }
+                    OverviewRow { label: "Configured request"; value: root.overview-configured-request; }
+                    OverviewRow { label: "Image request"; value: root.overview-configured-image; }
+                    OverviewRow { label: "Runtime policy"; value: root.overview-runtime-policy; }
+                    OverviewRow { label: "Loaded runtime"; value: root.overview-loaded-runtime; }
+                    OverviewRow { label: "Capabilities"; value: root.overview-capabilities; }
+                    OverviewRow { label: "Model info"; value: root.overview-model-info; }
+                    OverviewRow { label: "Warnings"; value: root.overview-warnings; }
+                    Rectangle { vertical-stretch: 1; }
                 }
             }
         }
