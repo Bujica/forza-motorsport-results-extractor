@@ -18,16 +18,22 @@ fn seeded_db() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 fn context(db: &std::path::Path, gamertag: &str) -> WorkerContext {
+    // Config path guaranteed absent (unique temp name, never created):
+    // exercises the missing-file → defaults path on every platform.
+    // `Z:/...` was a Windows-only assumption (a valid relative path on Linux).
+    let missing_ini = std::env::temp_dir().join(format!(
+        "forza-gui-test-missing-{}.ini",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&missing_ini);
     let cfg = forza_config::AppConfig {
         gamertag: gamertag.to_string(),
-        ..forza_config::load_config(Path::new("Z:/nonexistent.ini"), false)
+        ..forza_config::load_config(&missing_ini, false)
             .unwrap()
             .0
     };
-    WorkerContext::new(db.to_path_buf(), PathBuf::from("Z:/nonexistent.ini"), cfg)
+    WorkerContext::new(db.to_path_buf(), missing_ini, cfg)
 }
-
-use std::path::{Path, PathBuf};
 
 #[test]
 fn refresh_inventory_returns_seeded_rows() {
@@ -230,6 +236,9 @@ fn reviews_and_bestlaps_round_trip_through_worker_thread() {
     let (_guard, db) = seeded_db();
 
     // Enqueue before spawning, mirroring what UI callbacks do.
+    // Order matters: Rebuild marks best-lap flags, so ListBestLaps runs
+    // after it (before, the seeded rows have is_best_lap=0 and list is
+    // correctly empty).
     let (req_tx, req_rx) = mpsc::channel::<Request>();
     for request in [
         Request::ListReviews {
@@ -238,17 +247,20 @@ fn reviews_and_bestlaps_round_trip_through_worker_thread() {
                 ..Default::default()
             },
         },
+        Request::RunRebuild,
         Request::ListBestLaps,
         Request::RunDoctor,
-        Request::RunRebuild,
     ] {
         req_tx.send(request).unwrap();
     }
     drop(req_tx);
 
     let (res_tx, res_rx) = mpsc::channel();
+    // Gamertag matches a seeded driver: the frontier needs a player baseline
+    // (groups without one are skipped by design), otherwise Rebuild marks
+    // nothing and ListBestLaps is legitimately empty.
     let handle =
-        forza_gui::worker::spawn_thread(req_rx, context(&db, "bujica89"), move |response| {
+        forza_gui::worker::spawn_thread(req_rx, context(&db, "Player One"), move |response| {
             res_tx.send(response).unwrap();
         });
 
@@ -268,7 +280,15 @@ fn reviews_and_bestlaps_round_trip_through_worker_thread() {
             }
             Response::BestLaps(result) => {
                 let rows = result.unwrap();
-                assert!(rows.is_empty() || !rows.is_empty()); // shape check
+                // Seeded graph: Player One (92.5s) + Rival Driver (91.9s) on
+                // Fuji Speedway, one best row per driver identity.
+                assert_eq!(rows.len(), 2, "seeded best laps: {rows:?}");
+                assert!(rows.iter().all(|r| r.track == "Fuji Speedway"));
+                assert!(rows.iter().all(|r| r.best_lap_ms > 0));
+                let mut drivers: Vec<&str> =
+                    rows.iter().map(|r| r.driver.as_str()).collect();
+                drivers.sort_unstable();
+                assert_eq!(drivers, vec!["Player One", "Rival Driver"]);
                 saw_best_laps = true;
             }
             Response::Doctor(result) => {

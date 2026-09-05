@@ -153,6 +153,12 @@ fn database_file(config_path: &Path) -> PathBuf {
     }
 }
 
+/// Short display identity for dry-run listings. Never panics on short or
+/// legacy hashes (test seeds use `"abc123"`).
+fn short_hash(hash: &str) -> &str {
+    hash.get(..12).unwrap_or(hash)
+}
+
 /// Count rows in a table; `None` when the table is missing/unreadable (never
 /// conflate corruption with "empty" — callers print ERR instead of 0).
 fn table_count(conn: &Connection, name: &str) -> Option<i64> {
@@ -503,7 +509,7 @@ fn cmd_run(
             println!(
                 "  PROCESS  {}  [{}]",
                 image.path.display(),
-                image.file_hash.get(..12).unwrap_or(&image.file_hash)
+                short_hash(&image.file_hash)
             );
         }
         for dup in &plan.duplicates {
@@ -931,4 +937,58 @@ fn cmd_db_heal(db_path: &Path) -> anyhow::Result<()> {
     println!("  images.semantic_name       : {names_healed} row(s)");
     println!("next step: run `forza rebuild` to refresh best-lap status and review cases");
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_hash_never_panics() {
+        assert_eq!(short_hash("abc123"), "abc123");
+        assert_eq!(short_hash(""), "");
+        assert_eq!(
+            short_hash("deadbeefcafe1234567890_extra"),
+            "deadbeefcafe"
+        );
+    }
+
+    #[test]
+    fn resolve_db_path_prefers_config_dir_over_cwd() {
+        // Absolute configured path wins as-is.
+        assert_eq!(
+            resolve_db_path(
+                Path::new("/other/dir/forza_config.ini"),
+                PathBuf::from("/abs/data.sqlite3")
+            ),
+            PathBuf::from("/abs/data.sqlite3")
+        );
+        // Bare relative resolves against the config directory, not CWD.
+        assert_eq!(
+            resolve_db_path(
+                Path::new("/other/dir/forza_config.ini"),
+                PathBuf::from("data/forza.sqlite3")
+            ),
+            PathBuf::from("/other/dir/data/forza.sqlite3")
+        );
+        // Bare config filename has no parent: relative stays relative.
+        assert_eq!(
+            resolve_db_path(
+                Path::new("forza_config.ini"),
+                PathBuf::from("data/forza.sqlite3")
+            ),
+            PathBuf::from("data/forza.sqlite3")
+        );
+    }
+
+    #[test]
+    fn database_file_falls_back_without_panicking_on_missing_config() {
+        let dir = std::env::temp_dir().join("forza-cli-test-missing");
+        let missing = dir.join("definitely_missing_8f3a.ini");
+        let _ = std::fs::remove_file(&missing);
+        // Missing config resolves to defaults, never panics.
+        let db = database_file(&missing);
+        assert!(!db.as_os_str().is_empty());
+    }
 }

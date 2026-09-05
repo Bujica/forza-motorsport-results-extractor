@@ -34,9 +34,7 @@ pub fn rebuild(conn: &Connection, gamertag: &str) -> Result<RebuildOutcome, Stri
     }
     conn.execute_batch("BEGIN IMMEDIATE")
         .map_err(|e| e.to_string())?;
-    let inner: Result<RebuildOutcome, String> = (|| {
-        rebuild_inner(conn, gamertag)
-    })();
+    let inner = rebuild_inner(conn, gamertag);
     match inner {
         Ok(outcome) => {
             conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
