@@ -8,9 +8,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-- Nothing yet. The Python line is feature-frozen at 0.21.0-beta.1; only
-  regression fixes are accepted. New development continues in the Rust
-  migration plan.
+- The Rust workspace (`forza-rust/`) is now the current implementation:
+  extraction runner (sequential + multi-worker), Slint GUI, review/flag
+  lifecycle, CSV/PDF export, DB doctor, and maintenance CLI are ported and
+  verified against the Python baseline. The Python line stays frozen at
+  0.21.0-beta.1 (reference only).
+- Database schema v2 (`run_inputs.id` autoincrement); test databases must be
+  recreated via `forza.exe maintenance db-upgrade`.
+- Developer docs for the Rust implementation live in `forza-rust/docs/`;
+  root `docs/` remains the frozen Python-era reference.
 
 ---
 

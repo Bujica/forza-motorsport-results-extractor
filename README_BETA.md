@@ -14,6 +14,13 @@ This guide is for testers using the Windows beta bundle.
 
 The beta does not support Forza Horizon, older Motorsport layouts, leaderboard screenshots, telemetry overlays, or arbitrary racing-game screenshots.
 
+## Implementation note
+
+This bundle is built from the legacy Python line (`fmre-cli.exe` +
+PyInstaller GUI). Current development happens in Rust (`forza-rust/`:
+`forza.exe` CLI + `forza-gui.exe` desktop app); a Rust-built beta bundle does
+not exist yet. Behavior described below applies to the shipped Python bundle.
+
 ## What is included
 
 The ZIP bundle includes:
