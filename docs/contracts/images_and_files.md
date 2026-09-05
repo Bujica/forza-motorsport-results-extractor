@@ -1,43 +1,31 @@
 # Images And Files Contract
 
-Implementation: Rust (forza-rust/) — current. Legacy Python (forza/) frozen at 0.21.0-beta.1.
 Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: permanent
 Scope: image file identity, file operations, rename, export, and deletion
-Last verified: 2026-09-05
+Last verified: 2026-06-16
 Supersedes: image-management rules scattered across user and developer guides
-Related tests: unit tests in `forza-rust/crates/forza-app` (`image_inventory`, `extraction_runner`) and `forza-db` (`gui_queries`)
+Related tests: `tests/test_gui_read_and_rename.py`, `tests/test_gui_image_management_static.py`, `tests/test_image_file_promoted_fields_static.py`
 
 The Images-first workflow treats the input folder as the visible source of work.
 File operations are explicit operator actions and must not be hidden side
 effects of extraction.
 
-This contract records the approved Images-first schema direction.
-`image_files` is the physical-file table in the Rust schema
-(`forza-db/src/schema_ddl.rs`); inventory reads go through
-`forza-db/src/gui_queries.rs` (`image_inventory`) surfaced as
-`ImageInventoryEntry` by `ImageInventoryService`.
+This contract records the approved Images-first schema direction. Current
+database tables use `image_files`; remaining internal `ImageFile*` Python
+names are compatibility names, not schema contract names.
 
 ## Identity Rules
 
-- `image_files.id` is the stable identity of one observed physical file, with
-  the deterministic form `img-{content-hash}`
-  (see `upsert_image_for_run` in
-  `forza-app/src/services/extraction_runner.rs`).
+- `image_files.id` is the stable identity of one observed physical file.
 - `image_files.current_path` is the authoritative filesystem location when the
-  file is available. SQLite stores it as text; filesystem code converts to a
-  path only at operation edges.
+  file is available. Runtime/domain schemas surface it as `str | None`, matching
+  SQLite storage; filesystem code converts to `Path` only at operation edges.
 - `image_files.current_name` is the operational display/source name.
 - `image_files.file_hash` identifies content bytes and is indexed, not unique.
   Two physical files with identical bytes must remain two file rows sharing the
   same hash.
-- A different file arriving at a known `current_path` must NOT rewrite the
-  existing row in place (past extraction/lap rows reference that row id).
-  Both `upsert_image_for_run` and `ImageInventoryService::sync_input_folder`
-  retire the old available owner to `missing` first, then insert (or
-  reactivate) the row for the new bytes — so two available rows never share
-  one `current_path`.
 - `semantic_name` is a suggested/presentation filename. It must not replace the
   operational current filename unless the user explicitly renames the file.
 - The reset schema must not preserve an `original_name` or `original_path`
@@ -52,7 +40,7 @@ This contract records the approved Images-first schema direction.
   delete flows must reconcile the group: available duplicates must not anchor to
   missing canonicals, deleting a canonical duplicate must promote a remaining
   file, and singleton groups must resolve active duplicate flags.
-- `ImageInventoryEntry.processing_status` is a GUI/read-model status derived from the
+- `ImageFile.processing_status` is a GUI/read-model status derived from the
   latest `extraction_results.status` for the file, falling back to the latest
   `run_inputs` decision when no result exists. It is not an `image_files`
   column and must not compete with file inventory state.
@@ -91,11 +79,7 @@ canonical row visible while deciding which physical files to delete.
 ## Rename Rules
 
 - Extraction must not rename, move, or delete source screenshots.
-- GUI rename is an explicit operation (`Request::RenameImages`, handled in
-  `forza-gui/src/worker.rs::rename_images`): it renames the file to the
-  sanitized semantic (or current) name, updates `current_path` /
-  `current_name`, and keeps the same file row identity. A failed DB update
-  rolls the file back so the row never points at the old path.
+- GUI rename is an explicit operation.
 - Rename previews must be readable before confirmation.
 - Rename updates only the current physical file path/name and keeps the same
   file row identity.
@@ -107,21 +91,13 @@ canonical row visible while deciding which physical files to delete.
 ## Deletion And Export Rules
 
 - Export copies files; it does not change source identity.
-  (`Request::ExportImages` copies with semantic names, never silently
-  overwriting: same-name files get a `-N` suffix.)
 - Deletion is explicit and requires selected image files in Images.
 - Delete removes the physical file when it still exists inside the configured
-  input folder and removes the related image database records. Only files
-  under the configured input folder may be deleted. The DB row is deleted
-  FIRST: when FK RESTRICT refuses (extraction evidence exists), the file on
-  disk is preserved and the refusal is reported, never silently lost. Delete
-  must also reconcile `duplicate_of_image_file_id` and active `duplicate`
-  flags for the affected content-hash group.
+  input folder and removes the related image database records. It must also
+  reconcile `duplicate_of_image_file_id` and active `duplicate` flags for the
+  affected content-hash group.
 - If the selected physical file is already missing, Delete still removes the
   related image database records.
-- Rescan (`Request::RescanImages`) re-checks on-disk existence: now-missing
-  files become `missing` (+ `missing_at`), reappeared files return to
-  `available`.
 - Missing files are tracked as file state when the file disappeared outside an
   explicit app deletion action.
 - `missing` means the file disappeared outside an explicit app deletion action.
@@ -141,6 +117,6 @@ Duplicate groups are product inventory state. The canonical/duplicate relationsh
 Image processing status is a GUI inventory projection, not an `image_files` column.
 The persisted authority remains `run_inputs` plus `extraction_results`; Images read
 paths derive `unprocessed`, `processing`, `processed_ok`, `processed_error`,
-`cancelled`, and `skipped` from those causal rows. The read-model
-`ImageInventoryEntry` mirrors physical image-file state and metadata only.
+`cancelled`, and `skipped` from those causal rows. Domain `ImageFile` mirrors
+physical image-file state and metadata only.
 

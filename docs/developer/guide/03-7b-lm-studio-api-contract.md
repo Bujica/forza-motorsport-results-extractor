@@ -4,34 +4,21 @@ Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: permanent
 Scope: Developer maintenance guidance shard generated from the former oversized `guide.md` document
-Last verified: 2026-09-05
-Implementation: Rust (forza-rust/) — current. Legacy Python (forza/) frozen at 0.21.0-beta.1.
+Last verified: 2026-06-14
 
 Back to index: [`../guide.md`](../guide.md).
 
 ## 7b. LM Studio API contract
 
-The project talks to LM Studio through the native REST API implemented in the
-`forza-lmstudio` crate. Do not add OpenAI-compatible, Ollama, or generic
-backend branches unless the whole runtime contract is deliberately redesigned.
+The project talks to LM Studio through the native REST API implemented in `forza.lmstudio`. Do not add OpenAI-compatible, Ollama, or generic backend branches unless the whole runtime contract is deliberately redesigned.
 
-Rust code entry points (`forza-rust/crates/forza-lmstudio/src/`):
+Public code entry points:
 
-```text
-backend.rs      LMStudioBackend: async reqwest extract loop with
-                initial/transport_retry/json_retry/semantic_retry
-client.rs       RuntimeClient: model list and health metadata
-load_config.rs  load-config compatibility (context, eval batch, flash, offload)
-protocol.rs     ModelAttemptRecord, ModelExtractionResult, RequestKind records
-response.rs     strict parse + validation of the short-key extraction JSON
-json_repair.rs  one deterministic repair pass before json_retry
+```python
+from forza.lmstudio import build_backend, LMStudioRuntimeClient
 ```
 
-Run settings (model, URL, context, reasoning, eval batch, flash, offload,
-timeouts, retries) come from `forza_config.ini` `[lmstudio]` via
-`RunParams::from_config` (`forza-app`). Per-image debug log lines are emitted
-when the run's `verbose` flag is set (GUI Process page `Debug` checkbox).
-Attempts are persisted with the run's real `context_length`/`reasoning_mode`.
+`build_backend(cfg)` returns `LMStudioNativeBackend`, which is the extraction backend used by `ExtractionService`. `LMStudioRuntimeClient` is a small metadata client used by GUI diagnostics for health checks and model metadata.
 
 Configured URL:
 
@@ -40,7 +27,7 @@ Configured URL:
 url = http://127.0.0.1:1234/api/v1/chat
 ```
 
-`BackendConfig::api_base()` derives the API base from the configured URL:
+The code derives the API base from the configured URL:
 
 ```text
 http://127.0.0.1:1234/api/v1/chat -> http://127.0.0.1:1234/api/v1
@@ -53,44 +40,44 @@ Runtime endpoints used:
 ```text
 GET  /models        list available models and loaded instances
 POST /models/load   load the configured model with explicit runtime config
+POST /models/unload unload duplicate or incompatible loaded instances
 POST /chat          submit the image + text extraction request
 ```
 
-`RuntimeClient::list_models()` accepts the native `{"models": [...]}` shape,
-legacy `{"data": [...]}`, or a raw list response, and maps rows to
-`RuntimeModel` including model identity, metadata, capabilities, and loaded
-instances. Health reporting stays non-mutating. The run preflight snapshot is
-the non-mutating diagnostic; it uses only `GET /models`, compares desired load
-parameters against effective loaded-instance config, and must not call
-`/models/load`.
+`LMStudioRuntimeClient.list_models()` accepts the native `{"models": [...]}` shape, legacy `{"data": [...]}`, or a raw list response. It maps rows to `LMStudioModel` including model identity, metadata, capabilities, and loaded instances. `list_model_keys()` returns only model ids for comboboxes. `health()` returns `(ok, message)` and should stay non-mutating. `runtime_status(...)` is the non-mutating Overview diagnostic; it uses only `GET /models`, compares desired load parameters against effective loaded-instance config, and must not call `/models/load` or `/models/unload`.
 
 Model loading behavior:
 
-- `ensure_loaded()` inspects `/models` and reuses one compatible loaded
-  instance for the configured model.
-- `ensure_loaded()` is protected by a global async mutex keyed by
-  `(api_base, model)`. This is the single-flight guard that prevents two
-  workers from loading the same LM Studio model simultaneously.
-- Runtime model-control calls (`GET /models`, `POST /models/load`) retry
-  short-lived connection, timeout, and transient LM Studio HTTP failures
-  (`409`, `423`, `429`, `500`, `502`, `503`, `504`) with backoff before
-  failing as an operational runtime error.
+- `_ensure_loaded()` inspects `/models` and reuses one compatible loaded instance for the configured model.
+- `_ensure_loaded()` and `_reload_model()` are protected by a shared lock keyed
+  by `(api_base, model)`. This is the single-flight guard that prevents two
+  workers from loading or unloading the same LM Studio model simultaneously.
+- Runtime model-control calls (`GET /models`, `POST /models/load`, and
+  `POST /models/unload`) retry short-lived connection, timeout, and transient
+  LM Studio HTTP failures (`409`, `423`, `429`, `500`, `502`, `503`, `504`)
+  with a short internal backoff before failing as an operational runtime error.
 - Non-transient runtime failures fail immediately with model, endpoint, and
-  desired load-config context. These failures belong to the run/backend, not
-  to an individual image extraction result.
-- If no compatible instance exists, `/models/load` is called with the desired
-  load config (`model`, `echo_load_config = true`, plus context/batch/flags).
-- Model identity matches on `id`, `path`, `display_name`, `key`, or
-  `model_key`, in both preflight and `ensure_loaded`; keep the two in sync.
+  desired load-config context. These failures belong to the run/backend, not to
+  an individual image extraction result.
+- Loaded duplicate compatible instances are unloaded.
+- Loaded incompatible instances are unloaded.
+- If no compatible instance exists, `/models/load` is called with the desired load config.
+- `_reload_model()` unloads all loaded instances for that model and loads a fresh compatible instance.
+- `workers=2+` depends on both the RunService preflight and this model lock:
+  preflight prepares the model before the batch starts, while the lock keeps any
+  later reload/load path serialized across worker backend instances.
 
-Load compatibility (`load_config.rs`):
+Load config fields sent to `/models/load`:
 
-- `context_length` satisfies when the loaded value is at least the desired
-  value.
-- `physical_batch_size` is uncomparable (the `/models` response never echoes
-  it back) and must not block reuse.
-- Alias forms (`contextLength`, `n_ctx`, `evalBatchSize`, `flashAttention`,
-  offload variants) resolve to the same canonical fields.
+```text
+model
+echo_load_config = true
+context_length
+eval_batch_size
+physical_batch_size      optional, omitted when blank
+flash_attention
+offload_kv_cache_to_gpu
+```
 
 Chat payload sent to `/chat`:
 
@@ -109,12 +96,9 @@ Chat payload sent to `/chat`:
 }
 ```
 
-`reasoning` is included only when `reasoning_mode` is set. Retry attempts
-alter only the user text with a targeted instruction; they do not change the
-schema contract. `max_output_tokens` carries the `[lmstudio]`
-`max_completion_tokens` value.
+`reasoning` is included only when `reasoning_mode` is set. Retry attempts alter only the user text with a targeted instruction; they do not change the schema contract.
 
-Supported `[lmstudio]` options (via `forza-config` load + validate):
+Supported `[lmstudio]` options:
 
 ```text
 url                          native LM Studio API URL; /api/v1/chat is the normal value
@@ -131,80 +115,80 @@ eval_batch_size              model load eval batch size; blank omits it
 physical_batch_size          model load physical batch size; blank omits it
 flash_attention              model load flag
 offload_kv_cache_to_gpu      model load flag
-performance_tps_floor        slow-response watchdog token/s threshold (default 20.0)
-performance_reload_elapsed_s slow-response watchdog elapsed threshold (default 45 s)
-performance_reload_streak    consecutive slow responses before reload-before-next-image (default 3)
+performance_tps_floor        slow-response watchdog token/s threshold
+performance_reload_elapsed_s slow-response watchdog elapsed threshold
+performance_reload_streak    consecutive slow responses before reload-before-next-image
 ```
 
 Supported `[image]` request-encoding options:
 
 ```text
-max_width       resized request image width cap
+max_width       resized request image width cap, valid range 640..4096
 encode_quality  JPEG/WebP quality, valid range 1..100
 grayscale       HSL-lightness desaturation before encoding
 ```
 
 Response parsing contract:
 
-- `/chat` response text is read from `output_text`, then `output[]` message
-  chunks, with a legacy `choices[]` fallback.
-- The model must return the short-key JSON schema: `t` plus `e[]` entries.
-- Parsing is strict JSON first, then one deterministic `repair_json` pass.
-- `parse_and_validate_response()` in `response.rs` owns schema validation.
-- Critical semantic issues (`track_empty`, `entries_empty`,
-  `all_best_laps_null`) trigger `semantic_retry`.
+- `/chat` response text is read from `output[]` message chunks.
+- The model must return the short-key JSON schema: `t`, `tf`, `w`, and `e[]` with `dr`, `ca`, `cl`, `bl`.
+- Parsing is strict JSON first, then one deterministic `json_repair` pass.
+- `parse_and_validate_response()` in `forza.pipeline.model_response` owns schema validation.
+- Critical semantic issues (`track_empty`, `entries_empty`, `all_best_laps_null`) can trigger `semantic_retry`.
 
 Persistence/debug contract:
 
-- `ModelExtractionResult` carries parsed JSON, raw text, the accepted attempt,
-  and all attempts.
-- Persistence stores final result data in `extraction_results` and per-call
-  raw/debug evidence in `extraction_attempts` with the run's real
-  `context_length`/`reasoning_mode`, the preflight runtime snapshot id, and
-  the canonical request hash. Stored request messages keep the image redacted.
+- `ModelExtractionResult` carries parsed JSON, raw text, elapsed time, token counts, request metadata, response stats, and all attempts.
+- Persistence stores final result data in `extraction_results` and per-call raw/debug evidence in
+  `extraction_attempts`. File-backed `model_artifacts` are registered artifacts only, not a hidden raw-response cache.
 
 When extending API behavior:
 
-1. Add new user-editable options to `forza-config` load, save, and validate.
+1. Add new user-editable options to `LLMConfig`, `LMSTUDIO_DEFAULTS`, `load_config()`, and `validate_config()`.
 2. Add GUI Settings support when the option changes runtime behavior.
-3. Thread new run-affecting fields through `RunParams` and the attempt
-   persistence path if they matter for later diagnosis.
-4. Update tests for `LMStudioBackend`, `RuntimeClient`, and load-config
-   compatibility.
+3. Include new request/load fields in `ModelRequestMetadata`, `ModelExtractionAttempt`, or `ModelResponseStats` if they matter for later diagnosis.
+4. Update tests for `LMStudioNativeBackend`, `LMStudioRuntimeClient`, and static GUI contracts.
 5. Update this section and `forza_config.ini.example` in the same change.
 
 When adding a new config field:
 
-1. Add it to the config structs in `forza-config`.
-2. Load and save it (preserving the existing ini shape).
+1. Add it to the relevant dataclass in `forza/config.py`.
+2. Load it in `load_config()`.
 3. Validate it in `validate_config()` if needed.
 4. Add Settings UI support if user-editable.
-5. Update docs if the field changes a public contract.
+5. Ensure `ConfigChangeSet` emits a stable dotted key.
+6. Update `tests/gui/test_config_state_diff.py` expected keys.
+7. Update docs if the field changes a public contract.
 
 ## 8. GUI architecture
 
-The GUI is the Slint desktop app (`forza-gui.exe`, `forza-rust/crates/forza-gui/`).
-Long-running extraction runs on worker threads driven by typed run events;
-persistence and domain behavior live in `forza-app` services and `forza-db`
-queries. The GUI worker protocol (`worker.rs` `Request`/`Response`) is the
-boundary: image inventory, reviews, best laps, rebuild, image actions, image
-debug, settings, and external-record import all cross it.
+The GUI follows a controller/view/worker split:
 
-GUI pages (no Records page):
+- Views own widgets and emit user-intent signals.
+- Controllers translate signals into service/use-case calls.
+- Workers own long-running work on `QThread`.
+- Services own persistence and domain-facing behavior.
+- `MainWindow` wires sections together and lazy-loads heavy pages.
+
+Primary GUI sections:
 
 ```text
 Images           input-folder inventory, selected processing, flags, rename, export, safe deletion
 Process          selected run config summary, run/rebuild controls, progress, operator log
 Review           SQL review queue and correction actions
-Best Laps        persisted frontier plus normalized external rows, CSV/PDF export, spreadsheet import
-Diagnostics      overview, image debug, DB Doctor, logs (4 tabs)
-Settings         grouped config editor with preview/save validation
+Best Laps        persisted frontier plus normalized external rows
+Records          external-record import plus performance/analytics views
+Developer Tools  overview, image debug, DB Doctor, logs
+Settings         grouped config table with typed editors and preview/save validation
 ```
 
 Usability contracts:
 
-- Run filters must display human-readable labels and keep `run_id` as the
-  stable filter value for queries.
+- Run filters must display human-readable labels and keep `run_id` in combo
+  item data for controller calls.
+- Filter controls, comboboxes, tab labels, and action controls must size to
+  expected text in the normal 1280px desktop layout; finite comboboxes use
+  content-aware sizing or explicit minimum widths.
 - Review binary decisions use a selected primary action: `Up`/`Down` navigate
   rows, `Left`/`Right` changes the primary action, and `Enter` applies it.
 - Review writes must update the target lap/case and the matching system
@@ -213,45 +197,68 @@ Usability contracts:
 - Best Laps keeps `Source` limited to screenshot/external origin. Player-only
   filtering belongs to the gamertag label plus `Only this driver` checkbox.
 - Shared image-detail entry points should be labelled `Image details`.
-- Image Debug must keep raw model JSON and extracted pipeline data as separate
+- Model Debug must keep raw model JSON and extracted pipeline data as separate
   panes; do not populate both from the same parsed object.
 - Manual refresh controls are exceptions, not defaults. DB Doctor, Overview,
-  and Best Laps import may expose them because they summarize database files,
-  external spreadsheets, LM Studio, or other programs that can change outside
-  the GUI.
-- Process cancellation is two-step: the first click arms an inline
-  confirmation; confirming stops after the current image. Pause blocks at safe
-  checkpoints and cancel lifts pause.
+  and Records may expose them because they summarize database files, external
+  spreadsheets, LM Studio, or other programs that can change outside the GUI.
+  Logs must load internal read-only files on entry/configuration/events instead
+  of exposing a reload button.
 
 ## 9. GUI configuration contract
 
-There is exactly one config source: `forza_config.ini`, loaded and validated
-by `forza-config` (`load_config` + `validate_config`).
+There is exactly one live GUI configuration owner:
+
+```python
+forza.gui.config_state.GuiConfigState
+```
 
 Mandatory rules:
 
-- Long-running runs receive a start-time snapshot (`RunParams::from_config`).
-  Later config changes must affect future runs only, not mutate active run
-  state.
-- Run-affecting `[lmstudio]` settings (model, URL, context, reasoning, eval
-  batch, flash, offload, timeouts, retries) flow into the run only through
-  `RunParams`.
-- Settings edits preview and validate before saving; config-sensitive views
-  update from the saved config without restarting the application.
-- Views that display config-derived values must refresh those displays after
-  a save.
+- `MainWindow` creates one `GuiConfigState`.
+- Components registered through `connect_config_aware` must implement `on_config_changed(cfg, changes)`.
+- Do not add `update_config(cfg)` compatibility hooks.
+- No GUI controller may instantiate `ConfigFileService` directly.
+- Long-running workers receive a start-time snapshot. Later config changes must affect future actions only, not mutate active worker state.
+- Controllers that keep database readers/writers or other derived resources must rebuild them when `ConfigChangeSet.affects(...)` says the relevant key changed.
+- Views that display config-derived values must refresh those displays through `on_config_changed`.
+- Views with editable config-derived defaults should only update the field when the current text still equals the old default, so user-entered paths are not overwritten.
 
-## 10. GUI page loading
+Typical controller pattern:
 
-Slint instantiates page components on navigation (see `ui/main.slint`);
-expensive state is loaded through GUI worker requests when a page is entered,
-not at startup.
+```python
+def on_config_changed(self, cfg: AppConfig, changes: ConfigChangeSet) -> None:
+    self._cfg = cfg
+    if changes.affects("paths.database_file"):
+        self._reader.close()
+        self._writer.close()
+        self._reader = GuiReadService(cfg.database_file)
+        self._writer = GuiWriteService(cfg.database_file)
+```
+
+Typical action-time config pattern:
+
+```python
+def start_run(self, ...) -> bool:
+    cfg = self._config_state.current
+    worker = SomeWorker(cfg=cfg, ...)
+```
+
+Use `changes.affects("paths")`, `changes.affects("paths.database_file")`, `changes.affects("llm")`, or exact keys depending on the dependency.
+
+## 10. GUI lazy loading
+
+`MainWindow` must not construct every major section at startup.
 
 Rules:
 
-- `Images` is the initial operator page and synchronizes the visible
-  input-folder inventory.
-- Expensive service reads for other pages are deferred until first page entry
+- `Images` is loaded immediately because it is the initial operator page and
+  synchronizes the visible input-folder inventory.
+- Heavier pages are loaded on first navigation.
+- Expensive service reads for unloaded pages are deferred until first page entry
   or first refresh.
-- Do not replace on-navigation instantiation with eager loading of every page
-  unless startup cost and side effects are deliberately re-evaluated.
+- Dirty-section invalidation applies even before the page exists.
+- When an unloaded dirty page is first opened, it must build from current controller/config state and then refresh normally.
+
+Do not replace lazy loading with eager page construction unless startup cost and side effects are deliberately re-evaluated.
+

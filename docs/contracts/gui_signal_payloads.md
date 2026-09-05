@@ -1,166 +1,71 @@
-# GUI Event Payload Contracts
+# GUI Signal(object) Payload Contracts
 
-Implementation: Rust (forza-rust/) — current. Legacy Python (forza/) frozen at 0.21.0-beta.1.
-Status: current
-Audience: developer, maintainer, LLM
-Lifecycle: permanent
-Scope: Slint callback + GUI worker channel payload documentation
-Last verified: 2026-09-05
+Status: current  
+Audience: developer, maintainer, LLM  
+Lifecycle: permanent  
+Scope: PySide6 GUI signal payload documentation  
+Last verified: 2026-06-09
 
-There are no PySide6 `Signal(object)` payloads in the Rust GUI. Cross-boundary
-communication has two typed layers, both with payloads documented below:
+PySide6 `Signal(object)` is used where the GUI passes Python dataclasses, lists,
+dicts, or domain DTOs across controller/view/worker boundaries. Keep the Qt
+signature as `object` unless a native Qt type is both sufficient and stable.
 
-1. Slint callbacks declared in `forza-gui/ui/main.slint` (user intent from
-   pages, handled synchronously in `forza-gui/src/lib.rs`).
-2. The typed worker channel in `forza-gui/src/worker.rs`: the `Request` enum
-   (UI → worker job threads) and the `Response` enum (worker → UI thread via
-   `slint::invoke_from_event_loop`).
+When adding or changing a `Signal(...object...)`, update this document in the
+same patch. The static test `tests/test_gui_signal_object_payload_docs_static.py`
+checks that every object-typed GUI signal has a documented entry.
 
-When adding or changing a callback, `Request`, or `Response` variant, update
-this document in the same patch.
+## Contract table
 
-## Slint callback inventory
-
-Callbacks are declared as `callback <name>(args...)` on `MainWindow` in
-`forza-gui/ui/main.slint` and wired with `main.on_<name>(...)` in
-`forza-gui/src/lib.rs`. The "Handler" column names the `Request` enqueued or
-the local UI-thread handling.
-
-| Callback (`main.slint`) | Slint signature | Handler (`lib.rs` → `Request` or local) |
+| Signal marker | Declared signature | Payload contract |
 | --- | --- | --- |
-| `refresh-requested` | `(string, string, string, string, string, string)` | `Request::RefreshInventory { filter }` — `(file_status, best_lap_status, inventory_filter, track, run_id, processing_status)`; `"all"` maps to `None`; coalesced via `PENDING_INVENTORY_FILTER`. |
-| `scan-folder` | `()` | `Request::SyncInputFolder { filter }` with the current inventory filter. |
-| `selection-changed` | `(int)` | Row index → sets Images detail header locally + `Request::LoadImageDetail { image_id }` from the row cache. |
-| `selection-toggle` | `(int)` | Local multi-selection toggle (anchor-based). |
-| `selection-single` | `(int)` | Local single selection. |
-| `selection-range` | `(int)` | Local Shift+click range from the anchor row. |
-| `select-all` | `()` | Local: select all cached rows. |
-| `clear-selection` | `()` | Local: clear selection + summary. |
-| `export-selected` | `()` | Native folder dialog, then `Request::ExportImages { image_ids, dest_dir }`. |
-| `rescan-selected` | `()` | `Request::RescanImages { image_ids }` for the selection. |
-| `delete-selected` | `()` | After `confirm-delete`, `Request::DeleteImages { image_ids }`. |
-| `sort-changed` | `(int)` | Local: re-sort the cached inventory rows. |
-| `process-selected` | `()` | Local: stash selected ids (`RUN_SELECTED_IDS`) and navigate to Process; the next `start-run` consumes them. |
-| `rename-selected` | `()` | `Request::RenameImages { image_ids }` for the selection. |
-| `reviews-requested` | `()` | `Request::ListReviews { filter }` with the active `REVIEW_FILTER`; coalesced via `PENDING_REVIEW_FILTER`. |
-| `review-filter-changed` | `(string, string, string, string)` | `(status, reason, outcome, run)` → updates `REVIEW_FILTER` + `Request::ListReviews`. |
-| `review-selected` | `(int)` | Local: render the selected case detail from `REVIEW_CASES_CACHE` (+ `LoadPreview` when the case has an image). |
-| `review-apply` | `(int, string, string)` | `(case_number, field, value)` → `Request::DecideCase`; on success reloads Reviews + Best Laps + Images. |
-| `review-ignore` | `(int)` | `Request::IgnoreCase { case_number }`. |
-| `review-reopen` | `(int)` | `Request::ReopenCase { case_number }` (flag re-sync happens in the worker). |
-| `review-open-detail` | `(int)` | Local navigation: open Image Detail by the case's image id (never reuses the review-cache position as an inventory index). |
-| `review-preview-requested` | `(string)` | `Request::LoadPreview { image_file_id }`. |
-| `bestlaps-requested` | `()` | `Request::ListBestLaps`. |
-| `bestlaps-filter-changed` | `(string, string, string, string, string, string, string, bool)` | `(track, class, weather, driver, car, lap, source, only_mine)` → local in-memory `apply_bestlaps_filters`. No worker request. |
-| `bestlaps-sort-changed` | `(int)` | Local: toggle/replace `BESTLAP_SORT`, re-apply filters. |
-| `bestlaps-export-csv` | `()` | Local: native save dialog, filter cached rows, `forza_output::export_csv`. |
-| `bestlaps-generate-pdf` | `()` | Local: filter cached rows, `build_pdf_plan_ext` with `cfg.pdf` options, `render_pdf` to the configured pdf path. |
-| `bestlaps-open-pdf` | `()` | Local: open the configured PDF report. |
-| `bestlaps-import` | `()` | Native file dialog, then `Request::ImportExternalRecords { path }`. |
-| `bestlaps-detail-requested` | `(string)` | `Request::LoadImageDetail { image_id }` for the row's `image_file_id`. |
-| `doctor-requested` | `()` | `Request::RunFullDoctor` (full audit; Overview shows fast checks only). |
-| `rebuild-requested` | `()` | `Request::RunRebuild` → on completion reloads Reviews (all bucket) + Best Laps. |
-| `overview-requested` | `()` | `Request::RefreshOverview`. |
-| `start-run` | `(bool, bool, bool, bool)` | `(dry_run, force, retry, debug)` → dry-run plans via `Request::RunDryRun`; otherwise spawns the extraction thread (`spawn_extraction`) unless a run is active. |
-| `cancel-run` | `()` | Local: `RunControl::request_cancel()`. |
-| `toggle-pause` | `()` | Local: flip `RunControl` paused flag. |
-| `open-image-detail` | `(int)` | Inventory row index → `Request::LoadImageDetail { image_id }` (or directly when the image is outside the cached window). |
-| `detail-tab-changed` | `(string)` | Local detail tab switch. |
-| `detail-prev` / `detail-next` | `()` | Local detail stepping (`step_detail`). |
-| `detail-close` | `()` | Local: navigate back to Images. |
-| `setting-edited` | `(string, string)` | `(key, value)` → pending map + `Request::PreviewSettings { changes, seq }`; stale seq responses are dropped. |
-| `discard-settings` | `()` | Local: clear pending, bump seq, `Request::LoadSettings`. |
-| `save-settings` | `()` | `Request::SaveSettings { changes }`; a gamertag change triggers `rebuild()` in the worker. |
-| `page-changed` | `(string)` | Local: lazy loads — Settings first entry, Logs, Best Laps, Diagnostics (overview + debug cases). |
-| `debug-refresh-requested` | `()` | `Request::ListImageDebugCases` with the default filter. |
-| `debug-filter-changed` | `(string, string, string, string, string)` | `(status, backend, model, prompt, run)` → `Request::ListImageDebugCases { filter }`. |
-| `debug-case-selected` | `(int)` | Case index → `Request::LoadImageDebugDetail { image_file_id, selected_result_id: None }`. |
-| `debug-result-selected` | `(string)` | `Request::LoadImageDebugDetail` with the current image id + selected result id. |
-| `open-image-debug` | `(string)` | Navigate to Diagnostics/Debug + `Request::LoadImageDebugDetail` + `Request::ListImageDebugCases`. |
-| `debug-open-image-detail` | `()` | Navigate to Image Detail + `Request::LoadImageDetail` for the debug image. |
-| `logs-reload-requested` | `()` | `Request::LoadLogs`. |
-| `logs-clear-requested` | `(string)` | Native confirm dialog, then `Request::ClearLogs { which }` (`app` or `errors`). |
-| `logs-open-folder` | `()` | `Request::OpenLogFolder`. |
-| `logs-search-changed` | `(string)` | Local: filter cached log lines. |
-| `about-requested` | `()` | Local: fill + show the About overlay (version, config, DB, gamertag, doctor/overview state). |
-| `copy-diagnostics-requested` | `()` | Local: copy About text to the clipboard. |
-| `open-repository-requested` | `()` | Local: open the GitHub repository URL. |
-| `select-in-images` | `()` | Local: navigate to the Images page. |
-
-## Worker `Request` inventory (`forza-gui/src/worker.rs`)
-
-Each variant is handled by the pure `handle_request(ctx, service, request)`
-(no widget types), so it is testable headlessly. Per-job threads run handlers
-concurrently; responses marshal back via `slint::invoke_from_event_loop`.
-
-| `Request` variant | Payload |
-| --- | --- |
-| `RefreshInventory` | `filter: ImageInventoryFilter` — list cached inventory reads. |
-| `SyncInputFolder` | `filter: ImageInventoryFilter` — register new input-folder files, then list. |
-| `ListReviews` | `filter: ReviewQueueFilter` — cases + dynamic filter options. |
-| `ReopenCase` | `case_number: i64` — reopen + re-sync review flags. |
-| `LoadPreview` | `image_file_id: String` — resolve the on-disk path for the preview. |
-| `DecideCase` | `case_number: i64, field: String, value: String` — apply correction, then `rebuild()`. |
-| `IgnoreCase` | `case_number: i64` — ignore + re-sync review flags. |
-| `ListBestLaps` | — best-lap rows for the worker's live gamertag. |
-| `RunDoctor` | — fast `doctor_on_path` report. |
-| `RunFullDoctor` | — full audit (`run_full_doctor_on_path`). |
-| `RunRebuild` | — `rebuild()` with the worker's live gamertag. |
-| `RunDryRun` | `input_dir: String` — plan-only summary, no model calls. |
-| `LoadImageDetail` | `image_id: String` — full image detail payload. |
-| `RenameImages` | `image_ids: Vec<String>` — rename to semantic/current names. |
-| `ExportImages` | `image_ids: Vec<String>, dest_dir: String` — copy with semantic names. |
-| `RescanImages` | `image_ids: Vec<String>` — re-check on-disk existence. |
-| `DeleteImages` | `image_ids: Vec<String>` — DB row first (FK RESTRICT may refuse), then file. |
-| `LoadSettings` | — reload config from disk into the worker + fresh snapshot. |
-| `PreviewSettings` | `changes: BTreeMap<String, String>, seq: u64` — validate without saving; `seq` echoed back. |
-| `SaveSettings` | `changes: BTreeMap<String, String>` — backup + atomic write; gamertag change triggers `rebuild()`. |
-| `ListImageDebugCases` | `filter: ImageDebugFilter` — image-centric debug case list. |
-| `LoadImageDebugDetail` | `image_file_id: String, selected_result_id: Option<String>` — debug detail payload. |
-| `LoadImageDebugByResult` | `extraction_result_id: String` — debug detail by result id. |
-| `LoadLogs` | — app + error log tails (200 KB cap). |
-| `ClearLogs` | `which: String` — truncate `app` or `errors` log. |
-| `OpenLogFolder` | — open the log directory. |
-| `RefreshOverview` | — diagnostics overview snapshot (LM Studio, DB, inventory, review). |
-| `ImportExternalRecords` | `path: String` — `import_to_db`, then Best Laps reload. |
-
-## Worker `Response` inventory
-
-| `Response` variant | Payload |
-| --- | --- |
-| `Inventory` | `result: Vec<ImageInventoryEntry>`, `options: ImageInventoryOptions`, `filter_label: String`. |
-| `Reviews` | `result: Vec<ReviewCaseEntry>`, `options: ReviewOptions`, `filter: ReviewQueueFilter`. |
-| `CaseDecided` | `Result<(), String>` — reloads Reviews + Best Laps + Images on success. |
-| `BestLaps` | `Result<Vec<BestLapRow>, String>` — cached as `BESTLAP_ALL`, filtered in memory. |
-| `Doctor` | `Result<DoctorSummary, String>` — rendered into the doctor report + check list. |
-| `Rebuild` | `Result<RebuildOutcome, String>` — reloads Reviews (all bucket) + Best Laps. |
-| `RunDryRunDone` | `String` — plan summary appended to the run log. |
-| `ImageDetail` | `Result<Option<ImageDetailData>, String>`. |
-| `RenameDone` | `Result<String, String>` — summary message + Images reload. |
-| `ExportDone` | `Result<(exported: usize, skipped: usize), String>`. |
-| `RescanDone` | `Result<(available: usize, missing: usize), String>` + Images reload. |
-| `DeleteDone` | `Result<(deleted: usize, refused: usize, sample: String), String>` + Images reload. |
-| `Preview` | `Result<Option<String>, String>` — image file path (`None` when the case has no image). |
-| `CaseReopen` | `Result<(), String>` — reloads Reviews. |
-| `ImageDebugCases` | `Result<Vec<ImageDebugCase>, String>`. |
-| `ImageDebugDetail` | `Result<Option<ImageDebugDetail>, String>`. |
-| `Logs` | `Result<(app_log: String, error_log: String), String>`. |
-| `ClearLogs` | `Result<String, String>` — then reloads logs. |
-| `OpenLogFolder` | `Result<String, String>`. |
-| `Overview` | `Result<OverviewSnapshot, String>`. |
-| `Settings` | `Result<SettingsOutcome, String>` — fresh snapshot + effective config; `gamertag_recomputed` triggers derived-view reloads; stale `seq` previews dropped. |
-| `ImportDone` | `Result<ExternalImportResult, String>` — summary shown after the Best Laps reload. |
-| `Error` | `String` — a job thread panicked; resets the coalescing flags so later requests still issue. |
+| `forza/gui/config_state.py::changed` | `Signal(object, object)` | GUI DTO/dataclass/list/dict payload; keep documented with the emitting method. |
+| `forza/gui/controllers/best_laps_controller.py::rows_changed` | `Signal(object)` | `list[BestLapRow]` displayed by Best Laps. |
+| `forza/gui/controllers/best_laps_controller.py::filter_options_changed` | `Signal(object)` | `BestLapFilterOptions` for Best Laps filter widgets. |
+| `forza/gui/controllers/db_doctor_controller.py::report_changed` | `Signal(object)` | updated controller/view model object for the corresponding GUI section. |
+| `forza/gui/controllers/developer_overview_controller.py::overview_changed` | `Signal(object)` | updated controller/view model object for the corresponding GUI section. |
+| `forza/gui/controllers/image_controller.py::images_changed` | `Signal(object)` | `list[ImageFile]` for the image browser table. |
+| `forza/gui/controllers/image_controller.py::filter_options_changed` | `Signal(object)` | `ImageFilterOptions` for image-browser filters. |
+| `forza/gui/controllers/image_controller.py::selection_detail_changed` | `Signal(object, object)` | `tuple[list[ImageFile], ImageFile | None]` selection detail payload. |
+| `forza/gui/controllers/image_detail_controller.py::detail_loaded` | `Signal(object)` | loaded DTO/detail object for the corresponding GUI section. |
+| `forza/gui/controllers/image_debug_controller.py::cases_changed` | `Signal(object)` | `list[GuiImageDebugSummary]` current image-centric debug case list. |
+| `forza/gui/controllers/image_debug_controller.py::detail_loaded` | `Signal(object)` | `GuiImageDebugDetail` selected image debug detail, including image metadata, results, attempts, artifacts, runtime, laps, reviews, and timeline. |
+| `forza/gui/controllers/performance_controller.py::dashboard_changed` | `Signal(object)` | `PerformanceDashboard` aggregate dashboard payload. |
+| `forza/gui/controllers/performance_controller.py::external_records_changed` | `Signal(object)` | `list[object]` external-record DTOs from application service. |
+| `forza/gui/controllers/process_controller.py::run_finished` | `Signal(object)` | `RunWorkerResult` final process-run summary. |
+| `forza/gui/controllers/process_controller.py::event_received` | `Signal(object)` | `PipelineEvent` received from extraction worker. |
+| `forza/gui/controllers/process_controller.py::summary_changed` | `Signal(object)` | `ProcessSummary` snapshot for process status widgets. |
+| `forza/gui/controllers/rebuild_controller.py::rebuild_finished` | `Signal(object)` | GUI DTO/dataclass/list/dict payload; keep documented with the emitting method. |
+| `forza/gui/controllers/rebuild_controller.py::event_received` | `Signal(object)` | GUI DTO/dataclass/list/dict payload; keep documented with the emitting method. |
+| `forza/gui/controllers/review_controller.py::queue_changed` | `Signal(object)` | `list[GuiReviewCase]` current review queue. |
+| `forza/gui/controllers/review_controller.py::filter_options_changed` | `Signal(object)` | `dict[str, list[str]]` review filter options. |
+| `forza/gui/controllers/review_controller.py::run_options_changed` | `Signal(object)` | `list[object]` run option DTOs from GUI read facade. |
+| `forza/gui/controllers/review_controller.py::selection_changed` | `Signal(object, object, object, object)` | `tuple[GuiReviewCase | None, object | None, list[GuiLap], Path | None]` selection detail payload. |
+| `forza/gui/controllers/settings_controller.py::settings_changed` | `Signal(object)` | updated controller/view model object for the corresponding GUI section. |
+| `forza/gui/views/best_laps_view.py::export_requested` | `Signal(object)` | view intent/model object emitted to the owning controller. |
+| `forza/gui/views/best_laps_view.py::import_external_records_requested` | `Signal(object)` | view intent/model object emitted to the owning controller. |
+| `forza/gui/views/image_browser_view.py::refresh_requested` | `Signal(str, str, str, str, str, str)` | `tuple[file_status, best_lap_status, flag, track_id, run_id, processing_status]` image-browser filter state. |
+| `forza/gui/views/image_browser_view.py::process_selected_requested` | `Signal(object)` | `tuple[str, ...]` selected `ImageFile` ids to process from the Images page. |
+| `forza/gui/views/image_browser_view.py::selection_changed` | `Signal(object)` | updated controller/view model object for the corresponding GUI section. |
+| `forza/gui/views/image_browser_view.py::rename_requested` | `Signal(object)` | view intent/model object emitted to the owning controller. |
+| `forza/gui/views/image_browser_view.py::export_requested` | `Signal(object, object)` | view intent/model object emitted to the owning controller. |
+| `forza/gui/views/image_browser_view.py::delete_requested` | `Signal(object)` | `tuple[str, ...]` selected `ImageFile` ids whose physical files and database records should be deleted. |
+| `forza/gui/views/image_browser_view.py::rescan_selected_requested` | `Signal(object)` | `tuple[str, ...]` selected `ImageFile` ids to reconcile against current filesystem state. |
+| `forza/gui/views/review_queue_view.py::refresh_requested` | `Signal(str, object, object, object)` | view intent/model object emitted to the owning controller. |
+| `forza/gui/views/review_queue_view.py::filters_changed` | `Signal(str, object, object, object)` | updated controller/view model object for the corresponding GUI section. |
+| `forza/gui/views/settings_view.py::preview_requested` | `Signal(object)` | view intent/model object emitted to the owning controller. |
+| `forza/gui/views/settings_view.py::save_requested` | `Signal(object)` | view intent/model object emitted to the owning controller. |
+| `forza/gui/workers/db_doctor_worker.py::finished` | `Signal(object)` | `DbDoctorWorkerResult` emitted when the background DB Doctor check completes. |
+| `forza/gui/workers/developer_overview_worker.py::finished` | `Signal(object)` | worker result dataclass or service result object emitted when background work completes. |
+| `forza/gui/workers/event_bridge.py::event_received` | `Signal(object)` | `PipelineEvent` forwarded from worker thread to GUI thread. |
+| `forza/gui/workers/image_inventory_worker.py::finished` | `Signal(object)` | `ImageInventoryWorkerResult` emitted when the background Images input-folder sync completes. |
+| `forza/gui/workers/image_refresh_worker.py::finished` | `Signal(object)` | `ImageRefreshWorkerResult` emitted when the background Images list/filter refresh completes. |
+| `forza/gui/workers/performance_worker.py::finished` | `Signal(object)` | `PerformanceWorkerResult` emitted when the background Records/Performance refresh completes. |
+| `forza/gui/workers/rebuild_worker.py::finished` | `Signal(object)` | worker result dataclass or service result object emitted when background work completes. |
+| `forza/gui/workers/review_queue_worker.py::finished` | `Signal(object)` | `ReviewQueueWorkerResult` emitted when the background Review queue reload completes. |
+| `forza/gui/workers/run_worker.py::finished` | `Signal(object)` | worker result dataclass or service result object emitted when background work completes. |
 
 ## Maintenance rule
 
-- Do not add undocumented callbacks, `Request` variants, or `Response`
-  variants. Add a row above in the same change.
-- Prefer typed `Request`/`Response` payloads over untyped strings for new
-  cross-boundary data.
-- Keep Slint callback signatures stable; document payload changes here instead
-  of relying on implicit handler knowledge.
-- `RunEvent` values from the extraction thread (`Started`, `Plan`,
-  `ImageStarted`, `ImageDone`, `Progress`, `Log`, `Finished`, `Failed`) stream
-  through `spawn_extraction` directly, not through the worker channel; they
-  are defined in `forza-app/src/services/extraction_runner.rs`.
+- Do not add undocumented `Signal(...object...)` declarations. Add a row above in the same change.
+- Prefer controller/view/worker DTO dataclasses over raw dicts for new cross-boundary payloads.
+- Keep PySide signal signatures stable; document payload changes here instead of relying on implicit emitter knowledge.

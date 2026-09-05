@@ -1,21 +1,18 @@
-Implementation: Rust (forza-rust/) — current. Legacy Python (forza/) frozen at 0.21.0-beta.1.
-
 # Developer Maintenance Guide: 6. Code organization and layer contract
 
 Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: permanent
 Scope: Developer maintenance guidance shard generated from the former oversized `guide.md` document
-Last verified: 2026-09-05
+Last verified: 2026-06-14
 
 Back to index: [`../guide.md`](../guide.md).
 
 ## 6. Code organization and layer contract
 
-The workspace crate layout is part of the project contract. New features
-should fit one of these crates before a new crate or cross-layer dependency
-is introduced. The workspace is `forza-rust/` (version `0.1.0`); binaries are
-`forza.exe` (`forza-cli`) and `forza-gui.exe` (`forza-gui`).
+The reorganized package layout is part of the project contract. New features
+should fit one of these packages before a new package or cross-layer dependency
+is introduced.
 
 User-facing GUI text, operator messages, logs, and project documentation should
 use English unless a specific externally supplied value is being displayed.
@@ -25,171 +22,150 @@ values.
 High-level layout:
 
 ```text
-forza-rust/crates/forza-config/     config structs, loading (load_config), validation (validate_config)
-forza-rust/crates/forza-cli/        thin clap command adapters (forza.exe)
-forza-rust/crates/forza-app/        application-level use cases and CLI/GUI orchestration
-forza-rust/crates/forza-domain/     pure domain helpers (lap/frontier/review_rules/normalizer/ordering/race_class)
-forza-rust/crates/forza-db/         rusqlite schema DDL, repositories, migration::upgrade(), PRAGMA user_version state
-forza-rust/crates/forza-gui/        Slint UI (ui/pages/*.slint), callbacks/state (lib.rs), worker (worker.rs),
-                                    detail views, ui_state, ui_persist
-forza-rust/crates/forza-pipeline/   image discovery, planning, hashing, metadata, encoding, naming,
-                                    model-response intake helpers
-forza-rust/crates/forza-lmstudio/   LM Studio native backend (reqwest+tokio), DesiredLoadConfig,
-                                    PerformancePolicy, response parsing/validation/repair
-forza-rust/crates/forza-output/     CSV (BOM+CRLF) and dependency-free PDF writer (TOC links)
-forza-rust/fixtures/                expected/ committed; model_responses/ + images/ git-ignored personal data
-docs/                               architecture and remediation documentation
+forza/config.py                 config dataclasses, loading, validation
+forza/cli/                      thin command adapters
+forza/application/              application-level use cases and CLI orchestration
+forza/domain/                   pure domain helpers
+forza/db/                       SQLModel models, repositories, Alembic migration support
+forza/gui/                      PySide6 GUI, controllers, views, workers, widgets, GUI read/write facades
+forza/pipeline/                 image discovery, encoding, model-response parsing, image-to-result processing
+forza/lmstudio/                 LM Studio native backend and runtime metadata client
+forza/output/                   CSV and PDF writers
+forza/domain/review_rules.py    pure review-detection helper rules
+tests/                          unit, regression, static-contract, and integration tests
+docs/                           architecture and remediation documentation
 ```
 
-### 6a. Crate responsibilities
+### 6a. Package responsibilities
 
-`forza-domain/`
+`forza/domain/`
 
 - Owns pure domain logic: lap parsing, dirty-lap detection, class ordering,
   track/car normalization, review-rule helpers, and string normalization.
-- Only third-party text dependencies (regex/unicode crates); must not gain
-  GUI, DB, LM Studio, CLI, or filesystem-orchestration dependencies.
+- Must not import GUI, SQLModel sessions, repositories, LM Studio, CLI, or
+  filesystem-heavy application services.
 - May define deterministic helpers used by any other layer.
 
-There is no shared schemas package: each crate owns its row/param structs
-(e.g. `forza-output::csv::ExportRow`, `forza-app::BestLapRow`, `RunParams`,
-`SettingRow`/`SettingsSnapshot`) and orchestration passes owned data across
-the boundary. Avoid adding persistence-only SQL details to shared shapes
-unless multiple layers need the same shape.
+`forza/schemas/`
 
-`forza-db/`
+- Owns public DTOs/enums passed across package boundaries.
+- `ExportLap` is the SQL-native flat row for CSV/PDF/lab ground truth.
+- `ExtractionResult` is the in-memory pipeline result for one image file.
+- Avoid adding persistence-only SQL details here unless multiple layers need
+  the same shape.
 
-- Owns rusqlite schema DDL, repositories, `migration::upgrade()`, and
-  schema-state helpers (`schema_status`, `PRAGMA user_version`,
-  `SCHEMA_VERSION = 2`).
-- Repositories should express persistence operations, not GUI workflows
-  (`best_laps::mark_best_laps`, `reviews`, `corrections::apply_all`,
-  `flags::sync_review_flags`, `images`, `laps`, `runs`, `external_records`).
-- The doctor battery `doctor::run_full_doctor` (~70 checks) lives here.
-- Application and GUI read/write services may use DB helpers;
-  domain and output must not open DB connections.
+`forza/db/`
 
-`forza-pipeline/`
+- Owns SQLModel entities, repositories, Alembic migrations, and schema-state
+  helpers.
+- Repositories should express persistence operations, not GUI workflows.
+- Application, GUI read/write facades, and lab services may use DB helpers;
+  domain and output must not open DB sessions.
 
-- Owns image discovery (`discovery::find_images`), duplicate planning
-  (`planning::plan_images`), hashing (`hashing::file_hash`), metadata,
-  request-image encoding, naming, and model-response intake helpers.
-- Only third-party dependencies (image/walkdir/sha2/chrono/etc.); it is a
-  leaf the application layer wires together with the backend and the DB.
-- Shared image discovery lives in `discovery::find_images`; do not
+`forza/pipeline/`
+
+- Owns image discovery, duplicate planning, request-image encoding,
+  model-response parsing, and `process_image`.
+- `process_image` may call the LM Studio backend interface and pure domain
+  normalization, but it must not persist to SQLite or write reports.
+- Shared image discovery lives in `forza.pipeline.image.find_images`; do not
   add duplicate image-discovery helpers elsewhere.
 
-`forza-lmstudio/`
+`forza/lmstudio/`
 
-- Owns the native LM Studio REST backend (`backend::LMStudioBackend`,
-  reqwest+tokio), model runtime client (`client::RuntimeClient`), model
-  load/unload behavior (`load_config::DesiredLoadConfig`), retries, response
-  stats, strict response parse+validation (`response`), and JSON repair
-  (`json_repair::repair_json`).
-- Performance watchdog state uses `backend::PerformancePolicy` (defaults
-  20.0 tok/s floor, 45.0 s elapsed, streak 3).
-- Other layers should go through the backend/runtime client rather than
-  constructing raw requests directly.
+- Owns the native LM Studio REST backend, model runtime metadata client,
+  model load/unload behavior, retries, response stats, and SQL-attempt payload
+  production.
+- Other layers should use `build_backend(cfg)` or `LMStudioRuntimeClient`
+  rather than constructing raw requests directly.
 - Do not reintroduce OpenAI-compatible, Ollama, or generic backend branches
   without updating section 7b and the related tests.
 
-`forza-output/`
+`forza/output/`
 
-- Owns CSV/PDF rendering (`csv::export_csv` / `csv::ExportRow`,
-  `build_pdf_plan_ext`, `render_pdf`, `PdfRenderOptions`).
-- Takes already-normalized data (`ExportRow`, external records, config,
+- Owns CSV/PDF rendering.
+- Takes already-normalized data (`ExportLap`, external records, config,
   ordered track lists) and writes artifacts.
 - Must not query SQLite, call LM Studio, discover images, or mutate review
   state.
 
-`forza-app/`
+`forza/application/`
 
 - Owns use cases that coordinate DB, pipeline, LM Studio, output, config, and
   explicit maintenance behavior.
-- This is the primary place for orchestration: runs (`services::extraction_runner`
-  via `spawn_extraction` with `RunParams`/`RunControl`/`RunEvent`), rebuilds
-  (`services::rebuild::rebuild` with `RebuildOutcome`), exports, DB doctor,
-  image inventory/rename/export, external-record import, and Best Laps reads.
-- `rebuild()` order matters: apply persisted corrections
-  (`corrections::apply_all`) -> recompute frontier (`mark_best_laps`) ->
-  refresh review candidates (`upsert_review_cases`, preserving
-  operator-resolved cases by business key) -> sync system flags
-  (`sync_review_flags`) -> per-run review counters.
-- Application services may use repositories and crate APIs, but should expose
-  stable public functions to CLI and GUI.
+- This is the primary place for orchestration: runs, extraction batches,
+  rebuilds, exports, DB doctor, image inventory/rename/export, external-record
+  import, and Best Laps reads.
+- Application services may use repositories and package APIs, but should expose
+  stable public methods to CLI and GUI.
+- `RunService` is the top-level run orchestrator used by CLI and GUI flows.
+  `RunLifecycleService` is the database persistence boundary for run state
+  changes such as begin, complete, fail, preflight failure, and recovery.
 
-`forza-gui/`
+`forza/gui/`
 
-- Owns the Slint UI: pages in `ui/pages/*.slint` (images/process/review/
-  best-laps/diagnostics/settings/logs plus embedded image-detail/image-debug;
-  NO Records page), callbacks and screen state in `src/lib.rs`, background
-  work in `src/worker.rs`, `src/detail_views.rs`, `src/ui_state.rs`, and
-  `src/ui_persist.rs`.
-- GUI code must not perform persistence inline on the UI thread; a long-lived
-  worker thread handles each request on its own short-lived thread and
-  responses marshal back via `slint::invoke_from_event_loop`.
-- Long-running work belongs to worker requests; callbacks enqueue requests
-  and apply responses, they do not perform persistence inline.
+- Owns PySide6 UI code, controllers, workers, widgets, and GUI-only DTO/read
+  facades.
+- `GuiReadService` and `GuiWriteService` are GUI facades. Controllers and views
+  must use those facades or `forza.application` use cases.
+- GUI views/controllers must not import repositories or open SQLModel sessions.
+- Long-running work belongs in workers; views emit user-intent signals and do
+  not perform persistence.
 
 
-`forza-cli/` and `forza-config/`
+`forza/cli/`
 
-- `forza-cli` owns clap argument parsing and command dispatch only
-  (`run | rebuild | export | config-check | gui | maintenance ...`).
-- CLI commands load config, then delegate to application services or the GUI
-  entry point. Lab workflows are exposed through the GUI, not the public CLI.
+- Owns argument parsing and command dispatch only.
+- CLI commands load config, setup logging, then delegate to application
+  services. Lab workflows are exposed through the GUI, not the public CLI.
 - Do not put business logic, DB queries, or direct LM Studio calls in CLI
   modules.
-- `forza-config` owns `forza_config.ini` loading (`load_config`) and
-  validation (`validate_config`); settings UI rows live in
-  `forza-app/src/services/settings.rs` (`SettingRow`, `settings_snapshot`).
 
 ### 6b. Dependency direction
 
-Cargo-verified edges (orchestration flows upward into `forza-app`):
+Allowed dependency direction:
 
 ```text
-forza-cli -> forza-app/forza-gui/forza-db/forza-config/forza-output/forza-pipeline
-forza-gui -> forza-app/forza-db/forza-config/forza-domain/forza-output/forza-pipeline
-forza-app -> forza-db/forza-domain/forza-pipeline/forza-lmstudio/forza-output/forza-config
-forza-domain, forza-pipeline -> third-party crates only (leaves; app wires them together)
-forza-domain -> must stay free of GUI, DB, LM Studio, CLI, and filesystem orchestration
+cli -> application
+gui -> application/gui facades
+application -> db/domain/pipeline/lmstudio/output
+pipeline -> domain/lmstudio schemas
+lmstudio -> pipeline.model_response/domain schemas
+output -> domain/schemas
+db -> schemas/domain only when needed
+domain -> standard library only
 ```
 
 Keep dependencies acyclic where practical. If a new import creates a cycle,
-move the shared type/helper into `forza-domain`, or move the
-orchestration upward into `forza-app`.
+move the shared type/helper into `schemas` or `domain`, or move the
+orchestration upward into `application`.
 
 ### 6c. Public entry points
 
-Prefer crate public APIs when crossing layers:
+Prefer package public APIs when crossing layers:
 
-```rust
-use forza_app::{rebuild, spawn_extraction, RunParams, settings_snapshot, SettingRow};
-use forza_app::{apply_filters, filter_options, list_best_laps};
-use forza_config::{load_config, validate_config};
-use forza_db::migration::{schema_status, upgrade};
-use forza_db::repositories::{mark_best_laps, sync_review_flags};
-use forza_lmstudio::backend::{LMStudioBackend, PerformancePolicy};
-use forza_lmstudio::load_config::DesiredLoadConfig;
-use forza_output::csv::{export_csv, ExportRow};
-use forza_output::{build_pdf_plan_ext, render_pdf, PdfRenderOptions};
-use forza_pipeline::{find_images, plan_images, file_hash};
-use forza_domain::ordering::ordered_lap_key;
-use forza_domain::review_rules::*;
+```python
+from forza.application import DatabaseService, RunService, RebuildService, ExportService
+from forza.application import ExternalRecordService, ImageInventoryService, ImageRenameService
+from forza.gui import GuiReadService, GuiWriteService
+from forza.lmstudio import build_backend, LMStudioRuntimeClient
+from forza.output import export_csv, generate_pdf
+from forza.pipeline import find_images, plan_images, process_image
+from forza.domain import load_reference_data, ordered_lap_key
 ```
 
-Direct submodule imports are acceptable inside a crate or in tests that need a
-specific implementation detail. For feature code, prefer the public crate
+Direct submodule imports are acceptable inside a package or in tests that need a
+specific implementation detail. For feature code, prefer the public package
 exports above unless there is a clear reason not to.
 
 ### 6d. Boundary rules
 
-- GUI callbacks use worker requests, public services, and application use cases.
-- GUI code must not perform persistence inline on the UI thread.
+- GUI controllers and views use public services and application use cases.
+- GUI code must not open SQLModel sessions directly.
+- GUI code must not import repositories directly.
 - CLI modules should stay thin and delegate real behavior to services/use cases.
-- SQL-native exports use flat `ExportRow` rows, not grouped legacy snapshots.
-- Review detection helpers that are independent of SQL belong in `forza-domain::review_rules`; review-case persistence belongs in SQL repositories/application services.
+- SQL-native exports use flat `ExportLap` rows, not grouped legacy `ExtractionResult` snapshots.
+- Review detection helpers that are independent of SQL belong in `forza.domain.review_rules`; review-case persistence belongs in SQL repositories/application services.
 - Domain helpers should stay free of GUI, SQL, LM Studio, and filesystem side effects.
 - Normal extraction does not move, rename, or delete source screenshots; only explicit image-management actions may mutate files.
 - Runtime source of truth is SQLite, not JSON snapshots or cache files.
@@ -199,47 +175,54 @@ exports above unless there is a clear reason not to.
 Use this decision table before adding files:
 
 ```text
-Pure parsing, ordering, normalization, domain scoring     -> forza-domain/
-SQL schema DDL, repository, migration, schema state       -> forza-db/
-Image discovery/planning/hashing/encoding/naming         -> forza-pipeline/
-LM Studio request, model runtime, retry, raw response     -> forza-lmstudio/
-CSV/PDF rendering                                          -> forza-output/
-Run/rebuild/export/import/inventory orchestration          -> forza-app/
-Slint page/callback/worker/detail-view/UI state            -> forza-gui/
-Argument parser or command adapter                         -> forza-cli/
-Config struct, loading, validation                         -> forza-config/
-Former lab/bench workflows                                -> do not reintroduce into runtime crates
+Pure parsing, ordering, normalization, domain scoring     -> forza/domain/
+Cross-layer DTO or enum                                   -> forza/schemas/
+SQL model, repository, migration, schema state             -> forza/db/
+Image discovery/encoding or model-response validation      -> forza/pipeline/
+LM Studio request, model runtime, retry, raw response       -> forza/lmstudio/
+CSV/PDF rendering                                          -> forza/output/
+Run/rebuild/export/import/inventory orchestration          -> forza/application/
+GUI controller/view/worker/read-write facade               -> forza/gui/
+Former lab/bench workflows                                -> do not reintroduce into runtime package
+Argument parser or command adapter                         -> forza/cli/
 ```
 
 If the feature seems to need logic in three or more layers, implement the
-workflow in `forza-app` and keep the lower layers focused on their own
+workflow in `application` and keep the lower layers focused on their own
 contracts.
 
 ### 6f. Anti-patterns to avoid
 
-- Recreating removed Python-era structures (compat shims, service facades,
-  second JSON parsers, second LM Studio clients, second image finders).
+- Recreating removed root modules such as `forza.pipeline.py`,
+  `forza.extractor.py`, `forza.report.py`, or a new `forza.services` facade.
+- Adding compatibility aliases for old module paths.
 - Reading normalized external-record JSON files directly from Best Laps or PDF paths;
   community records are SQL-backed active state.
-- Letting GUI callbacks write config files, database rows, or filesystem assets
-  directly instead of going through worker requests/services.
+- Adding a second image finder, second JSON parser, or second LM Studio client.
+- Letting GUI views write config files, database rows, or filesystem assets
+  directly.
 - Letting output writers query SQLite or recompute best laps.
 - Treating partial driver lists as model failure in retry logic.
 
 ## 7. Configuration model
 
-`AppConfig` (in `forza-config`) is the loaded runtime config. It includes path fields, user fields, LLM settings, image encoding settings, validation settings, PDF settings, and prompt selection.
+`forza.config.AppConfig` is the loaded runtime config. It includes path fields, user fields, LLM settings, image encoding settings, validation settings, PDF settings, and prompt selection.
 
 Important config rules:
 
-- Use `load_config(path, strict)` with `strict=true` before operations where invalid typed values must fail rather than silently falling back (the CLI also exposes `--strict`).
-- GUI settings reads go through `settings_snapshot` (`SettingRow`/`SettingsSnapshot`); saves go through the worker `SaveSettings` request against the worker-owned live `AppConfig`, not through ad hoc INI edits.
+- Use `load_config(..., strict=True)` before operations where invalid typed values must fail rather than silently falling back.
+- GUI writes and previews go through `ConfigFileService` via `GuiConfigState`, not through ad hoc INI edits.
+- Saving config validates the candidate config, creates a timestamped backup, writes a temporary file, then replaces the target file.
 - `[lmstudio]` is the only model section. Do not reintroduce backend switching or compatibility-only fields.
-- Obsolete Python-era fields must not be reintroduced into `AppConfig` or GUI settings.
-- `workers` controls extraction concurrency (`RunParams.workers`; multi-worker
-  when > 1). Keep the default conservative for LM Studio unless the loaded
-  model and hardware have been validated with parallel image requests.
-- `context_length`, `reasoning_mode`, batch settings, KV-cache settings, image format, and performance watchdog settings are user-editable LM Studio controls surfaced through the settings rows.
+- Obsolete fields such as `output_dir` and `max_parse_retries` must not be reintroduced into `AppConfig` or GUI settings.
+- `llm.image_format` supports `png`, `jpeg`, and `webp`; image file format belongs to `image_files`, while request payload format belongs to `extraction_results`.
+- `llm.workers` controls extraction concurrency. Keep the default conservative
+  for LM Studio unless the loaded model and hardware have been validated with
+  parallel image requests.
+- `llm.context_length`, `llm.reasoning_mode`, batch settings, KV-cache settings, image format, and performance watchdog settings are user-editable LM Studio controls.
+- `llm.reasoning_mode` accepts `off`, `on`, `auto`, `low`, `medium`, and
+  `high`; not every model advertises every mode through LM Studio.
+- `llm.context_length = 5000` is the current safe default for Qwen3.5 9B with the production prompt and `reasoning_mode = off`. Re-evaluate the margin before enabling thinking/reasoning models or longer prompts.
 - `extraction_results` stores the accepted/final per-image summary;
   `extraction_attempts` stores each concrete call, including rejected retries,
   redacted request payload, request hash, raw response, parse error,
@@ -257,5 +240,5 @@ Important config rules:
 - `semantic_retry`: critical extraction failure such as an empty track, empty entry list, or all null best-lap values. Partial driver lists and missing specific drivers are valid and must not trigger retry.
 - Accepted attempts are marked in SQL with `accepted = true`. Failed attempts remain queryable for model/prompt diagnostics.
 
-For performance degradation, prefer a watchdog over routine unload/reload. The native backend schedules reload only after repeated slow responses, using `PerformancePolicy` (defaults 20.0 tok/s floor, 45.0 s elapsed, streak 3).
+For performance degradation, prefer a watchdog over routine unload/reload. The native backend schedules reload only after repeated slow responses, using `performance_tps_floor`, `performance_reload_elapsed_s`, and `performance_reload_streak`.
 

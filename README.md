@@ -104,6 +104,9 @@ Users are responsible for the model they run, the endpoint they configure, and t
 - [Beta tester guide](README_BETA.md)
 - [Roadmap](docs/roadmap.md)
 - [Beta packaging policy](docs/release/beta_packaging.md)
+- [Rust implementation docs](forza-rust/docs/README.md) — current developer
+  reference (architecture, database, reviews, GUI, LM Studio, output, config).
+  Root `docs/` is the frozen Python-era reference.
 
 ## Contributing and security
 

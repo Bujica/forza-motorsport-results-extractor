@@ -3,23 +3,19 @@
 Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: permanent
-Scope: current product state after the Rust migration (0.21.0-beta.1 was the
-final Python baseline; the Rust workspace in `forza-rust/` is current)
-Last verified: 2026-09-04
+Scope: current product state after the 0.21.0-beta.1 release
+Last verified: 2026-08-25
 Supersedes: scattered stage notes in implementation and history documents
-Related tests: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `forza.exe maintenance db-doctor`
+Related tests: `python -m compileall -q forza`, `pytest`, `python -m forza maintenance db-doctor --json`
 
 This document is the first orientation point for maintenance work. It states the
 current released product posture and links to the authoritative contracts.
 
 ## Current Stage
 
-The current product version is 0.21.0-beta.1. That was the final stable
-baseline of the Python line (`forza/`, now frozen — see
-`docs/history/2026-08-25_0.21.0-beta.1_final_python_line_release.md`); the Rust
-migration (`docs/plans/2026-08-25_rust_migration_plan.md`) is complete and the
-`forza-rust/` workspace (9 crates, Slint GUI + clap CLI over rusqlite) is the
-current implementation.
+The current product version is 0.21.0-beta.1, the final stable baseline of the
+Python line before the Rust migration experiment
+(`docs/plans/2026-08-25_rust_migration_plan.md`).
 SQLite is the runtime source of truth for extraction runs, inputs, attempts, raw
 model evidence, reviews, internal image flags, best laps, Community Records,
 performance analytics, and reference catalog data. Legacy runtime JSON caches,

@@ -7,8 +7,7 @@ Target screenshot type: post-race Results screen.
 Audience: maintainer
 Lifecycle: beta release
 Scope: Windows portable executable packaging
-Last verified: 2026-09-05
-Implementation: Rust (forza-rust/) — current. Legacy Python (forza/) frozen at 0.21.0-beta.1.
+Last verified: 2026-06-19
 
 ## Goal
 
@@ -17,13 +16,14 @@ The bundle must include only product runtime files and must exclude developer-on
 
 ## Bundle policy
 
-Included (see the README.md bundle section, which stays authoritative):
+Included:
 
-- `forza-gui.exe` for GUI-first testing.
-- `forza.exe` for explicit CLI and maintenance commands.
-- Database migrations required by the application.
-- Runtime reference data and starter configuration templates
-  (`forza_config.ini.example` and related files).
+- `Forza Motorsport Results Extractor.exe` for GUI-first testing.
+- `fmre-cli.exe` for explicit maintenance commands.
+- Alembic migrations and runtime package files required by the application.
+- `forza_config.ini.example`.
+- `README_BETA.md`.
+- `cars.txt`, `tracks.txt`, and `data/external/track_aliases.json`.
 - Empty runtime folders for `data/input`, `output/reports`, `output/logs`, and `output/exports`.
 
 Excluded:
@@ -37,24 +37,11 @@ Excluded:
 - local screenshots, logs, reports, exports, prompt diagnostics, and debug artifacts.
 - private external spreadsheets such as `DataFM.xlsx`.
 
-There is no PyInstaller step and no `fmre-cli.exe` (that name never existed):
-both executables are native Rust builds.
-
 ## Local build
 
-From `forza-rust/` (Rust toolchain required):
-
 ```cmd
-cd forza-rust
-cargo build --release -p forza-cli -p forza-gui
-```
-
-Before release, the gates must be green:
-
-```cmd
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all --check
+pip install -e .[dev,gui,build]
+python tools\build_windows_beta.py
 ```
 
 Expected artifact:
@@ -68,15 +55,12 @@ dist\ForzaMotorsportResultsExtractor-0.21.0-beta.1-windows-x64.zip
 From the unpacked bundle:
 
 ```cmd
-forza.exe --help
-forza.exe maintenance db-upgrade
-forza.exe maintenance db-doctor --json
-forza-gui.exe
+fmre-cli.exe --help
+fmre-cli.exe maintenance db-upgrade
+fmre-cli.exe maintenance db-doctor --json
+"Forza Motorsport Results Extractor.exe"
 ```
 
 ## Notes
 
-The beta uses native Rust builds: `forza-gui.exe` (Slint desktop app) plus
-`forza.exe` (CLI maintenance and controlled runs) against the local SQLite
-database. This keeps troubleshooting close to the shipped binaries with no
-interpreter or packaging shim in between.
+The beta uses PyInstaller one-folder packaging. This is deliberate: PySide6, SQLite/Alembic data files, and troubleshooting are easier to validate before attempting a one-file executable.

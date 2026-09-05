@@ -1,23 +1,16 @@
-Implementation: Rust (forza-rust/) — current. Legacy Python (forza/) frozen at 0.21.0-beta.1.
-
 # Architecture Overview
 
 Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: permanent
 Scope: system-level structure and source-of-truth overview
-Last verified: 2026-09-05
+Last verified: 2026-06-05
 Supersedes: high-level architecture notes scattered across developer guide
-Related tests: `cargo test --workspace` (run in `forza-rust/`)
+Related tests: `python -m pytest -q`
 
 Forza Screenshot Extractor is a desktop-first application that processes Forza
 Motorsport race-result screenshots with a local LM Studio vision model, stores
 runtime state in SQLite, supports human review, and exports best-lap records.
-
-The two binaries are `forza.exe` (CLI, clap arg parsing) and `forza-gui.exe`
-(Slint UI), built via `cargo build -p forza-cli -p forza-gui` in `forza-rust/`.
-Build identity is workspace `Cargo.toml` version `0.1.0`, surfaced as
-`forza-app::APP_VERSION` (`forza.exe --version`, GUI title, every run row).
 
 ## Primary Flow
 
@@ -33,19 +26,17 @@ data/input images
   -> best-lap views and exports
 ```
 
-## Crate Roles
+## Package Roles
 
-| Crate | Role |
+| Package | Role |
 | --- | --- |
-| `forza-app` | Orchestration services for runs, rebuild, images, DB Doctor, export, and config. |
-| `forza-db` | rusqlite persistence: schema DDL, `migration::upgrade()`, repositories, and SQLite connection helpers. |
-| `forza-gui` | Slint UI: pages, callbacks/state, worker threads, and GUI read/write services. |
-| `forza-lmstudio` | Native LM Studio REST API boundary (reqwest+tokio HTTP backend). |
-| `forza-pipeline` | Image processing and extraction orchestration helpers (discovery/planning/hashing/metadata/encoding/naming). |
-| `forza-domain` | Domain rules independent of UI and persistence (lap/frontier/review_rules/normalizer/ordering/race_class). |
-| `forza-output` | Export and report generation (CSV BOM+CRLF, dependency-free PDF writer with TOC links). |
-| `forza-config` | `forza_config.ini` loading (`load_config`) and validation (`validate_config`). |
-| `forza-cli` | Thin clap command adapters delegating to `forza-app` services. |
+| `forza.application` | Orchestration services for runs, rebuild, images, DB Doctor, export, and config. |
+| `forza.db` | SQLModel entities, migrations, repositories, and SQLite connection helpers. |
+| `forza.gui` | PySide6 views, controllers, workers, and GUI read/write services. |
+| `forza.lmstudio` | Native LM Studio REST API boundary. |
+| `forza.pipeline` | Image processing and extraction orchestration helpers. |
+| `forza.domain` | Domain rules that should be independent of UI and persistence. |
+| `forza.output` | Export and report generation. |
 
 ## Authority Order
 

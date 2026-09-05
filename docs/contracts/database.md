@@ -1,45 +1,28 @@
 # Database Contract
 
-Implementation: Rust (forza-rust/) — current. Legacy Python (forza/) frozen at 0.21.0-beta.1.
 Status: current
 Audience: maintainer, developer, LLM
 Lifecycle: permanent
 Scope: SQLite runtime source of truth and integrity contract
-Last verified: 2026-09-05
+Last verified: 2026-07-27
 Supersedes: database contract sections in `docs/DEVELOPER_GUIDE.md`
-Related tests: unit/integration tests in `forza-rust/crates/forza-db`
+Related tests: `tests/test_db_doctor_core_service.py`, `tests/test_db_repositories_core.py`, `tests/test_db_vnext_runtime_contracts.py`
 
-SQLite (via `rusqlite`) is the operational source of truth. Runtime screens,
-rebuild, export, review, and Developer Tools must read relational state and
-registered artifacts, not legacy JSON snapshots or cache files.
+SQLite is the operational source of truth. Runtime screens, rebuild, export,
+review, and Developer Tools must read relational state and registered artifacts,
+not legacy JSON snapshots or cache files.
 
 The full architecture and table-level schema live in
 `docs/architecture/database.md`. This contract summarizes the behavior that code
 must preserve.
 
-## Schema Version And Migration
-
-- Schema identity is `PRAGMA user_version`; the current build expects
-  `SCHEMA_VERSION = 2` (`forza-db/src/schema_ddl.rs`).
-- `forza-db/src/migration.rs::upgrade()` builds the full schema from zero
-  inside one transaction (tables + indexes from `schema_ddl.rs`, plus
-  Images-inventory performance indexes), then stamps `user_version`, seeds
-  the reference catalog, and backfills performance indexes. Re-running on a
-  current database is a no-op (seed + backfill only).
-- `upgrade()` refuses populated databases with a foreign version instead of
-  migrating them: the Rust line creates its own databases from zero.
-  Python-created databases are never opened in production.
-- The runtime database must never be shared between implementations.
-- `schema_ddl.rs` is frozen DDL; the `frozen_schema_*` DB Doctor checks
-  enforce that runtime databases still match it.
-
 ## Reset Boundary
 
-The Images-first schema reset starts from a clean database. `forza.exe
-maintenance db-reset --yes` deletes the configured SQLite database (after an
-exclusive-lock check), and `db-upgrade` / new database creation builds the new
-baseline directly; compatibility tables, views, aliases, and columns from
-earlier runtime designs must not be retained only to preserve old data.
+The Images-first schema reset starts from a clean database. There is no migration
+requirement from earlier local DBs. CLI `db-reset`, GUI-confirmed reset, and
+new database creation must build the new baseline directly; compatibility
+tables, views, aliases, and columns from earlier runtime designs must not be
+retained only to preserve old data.
 
 During the transition, implementation files may still contain old table names,
 but the approved target identity is:
@@ -86,23 +69,13 @@ but the approved target identity is:
 
 ## Integrity Gate
 
-`forza.exe maintenance db-doctor [--json]` is the main database integrity
+`python -m forza maintenance db-doctor --json` is the main database integrity
 gate. A passing DB Doctor report proves only the checks it implements; it does
 not replace workflow-specific contract tests.
 
 DB Doctor must block release/rerun confidence when Review business keys are not
 canonical, when open Review cases lack matching active flags, or when relational
 runtime evidence no longer matches the frozen schema contract.
-
-Related maintenance commands (`forza.exe maintenance ...`):
-
-```text
-db-status          inspect schema state and row counts (read-only)
-db-doctor [--json] run relational integrity checks (read-only)
-db-upgrade         create the database from zero (refuses foreign versions)
-db-reset --yes     delete the configured database (exclusive-lock checked)
-db-heal            backfill missing extraction evidence left by older builds
-```
 
 ## SQLite File-Size Maintenance
 
@@ -113,9 +86,11 @@ cleanup.
 
 Routine cleanup must not run `VACUUM` after each deletion. After a large,
 intentional deletion, a maintainer may reclaim unused pages with `VACUUM` only
-when the application is closed and an explicit backup has been created.
+when the application is closed and an explicit backup has been created. The
+maintenance threshold is approximately 25–30% of pages on the freelist, or a
+cleanup large enough to justify the exclusive rewrite and temporary disk space.
 
-Before and after `VACUUM`, run `forza.exe maintenance db-doctor --json`
+Before and after `VACUUM`, run `python -m forza maintenance db-doctor --json`
 and retain the backup until the post-maintenance checks pass. Do not delete the
 SQLite `-wal` or `-shm` sidecars independently, and do not treat file size alone
 as an integrity signal; use SQLite integrity checks and DB Doctor instead.

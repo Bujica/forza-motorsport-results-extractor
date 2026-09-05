@@ -6,11 +6,10 @@ Forza Motorsport Results Extractor extracts lap-time data from Forza Motorsport,
 ## Source checkout quick start
 
 ```cmd
-cd forza-rust
-cargo build -p forza-cli -p forza-gui
-.\target\debug\forza.exe maintenance db-upgrade
-.\target\debug\forza.exe maintenance db-doctor
-.\target\debug\forza-gui.exe
+pip install -e ".[dev,gui]"
+python -m forza maintenance db-upgrade
+python -m forza maintenance db-doctor --json
+python -m forza gui
 ```
 
 ## Beta bundle quick start
@@ -19,9 +18,9 @@ From the unpacked bundle folder:
 
 ```cmd
 copy forza_config.ini.example forza_config.ini
-forza.exe maintenance db-upgrade
-forza.exe maintenance db-doctor
-forza-gui.exe
+fmre-cli.exe maintenance db-upgrade
+fmre-cli.exe maintenance db-doctor --json
+"Forza Motorsport Results Extractor.exe"
 ```
 
 Put supported screenshots here when using the beta bundle:
@@ -51,9 +50,9 @@ Not supported as a beta target:
 ## Common checks
 
 ```cmd
-.\target\debug\forza.exe --version
-.\target\debug\forza.exe config-check
-.\target\debug\forza.exe maintenance db-doctor
+python -m forza --version
+python -m forza config-check
+python -m forza maintenance db-doctor --json
 ```
 
-For the beta bundle, run `forza.exe` from the bundle folder instead.
+For the beta bundle, replace `python -m forza` with `fmre-cli.exe`.
