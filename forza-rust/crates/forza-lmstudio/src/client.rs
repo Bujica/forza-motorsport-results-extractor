@@ -250,14 +250,15 @@ impl RuntimeClient {
             .find(|inst| load_config_compatible(&inst.config, desired))
             .or(model.loaded_instances.first());
         if loaded && diagnosed.is_none_or(|d| d.id != model.loaded_instances[0].id) {
-            warnings.push("First loaded instance is not load-config compatible; diagnosing a compatible one".into());
+            warnings.push(
+                "First loaded instance is not load-config compatible; diagnosing a compatible one"
+                    .into(),
+            );
         }
         let effective = diagnosed
             .map(|inst| normalized_load_config(&inst.config))
             .unwrap_or_default();
-        let instance_id = diagnosed
-            .map(|inst| inst.id.clone())
-            .unwrap_or_default();
+        let instance_id = diagnosed.map(|inst| inst.id.clone()).unwrap_or_default();
 
         if !loaded {
             warnings.push("Model is available but not loaded".into());

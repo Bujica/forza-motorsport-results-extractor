@@ -31,10 +31,7 @@ mod tests {
     #[test]
     fn api_base_edge_cases() {
         assert_eq!(api_base("http://localhost:1234"), "http://localhost:1234");
-        assert_eq!(
-            api_base("http://localhost:1234/"),
-            "http://localhost:1234"
-        );
+        assert_eq!(api_base("http://localhost:1234/"), "http://localhost:1234");
         assert_eq!(
             api_base("http://localhost:1234/api/v1"),
             "http://localhost:1234/api/v1"

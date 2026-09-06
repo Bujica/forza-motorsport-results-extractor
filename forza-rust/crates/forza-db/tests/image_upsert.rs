@@ -2,8 +2,8 @@
 // Test harness: unwraps are idiomatic assertion helpers here.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use forza_db::{open_connection, upgrade};
 use forza_db::repositories::images::{UpsertParams, known_path_hashes, upsert_image_file};
+use forza_db::{open_connection, upgrade};
 
 fn fresh_conn() -> (tempfile::TempDir, rusqlite::Connection) {
     let dir = tempfile::tempdir().unwrap();

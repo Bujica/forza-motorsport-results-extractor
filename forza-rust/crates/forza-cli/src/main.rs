@@ -948,10 +948,7 @@ mod tests {
     fn short_hash_never_panics() {
         assert_eq!(short_hash("abc123"), "abc123");
         assert_eq!(short_hash(""), "");
-        assert_eq!(
-            short_hash("deadbeefcafe1234567890_extra"),
-            "deadbeefcafe"
-        );
+        assert_eq!(short_hash("deadbeefcafe1234567890_extra"), "deadbeefcafe");
     }
 
     #[test]

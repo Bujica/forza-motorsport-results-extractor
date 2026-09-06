@@ -15,10 +15,7 @@ pub fn known_path_hashes(conn: &Connection) -> Result<HashMap<String, String>, D
                          AND r.status IN ('ok', 'error'))",
     )?;
     let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, Option<String>>(0)?,
-            row.get::<_, String>(1)?,
-        ))
+        Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
     })?;
     let mut out = HashMap::new();
     for item in rows {
@@ -67,10 +64,7 @@ pub fn list_failed_images_for_retry(conn: &Connection) -> Result<Vec<(String, St
          ORDER BY i.current_name, i.id",
     )?;
     let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, Option<String>>(0)?,
-            row.get::<_, String>(1)?,
-        ))
+        Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
     })?;
     let mut out = Vec::new();
     for item in rows {

@@ -21,16 +21,12 @@ fn context(db: &std::path::Path, gamertag: &str) -> WorkerContext {
     // Config path guaranteed absent (unique temp name, never created):
     // exercises the missing-file → defaults path on every platform.
     // `Z:/...` was a Windows-only assumption (a valid relative path on Linux).
-    let missing_ini = std::env::temp_dir().join(format!(
-        "forza-gui-test-missing-{}.ini",
-        std::process::id()
-    ));
+    let missing_ini =
+        std::env::temp_dir().join(format!("forza-gui-test-missing-{}.ini", std::process::id()));
     let _ = std::fs::remove_file(&missing_ini);
     let cfg = forza_config::AppConfig {
         gamertag: gamertag.to_string(),
-        ..forza_config::load_config(&missing_ini, false)
-            .unwrap()
-            .0
+        ..forza_config::load_config(&missing_ini, false).unwrap().0
     };
     WorkerContext::new(db.to_path_buf(), missing_ini, cfg)
 }
@@ -296,8 +292,7 @@ fn reviews_and_bestlaps_round_trip_through_worker_thread() {
                 assert_eq!(rows.len(), 2, "seeded best laps: {rows:?}");
                 assert!(rows.iter().all(|r| r.track == "Fuji Speedway"));
                 assert!(rows.iter().all(|r| r.best_lap_ms > 0));
-                let mut drivers: Vec<&str> =
-                    rows.iter().map(|r| r.driver.as_str()).collect();
+                let mut drivers: Vec<&str> = rows.iter().map(|r| r.driver.as_str()).collect();
                 drivers.sort_unstable();
                 assert_eq!(drivers, vec!["Player One", "Rival Driver"]);
                 saw_best_laps = true;

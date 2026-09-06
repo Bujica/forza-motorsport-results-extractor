@@ -291,7 +291,8 @@ pub fn insert_processed_input_full(
 ) -> Result<(String, i64), DbError> {
     if !conn.is_autocommit() {
         return Err(DbError::SchemaState {
-            message: "insert_processed_input_full requires autocommit (no outer transaction)".into(),
+            message: "insert_processed_input_full requires autocommit (no outer transaction)"
+                .into(),
         });
     }
     conn.execute_batch("BEGIN IMMEDIATE")
