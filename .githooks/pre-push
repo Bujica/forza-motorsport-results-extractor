@@ -1,0 +1,29 @@
+#!/bin/sh
+# Local mirror of .github/workflows/rust.yml (fmt + clippy + test).
+# Install once:  git config core.hooksPath .githooks
+# Bypass (not recommended):  SKIP_GUARD=1 git push
+set -e
+
+if [ "${SKIP_GUARD}" = "1" ]; then
+  echo "[pre-push] SKIP_GUARD=1, skipping Rust gate."
+  exit 0
+fi
+
+# Repo root = parent of .githooks (hook runs with CWD = repo root).
+cd "$(dirname "$0")/.." || exit 1
+
+if [ ! -d forza-rust ]; then
+  echo "[pre-push] no forza-rust/ here, nothing to check."
+  exit 0
+fi
+
+cd forza-rust || exit 1
+
+echo "[pre-push] cargo fmt --all --check"
+cargo fmt --all --check
+
+echo "[pre-push] cargo clippy --workspace --all-targets -- -D warnings"
+cargo clippy --workspace --all-targets -- -D warnings
+
+echo "[pre-push] cargo test --workspace"
+cargo test --workspace

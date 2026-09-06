@@ -32,6 +32,15 @@ by hand — a stale binary against a newer database is the classic
 The workflow triggers on `forza-rust/**`, the workflow file itself, and root
 `.gitattributes` (line endings affect byte-embedded assets — see below).
 
+Run the same gate locally before pushing via the versioned hook:
+
+```sh
+git config core.hooksPath .githooks   # one-time install
+git push                              # pre-push runs fmt + clippy + test
+```
+
+Bypass only with reason: `SKIP_GUARD=1 git push`.
+
 ## Fixtures (`forza-rust/fixtures/`)
 
 | Path | Status |
