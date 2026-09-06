@@ -7,3 +7,5 @@
 forza-rust/assets/*.txt text eol=lf
 forza-rust/assets/*.json text eol=lf
 forza-rust/fixtures/**/*.json text eol=lf
+# Git hooks run under POSIX sh: a CRLF checkout breaks the shebang line.
+.githooks/* text eol=lf
