@@ -147,7 +147,15 @@ fn safe_filename(name: &str, fallback_suffix: &str) -> String {
 /// Series number of `path` within `base_target`'s `" - Race NNN"` series:
 /// base stem itself is 0, otherwise the numeric suffix, else `None`.
 fn series_number(path: &Path, base_target: &Path) -> Option<u32> {
-    if path.parent() != base_target.parent() {
+    // Parents compare by canonical key, not raw equality: stored vs
+    // discovered spellings differ in case/separators on Windows (Python
+    // casefolds both sides).
+    let same_parent = match (path.parent(), base_target.parent()) {
+        (Some(a), Some(b)) => path_key(a) == path_key(b),
+        (None, None) => true,
+        _ => false,
+    };
+    if !same_parent {
         return None;
     }
     let suffix_eq = path.extension().map(|e| e.to_string_lossy().to_lowercase())
@@ -403,15 +411,18 @@ pub fn plan_rename_many(conn: &Connection, ids: &[String]) -> Result<Vec<RenameP
     }
     let mut grouped: HashMap<SeriesKey, Vec<(ImageRow, PathBuf, String)>> = HashMap::new();
     for (image, target, semantic) in base {
+        // Lowercase like `available_semantic_group_ids`: the lookup below
+        // misses when cases differ (Windows FS is case-insensitive), which
+        // stuck every rename on the partial-series path.
         let key = (
             target.parent().map(Path::to_path_buf).unwrap_or_default(),
             target
                 .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
+                .map(|s| s.to_string_lossy().to_lowercase())
                 .unwrap_or_default(),
             target
                 .extension()
-                .map(|s| s.to_string_lossy().to_string())
+                .map(|s| s.to_string_lossy().to_lowercase())
                 .unwrap_or_default(),
         );
         grouped
@@ -743,7 +754,17 @@ mod tests {
         assert_eq!(
             numbered(Path::new("C:/shots/FUJI SPEEDWAY - A.png"), base),
             Some(0),
-            "stem match is case-insensitive (parent stays exact, like Python)"
+            "stem match is case-insensitive"
+        );
+        assert_eq!(
+            numbered(Path::new("c:/SHOTS/Fuji Speedway - A.png"), base),
+            Some(0),
+            "parent match is case-insensitive like Python casefold"
+        );
+        assert_eq!(
+            numbered(Path::new("C:/shots/Fuji Speedway - A.PNG"), base),
+            Some(0),
+            "suffix match is case-insensitive like Python casefold"
         );
         assert_eq!(
             numbered(Path::new("C:/shots/Fuji Speedway - A - Race 007.png"), base),
@@ -808,5 +829,53 @@ mod tests {
             ]
         );
         assert!(plans.iter().all(|p| p.would_change));
+    }
+
+    #[test]
+    fn full_rename_compacts_stale_series_numbers_like_python() {
+        // Python `_plan_complete_semantic_series` renumbers the whole
+        // selection 1..N by race order. The partial path instead keeps a
+        // stale "Race 005" and numbers the newcomer from max+1 (006).
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("rename.sqlite3");
+        forza_db::upgrade(&db).unwrap();
+        let conn = forza_db::open_connection(&db).unwrap();
+        for (id, name) in [
+            ("i1", "Fuji Speedway - A - Race 005.png"),
+            ("i2", "shot.png"),
+        ] {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "x").unwrap();
+            conn.execute(
+                "INSERT INTO image_files
+                    (id, file_hash, current_name, current_path, semantic_name,
+                     file_status, first_seen_at, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 'Fuji Speedway - A.png', 'available',
+                         datetime('now'), datetime('now'), datetime('now'))",
+                params![id, format!("h-{id}"), name, path.to_string_lossy()],
+            )
+            .unwrap();
+        }
+        let plans = plan_rename_many(&conn, &["i1".to_string(), "i2".to_string()]).unwrap();
+        assert_eq!(plans.len(), 2);
+        let mut targets: Vec<String> = plans
+            .iter()
+            .map(|p| p.target.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        targets.sort();
+        assert_eq!(
+            targets,
+            vec![
+                "Fuji Speedway - A - Race 001.png",
+                "Fuji Speedway - A - Race 002.png",
+            ]
+        );
+    }
+
+    #[test]
+    fn path_key_unifies_case_and_separators() {
+        let a = Path::new("C:/Shots/Fuji Speedway - A.png");
+        let b = Path::new("c:\\shots\\fuji speedway - a.png");
+        assert_eq!(super::super::path_key(a), super::super::path_key(b));
     }
 }

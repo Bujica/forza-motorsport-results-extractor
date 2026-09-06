@@ -12,12 +12,14 @@ pub mod run_control;
 pub mod run_log;
 pub mod settings;
 
-/// Canonical path identity for dedup/comparison: lowercase with normalized
-/// separators, so `C:/Shots` and `c:\shots` (and planning's `known_paths`)
-/// compare equal. Single owner (was copy-pasted in `extraction_runner` and
-/// `image_rename`).
+/// Canonical path identity for dedup/comparison: absolute, lowercase, with
+/// normalized separators, so `C:/Shots`, `c:\shots`, and relative-vs-absolute
+/// spellings of the same file compare equal (Python `_path_key` parity:
+/// `str(path.resolve(strict=False)).casefold()`; Rust has no casefold, and
+/// `to_lowercase` only differs on Turkic/ß edge cases).
 pub(crate) fn path_key(path: &std::path::Path) -> String {
-    path.to_string_lossy().replace('/', "\\").to_lowercase()
+    let abs = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    abs.to_string_lossy().replace('/', "\\").to_lowercase()
 }
 
 use rusqlite::Connection;
