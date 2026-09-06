@@ -7,6 +7,7 @@
 //! to Image Debug, per the GUI contract's list/detail policy.
 
 use crate::error::DbError;
+use crate::gui_queries::PROCESSING_PROJECTION;
 use rusqlite::{Connection, Row};
 
 /// Metadata projection for one image file (plus derived processing status).
@@ -82,20 +83,6 @@ pub struct DetailAttemptRow {
     pub validation_status: Option<String>,
     pub created_at: String,
 }
-
-const PROCESSING_PROJECTION: &str = "
-    COALESCE(
-        CASE
-            WHEN lr.status IS NULL THEN NULL
-            WHEN lr.status IN ('pending', 'running') THEN 'processing'
-            WHEN lr.status = 'ok' THEN 'processed_ok'
-            WHEN lr.status = 'cancelled' THEN 'cancelled'
-            ELSE 'processed_error'
-        END,
-        CASE WHEN li.image_file_id IS NOT NULL THEN 'skipped' END,
-        'unprocessed'
-    )
-";
 
 fn meta_row(row: &Row<'_>) -> rusqlite::Result<ImageDetailMeta> {
     Ok(ImageDetailMeta {

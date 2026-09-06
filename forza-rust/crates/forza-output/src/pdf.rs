@@ -15,6 +15,7 @@ use forza_domain::lap::strip_dirty_symbol;
 use forza_domain::ordering::{class_order_key, track_order_key, track_order_map};
 
 use crate::csv::ExportRow;
+use crate::fmt_float;
 
 /// One rendered row inside a class table.
 #[derive(Debug, Clone, PartialEq)]
@@ -632,15 +633,6 @@ fn title_case(s: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-/// Python str(float): 80.0 → "80.0", 26.7 → "26.7".
-fn fmt_float(v: f64) -> String {
-    if v == v.trunc() && v.abs() < 1e15 {
-        format!("{v:.1}")
-    } else {
-        format!("{v}")
-    }
 }
 
 // ── Main entry point ─────────────────────────────────────────────────────────

@@ -119,20 +119,22 @@ const VALID_REASONING_MODES: &[&str] = &["off", "on", "auto", "low", "medium", "
 
 type Sections = HashMap<String, HashMap<String, String>>;
 
-fn read_ini(path: &Path) -> Sections {
+fn read_ini(path: &Path) -> (Sections, Option<String>) {
     let mut ini = configparser::ini::Ini::new();
     match ini.load(path) {
-        Ok(map) => map
-            .into_iter()
-            .map(|(section, kv)| {
-                let cleaned = kv
-                    .into_iter()
-                    .filter_map(|(k, v)| v.map(|value| (k, value)))
-                    .collect();
-                (section, cleaned)
-            })
-            .collect(),
-        Err(_) => HashMap::new(),
+        Ok(map) => (
+            map.into_iter()
+                .map(|(section, kv)| {
+                    let cleaned = kv
+                        .into_iter()
+                        .filter_map(|(k, v)| v.map(|value| (k, value)))
+                        .collect();
+                    (section, cleaned)
+                })
+                .collect(),
+            None,
+        ),
+        Err(e) => (HashMap::new(), Some(e.to_string())),
     }
 }
 
@@ -237,13 +239,15 @@ impl<'a> Loader<'a> {
     ) -> Option<i64> {
         match self.raw(section, key) {
             None => fallback,
-            // "0" and "" both mean "unset" for optional ints — matching the
-            // writer, which serializes None as "" and 0-valued optionals are
-            // never meaningful (context/batch sizes must be > 0 when set).
-            Some(text) if text.trim().is_empty() || text.trim() == "0" => None,
+            // Empty, "0", and zero-padded "00" all mean "unset" for optional
+            // ints — matching the writer, which serializes None as "" and
+            // drops zero values on save. Any parsed zero is unset too
+            // (context/batch sizes must be > 0 when set).
+            Some(text) if text.trim().is_empty() => None,
             Some(text) => {
                 let parsed = parse_int(&text, section, key);
                 match parsed.invalid {
+                    None if parsed.value == 0 => None,
                     None => Some(parsed.value),
                     Some(message) => {
                         if self.strict && self.first_error.is_none() {
@@ -291,7 +295,17 @@ pub fn load_config(path: &Path, strict: bool) -> Result<(AppConfig, Warnings), C
             path.display()
         ));
     }
-    let map = read_ini(path);
+    let (map, read_error) = read_ini(path);
+    // A present-but-unreadable file used to degrade to all-defaults silently
+    // (wrong DB, wrong backend, no trace). Surface it like a missing file.
+    if let Some(e) = read_error
+        && path.exists()
+    {
+        warnings.push(format!(
+            "config file unreadable ({}): {e}; using defaults for missing values",
+            path.display()
+        ));
+    }
     let mut loader = Loader {
         map: &map,
         strict,

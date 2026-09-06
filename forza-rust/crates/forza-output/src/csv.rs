@@ -4,6 +4,8 @@
 use std::io::Write;
 use std::path::Path;
 
+use crate::fmt_float;
+
 #[derive(Debug, thiserror::Error)]
 pub enum ExportError {
     #[error("I/O error: {0}")]
@@ -74,15 +76,6 @@ fn field_value(row: &ExportRow, field: &str) -> String {
         "width_px" => row.width_px.map(|v| v.to_string()).unwrap_or_default(),
         "height_px" => row.height_px.map(|v| v.to_string()).unwrap_or_default(),
         other => unreachable!("unknown csv field {other}"),
-    }
-}
-
-/// Python str(float): 80.0 → "80.0", 26.7 → "26.7".
-fn fmt_float(v: f64) -> String {
-    if v == v.trunc() && v.abs() < 1e15 {
-        format!("{v:.1}")
-    } else {
-        format!("{v}")
     }
 }
 

@@ -47,14 +47,13 @@ pub fn candidate_config(
 }
 
 /// Validate what a change set would produce without writing anything.
-/// Returns the success message on validity.
+/// Returns the success message on validity. An empty change set validates the
+/// current file as-is (previously it returned success unconditionally, even
+/// for an invalid file).
 pub fn validate_changes(
     path: &Path,
     changes: &std::collections::BTreeMap<String, String>,
 ) -> Result<String, String> {
-    if changes.is_empty() {
-        return Ok("Configuration is valid for execution.".to_string());
-    }
     candidate_config(path, changes)?;
     Ok("Configuration is valid for execution.".to_string())
 }
@@ -470,6 +469,26 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn empty_preview_validates_current_file_instead_of_succeeding() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_base(dir.path());
+        assert!(validate_changes(&path, &map(&[])).is_ok());
+
+        // Corrupt the file in place: empty preview must now fail.
+        std::fs::write(&path, "[lmstudio]\nimage_format = bmp\n").unwrap();
+        assert!(validate_changes(&path, &map(&[])).is_err());
+    }
+
+    #[test]
+    fn zero_padded_optional_ints_mean_unset_like_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("forza_config.ini");
+        std::fs::write(&path, "[lmstudio]\ncontext_length = 00\n").unwrap();
+        let (cfg, _) = crate::load_config(&path, false).unwrap();
+        assert_eq!(cfg.llm.context_length, None);
     }
 
     #[test]

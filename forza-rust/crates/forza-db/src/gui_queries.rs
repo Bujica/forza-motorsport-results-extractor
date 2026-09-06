@@ -41,8 +41,11 @@ pub struct ImageInventoryFilter {
     pub include_missing_files: bool,
 }
 
-#[allow(dead_code)]
-const PROCESSING_PROJECTION: &str = "
+/// Derived processing-status expression over the `lr` (latest result) and
+/// `li` (latest non-process input) joins. Single owner: `image_detail` and
+/// `image_debug` reuse this so the three surfaces can never disagree
+/// (previously copy-pasted in all three files, one copy already dead).
+pub(crate) const PROCESSING_PROJECTION: &str = "
     COALESCE(
         CASE
             WHEN lr.status IS NULL THEN NULL
@@ -54,37 +57,6 @@ const PROCESSING_PROJECTION: &str = "
         CASE WHEN li.image_file_id IS NOT NULL THEN 'skipped' END,
         'unprocessed'
     )
-";
-
-#[allow(dead_code)]
-const FROM_CLAUSE: &str = "
-    FROM image_files i
-    LEFT JOIN (
-        SELECT image_file_id, status,
-               ROW_NUMBER() OVER (
-                   PARTITION BY image_file_id
-                   ORDER BY created_at DESC, id DESC
-               ) AS result_rank
-        FROM extraction_results
-        WHERE image_file_id IS NOT NULL
-    ) lr ON lr.image_file_id = i.id AND lr.result_rank = 1
-    LEFT JOIN (
-        SELECT ri.image_file_id
-        FROM run_inputs ri
-        JOIN (
-            SELECT image_file_id, MAX(id) AS latest_input_id
-            FROM run_inputs
-            WHERE image_file_id IS NOT NULL
-            GROUP BY image_file_id
-        ) l ON ri.id = l.latest_input_id
-        WHERE ri.decision <> 'process'
-    ) li ON li.image_file_id = i.id
-    LEFT JOIN (
-        SELECT duplicate_of_image_file_id, COUNT(*) AS cnt
-        FROM image_files
-        WHERE duplicate_of_image_file_id IS NOT NULL
-        GROUP BY duplicate_of_image_file_id
-    ) dup ON dup.duplicate_of_image_file_id = i.id
 ";
 
 fn row_to_inventory(row: &Row<'_>) -> rusqlite::Result<ImageInventoryRow> {

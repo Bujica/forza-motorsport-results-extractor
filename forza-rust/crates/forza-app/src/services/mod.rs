@@ -12,6 +12,14 @@ pub mod run_control;
 pub mod run_log;
 pub mod settings;
 
+/// Canonical path identity for dedup/comparison: lowercase with normalized
+/// separators, so `C:/Shots` and `c:\shots` (and planning's `known_paths`)
+/// compare equal. Single owner (was copy-pasted in `extraction_runner` and
+/// `image_rename`).
+pub(crate) fn path_key(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('/', "\\").to_lowercase()
+}
+
 use rusqlite::Connection;
 
 pub use extraction_replay::{ReplayOutcome, replay_recorded_response};

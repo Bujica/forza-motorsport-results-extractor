@@ -15,6 +15,8 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, params};
 
+use super::path_key;
+
 const WIN_FORBIDDEN: &[char] = &['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
 const WIN_RESERVED: &[&str] = &[
     "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
@@ -142,10 +144,6 @@ fn safe_filename(name: &str, fallback_suffix: &str) -> String {
 }
 
 /// Case-insensitive path identity (Windows filesystem parity).
-fn path_key(path: &Path) -> String {
-    path.to_string_lossy().to_lowercase().replace('/', "\\")
-}
-
 /// Series number of `path` within `base_target`'s `" - Race NNN"` series:
 /// base stem itself is 0, otherwise the numeric suffix, else `None`.
 fn series_number(path: &Path, base_target: &Path) -> Option<u32> {

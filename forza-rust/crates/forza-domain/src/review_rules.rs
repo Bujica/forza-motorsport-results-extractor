@@ -5,15 +5,6 @@ use std::sync::LazyLock;
 
 use crate::normalizer::track_key as review_track_key;
 
-macro_rules! lazy_regex {
-    ($pattern:expr) => {
-        LazyLock::new(|| match Regex::new($pattern) {
-            Ok(re) => re,
-            Err(err) => panic!("invalid built-in regex: {err}"),
-        })
-    };
-}
-
 static SUSPICIOUS_SYMBOL: LazyLock<Regex> = lazy_regex!(r"[^\w\s.\-']");
 static NUMERIC_PREFIX: LazyLock<Regex> = lazy_regex!(r"^\s*\d{1,3}[\s_\-.].+");
 static AMBIGUOUS_LAYOUT: LazyLock<Regex> = lazy_regex!(r"(?i)ambiguous layout\)?\s*:\s*(.+)$");

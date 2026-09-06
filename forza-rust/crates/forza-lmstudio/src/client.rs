@@ -7,6 +7,7 @@ use crate::error::LlmError;
 use crate::load_config::{
     DesiredLoadConfig, NormalizedLoadConfig, load_config_compatible, normalized_load_config,
 };
+use crate::url::api_base;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LoadedInstance {
@@ -65,20 +66,6 @@ pub struct RuntimeDiagnostic {
     pub model_info_summary: String,
     /// Display name of the matched model (`"id -> Display"` overview line).
     pub matched_display: String,
-}
-
-fn api_base(url: &str) -> String {
-    let clean = url.trim_end_matches('/');
-    if let Some(idx) = clean.find("/api/v1/") {
-        return format!("{}/api/v1", &clean[..idx]);
-    }
-    if clean.ends_with("/api/v1") {
-        return clean.to_string();
-    }
-    if let Some(idx) = clean.find("/v1/") {
-        return format!("{}/api/v1", &clean[..idx]);
-    }
-    clean.to_string()
 }
 
 fn model_rows(data: &Value) -> Vec<&Value> {

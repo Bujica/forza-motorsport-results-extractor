@@ -6,6 +6,19 @@
 //! This crate has no filesystem, network, GUI, or database access. Reference
 //! data is embedded at compile time from `assets/`.
 
+// Textual scope: defined before the modules below, so every child module
+// shares this one definition instead of repeating it (was copy-pasted in
+// `lap`, `car_names`, `review_rules`).
+/// Compile-once regex; patterns here are static and infallible.
+macro_rules! lazy_regex {
+    ($pattern:expr) => {
+        ::std::sync::LazyLock::new(|| match ::regex::Regex::new($pattern) {
+            Ok(re) => re,
+            Err(err) => panic!("invalid built-in regex: {err}"),
+        })
+    };
+}
+
 pub mod car_names;
 pub mod difflib;
 pub mod enums;

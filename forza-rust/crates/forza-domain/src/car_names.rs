@@ -79,16 +79,6 @@ pub fn car_match_key(value: Option<&str>) -> String {
 
 use std::sync::LazyLock;
 
-/// Compile-once regex; patterns here are static and infallible.
-macro_rules! lazy_regex {
-    ($pattern:expr) => {
-        LazyLock::new(|| match regex::Regex::new($pattern) {
-            Ok(re) => re,
-            Err(err) => panic!("invalid built-in regex: {err}"),
-        })
-    };
-}
-
 static YEAR_FULL: LazyLock<regex::Regex> = lazy_regex!(r"\b(?:19|20)(\d{2})\b");
 static QUOTED_YEAR: LazyLock<regex::Regex> = lazy_regex!(r"(\s)'(\d{2})\b");
 static NON_WORD: LazyLock<regex::Regex> = lazy_regex!(r"[^a-z0-9]+");

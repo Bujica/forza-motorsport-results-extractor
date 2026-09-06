@@ -9,16 +9,6 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::errors::DomainError;
 
-/// Compile-once regex; patterns here are static and infallible.
-macro_rules! lazy_regex {
-    ($pattern:expr) => {
-        LazyLock::new(|| match Regex::new($pattern) {
-            Ok(re) => re,
-            Err(err) => panic!("invalid built-in regex: {err}"),
-        })
-    };
-}
-
 /// TCR livery names; a race where >= 30% of the grid drives one is TCR.
 pub const TCR_CARS: &[&str] = &[
     "MG #20 MG6",

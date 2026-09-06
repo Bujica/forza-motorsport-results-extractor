@@ -7,6 +7,7 @@ use rusqlite::Connection;
 use forza_db::repositories::external_records::ExternalLapRecord;
 use forza_domain::lap::strip_dirty_symbol;
 use forza_domain::ordering::{LapRowLike, ordered_lap_key, track_order_map};
+use forza_output::fmt_float;
 
 /// One row in the Best Laps view (internal or external).
 #[derive(Debug, Clone, PartialEq)]
@@ -407,14 +408,6 @@ pub fn csv_row(row: &BestLapRow) -> std::collections::BTreeMap<String, String> {
     map.insert("lap_id".to_string(), row.lap_id.clone().unwrap_or_default());
     map.insert("run_id".to_string(), row.run_id.clone().unwrap_or_default());
     map
-}
-
-fn fmt_float(v: f64) -> String {
-    if v == v.trunc() && v.abs() < 1e15 {
-        format!("{v:.1}")
-    } else {
-        format!("{v}")
-    }
 }
 
 /// Build ExportRow slices for CSV/PDF consumers.

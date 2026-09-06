@@ -10,6 +10,7 @@
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::DbError;
+use crate::gui_queries::PROCESSING_PROJECTION;
 
 // ── Public projections ──────────────────────────────────────────────────
 
@@ -137,8 +138,6 @@ pub struct ImageDebugDetail {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────
-
-const PROCESSING_PROJECTION: &str = "COALESCE(\n        CASE\n            WHEN lr.status IS NULL THEN NULL\n            WHEN lr.status IN ('pending', 'running') THEN 'processing'\n            WHEN lr.status = 'ok' THEN 'processed_ok'\n            WHEN lr.status = 'cancelled' THEN 'cancelled'\n            ELSE 'processed_error'\n        END,\n        CASE WHEN li.image_file_id IS NOT NULL THEN 'skipped' END,\n        'unprocessed'\n    )";
 
 fn count_by_image(
     conn: &Connection,

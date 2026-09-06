@@ -235,26 +235,11 @@ fn settings_load_preview_save_round_trip() {
 fn reviews_and_bestlaps_round_trip_through_worker_thread() {
     let (_guard, db) = seeded_db();
 
-    // Enqueue before spawning, mirroring what UI callbacks do.
-    // Order matters: Rebuild marks best-lap flags, so ListBestLaps runs
-    // after it (before, the seeded rows have is_best_lap=0 and list is
-    // correctly empty).
+    // Job threads run each request concurrently, so responses arrive in
+    // nondeterministic order AND ListBestLaps may overtake RunRebuild (then
+    // the seeded rows still have is_best_lap=0 and the list is correctly
+    // empty). Sequence in two phases: rebuild first, then read.
     let (req_tx, req_rx) = mpsc::channel::<Request>();
-    for request in [
-        Request::ListReviews {
-            filter: forza_app::ReviewQueueFilter {
-                bucket: "open".into(),
-                ..Default::default()
-            },
-        },
-        Request::RunRebuild,
-        Request::ListBestLaps,
-        Request::RunDoctor,
-    ] {
-        req_tx.send(request).unwrap();
-    }
-    drop(req_tx);
-
     let (res_tx, res_rx) = mpsc::channel();
     // Gamertag matches a seeded driver: the frontier needs a player baseline
     // (groups without one are skipped by design), otherwise Rebuild marks
@@ -264,13 +249,20 @@ fn reviews_and_bestlaps_round_trip_through_worker_thread() {
             res_tx.send(response).unwrap();
         });
 
+    req_tx
+        .send(Request::ListReviews {
+            filter: forza_app::ReviewQueueFilter {
+                bucket: "open".into(),
+                ..Default::default()
+            },
+        })
+        .unwrap();
+    req_tx.send(Request::RunRebuild).unwrap();
     let mut saw_reviews = false;
-    let mut saw_best_laps = false;
-    let mut saw_doctor_ok = false;
     let mut saw_rebuild = false;
-    for _ in 0..4 {
+    for _ in 0..2 {
         match res_rx
-            .recv_timeout(std::time::Duration::from_secs(5))
+            .recv_timeout(std::time::Duration::from_secs(10))
             .unwrap()
         {
             Response::Reviews { result, .. } => {
@@ -278,6 +270,25 @@ fn reviews_and_bestlaps_round_trip_through_worker_thread() {
                 assert!(!rows.is_empty(), "seeded review case must be listed");
                 saw_reviews = true;
             }
+            Response::Rebuild(result) => {
+                assert!(result.is_ok());
+                saw_rebuild = true;
+            }
+            other => panic!("unexpected phase-1 response: {other:?}"),
+        }
+    }
+    assert!(saw_reviews && saw_rebuild);
+
+    req_tx.send(Request::ListBestLaps).unwrap();
+    req_tx.send(Request::RunDoctor).unwrap();
+    drop(req_tx);
+    let mut saw_best_laps = false;
+    let mut saw_doctor_ok = false;
+    for _ in 0..2 {
+        match res_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap()
+        {
             Response::BestLaps(result) => {
                 let rows = result.unwrap();
                 // Seeded graph: Player One (92.5s) + Rival Driver (91.9s) on
@@ -295,13 +306,9 @@ fn reviews_and_bestlaps_round_trip_through_worker_thread() {
                 assert!(result.unwrap().ok);
                 saw_doctor_ok = true;
             }
-            Response::Rebuild(result) => {
-                assert!(result.is_ok());
-                saw_rebuild = true;
-            }
-            _ => {}
+            other => panic!("unexpected phase-2 response: {other:?}"),
         }
     }
-    assert!(saw_reviews && saw_best_laps && saw_doctor_ok && saw_rebuild);
+    assert!(saw_best_laps && saw_doctor_ok);
     handle.join().ok();
 }

@@ -9,6 +9,7 @@ pub mod json_repair;
 pub mod load_config;
 pub mod protocol;
 pub mod response;
+pub mod url;
 
 pub use backend::{LMStudioBackend, RuntimeSnapshot};
 pub use client::{RuntimeClient, RuntimeModel};

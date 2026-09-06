@@ -54,17 +54,7 @@ pub struct BackendConfig {
 
 impl BackendConfig {
     pub fn api_base(&self) -> String {
-        let clean = self.url.trim_end_matches('/');
-        if let Some(idx) = clean.find("/api/v1/") {
-            return format!("{}/api/v1", &clean[..idx]);
-        }
-        if clean.ends_with("/api/v1") {
-            return clean.to_string();
-        }
-        if let Some(idx) = clean.find("/v1/") {
-            return format!("{}/api/v1", &clean[..idx]);
-        }
-        clean.to_string()
+        crate::url::api_base(&self.url)
     }
 
     pub fn chat_url(&self) -> String {
