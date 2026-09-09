@@ -307,3 +307,86 @@ fn reviews_and_bestlaps_round_trip_through_worker_thread() {
     assert!(saw_best_laps && saw_doctor_ok);
     handle.join().ok();
 }
+
+#[test]
+fn delete_duplicate_removes_inputs_and_recomputes_counters() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("del.sqlite3");
+    forza_db::upgrade(&db).unwrap();
+    let conn = forza_db::open_connection(&db).unwrap();
+    // Two files on disk inside the input dir (delete refuses outside roots).
+    for name in ["canon.png", "dup.png"] {
+        std::fs::write(dir.path().join(name), "x").unwrap();
+    }
+    conn.execute_batch(
+        "INSERT INTO extraction_runs (id, status, mode, model, total_inputs, duplicate_count, created_at)
+         VALUES ('run-del', 'completed', 'normal', 'm', 2, 1, datetime('now'));
+         INSERT INTO image_files
+            (id, file_hash, current_name, current_path, duplicate_of_image_file_id,
+             file_status, first_seen_at, created_at, updated_at)
+         VALUES ('img-canon', 'hash-1', 'canon.png', 'CANON_PATH', NULL, 'available',
+                 datetime('now'), datetime('now'), datetime('now')),
+                ('img-dup', 'hash-1', 'dup.png', 'DUP_PATH', 'img-canon', 'available',
+                 datetime('now'), datetime('now'), datetime('now'));
+         INSERT INTO run_inputs (id, run_id, image_file_id, input_order, input_path,
+                                 decision, file_hash, duplicate_kind, duplicate_of_hash,
+                                 duplicate_of_input_id, created_at)
+         VALUES (1, 'run-del', 'img-canon', 0, 'canon.png', 'process',
+                 'hash-1', NULL, NULL, NULL, datetime('now')),
+                (2, 'run-del', 'img-dup', 1, 'dup.png', 'duplicate',
+                 'hash-1', 'batch', 'hash-1', 1, datetime('now'));",
+    )
+    .unwrap();
+    // Fix the placeholder paths to the real temp files.
+    for (id, name) in [("img-canon", "canon.png"), ("img-dup", "dup.png")] {
+        let full = dir.path().join(name).to_string_lossy().to_string();
+        conn.execute(
+            "UPDATE image_files SET current_path = ?2 WHERE id = ?1",
+            rusqlite::params![id, full],
+        )
+        .unwrap();
+    }
+
+    let missing_ini =
+        std::env::temp_dir().join(format!("forza-gui-test-del-{}.ini", std::process::id()));
+    let _ = std::fs::remove_file(&missing_ini);
+    let mut cfg = forza_config::load_config(&missing_ini, false).unwrap().0;
+    cfg.input_dir = dir.path().to_path_buf();
+    cfg.gamertag = "Player".to_string();
+    let ctx = WorkerContext::new(db.clone(), missing_ini, cfg);
+    let service = ImageInventoryService::new(db.clone());
+
+    match handle_request(
+        &ctx,
+        &service,
+        &Request::DeleteImages {
+            image_ids: vec!["img-dup".to_string()],
+        },
+    ) {
+        Response::DeleteDone(result) => {
+            let (deleted, refused, sample) = result.unwrap();
+            assert_eq!((deleted, refused), (1, 0), "sample: {sample}");
+        }
+        other => panic!("expected delete response, got {other:?}"),
+    }
+
+    // Row, file, and run inputs gone; counters recomputed like Python.
+    assert!(!dir.path().join("dup.png").exists());
+    assert!(dir.path().join("canon.png").exists());
+    let remaining: i64 = conn
+        .query_row("SELECT COUNT(*) FROM image_files", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(remaining, 1);
+    let inputs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM run_inputs", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(inputs, 1);
+    let (total, dup): (i64, i64) = conn
+        .query_row(
+            "SELECT total_inputs, duplicate_count FROM extraction_runs WHERE id = 'run-del'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((total, dup), (1, 0));
+}

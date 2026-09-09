@@ -766,6 +766,8 @@ fn delete_images(
     let mut deleted = 0usize;
     let mut refused = 0usize;
     let mut refusal_sample = String::new();
+    // Runs whose counters need recompute after input rows disappear below.
+    let mut touched_runs: std::collections::HashSet<String> = std::collections::HashSet::new();
     for id in image_ids {
         let row: Option<(Option<String>, String)> = conn
             .query_row(
@@ -818,8 +820,27 @@ fn delete_images(
             "DELETE FROM image_flags WHERE image_file_id = ?1 AND flag_type = 'duplicate'",
             [id],
         );
+        // Run inputs that will be orphaned by the row delete (Python parity:
+        // the writer deletes them with the row instead of leaving NULLed
+        // leftovers). Collected BEFORE the row delete; removed only if the
+        // row delete below succeeds, so a refused image keeps everything.
+        // (Safe from result cascades: reaching the input delete implies no
+        // extraction_results reference this image, otherwise the row delete
+        // would already have refused via FK RESTRICT.)
+        let image_inputs: Vec<(i64, String)> = conn
+            .prepare("SELECT id, run_id FROM run_inputs WHERE image_file_id = ?1")
+            .and_then(|mut stmt| {
+                stmt.query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .map_err(|e| e.to_string())?;
         match conn.execute("DELETE FROM image_files WHERE id = ?1", [id]) {
             Ok(n) if n > 0 => {
+                for (input_id, run_id) in &image_inputs {
+                    conn.execute("DELETE FROM run_inputs WHERE id = ?1", [input_id])
+                        .map_err(|e| e.to_string())?;
+                    touched_runs.insert(run_id.clone());
+                }
                 if let Err(e) = std::fs::remove_file(&path) {
                     // Row is gone but the file remains: report it explicitly
                     // (recoverable via rescan) instead of counting success.
@@ -847,6 +868,25 @@ fn delete_images(
                 }
             }
         }
+    }
+    // Recompute run counters for runs that lost inputs (Python
+    // `_refresh_run_metrics` parity: total/to_process/skipped/duplicates
+    // from decisions, processed/succeeded/failed from results, open reviews).
+    for run_id in &touched_runs {
+        conn.execute(
+            "UPDATE extraction_runs SET
+                total_inputs = (SELECT COUNT(*) FROM run_inputs WHERE run_id = ?1),
+                to_process = (SELECT COUNT(*) FROM run_inputs WHERE run_id = ?1 AND decision = 'process'),
+                skipped = (SELECT COUNT(*) FROM run_inputs WHERE run_id = ?1 AND decision NOT IN ('process', 'duplicate')),
+                duplicate_count = (SELECT COUNT(*) FROM run_inputs WHERE run_id = ?1 AND decision = 'duplicate'),
+                processed = (SELECT COUNT(*) FROM extraction_results WHERE run_id = ?1),
+                succeeded = (SELECT COUNT(*) FROM extraction_results WHERE run_id = ?1 AND status = 'ok'),
+                failed = (SELECT COUNT(*) FROM extraction_results WHERE run_id = ?1 AND status = 'error'),
+                review_case_count = (SELECT COUNT(*) FROM review_cases WHERE run_id = ?1 AND status = 'open')
+             WHERE id = ?1",
+            [run_id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     Ok((deleted, refused, refusal_sample))
 }
