@@ -390,3 +390,100 @@ fn delete_duplicate_removes_inputs_and_recomputes_counters() {
         .unwrap();
     assert_eq!((total, dup), (1, 0));
 }
+
+#[test]
+fn delete_image_with_evidence_cascades_like_python() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("delcascade.sqlite3");
+    forza_db::upgrade(&db).unwrap();
+    let conn = forza_db::open_connection(&db).unwrap();
+    std::fs::write(dir.path().join("full.png"), "x").unwrap();
+    std::fs::write(dir.path().join("other.png"), "x").unwrap();
+    conn.execute_batch(
+        "INSERT INTO extraction_runs (id, status, mode, model, total_inputs, created_at)
+         VALUES ('run-c', 'completed', 'normal', 'm', 2, datetime('now'));
+         INSERT INTO image_files
+            (id, file_hash, current_name, current_path,
+             file_status, first_seen_at, created_at, updated_at)
+         VALUES ('img-full', 'hash-f', 'full.png', 'FULL_PATH', 'available',
+                 datetime('now'), datetime('now'), datetime('now')),
+                ('img-other', 'hash-o', 'other.png', 'OTHER_PATH', 'available',
+                 datetime('now'), datetime('now'), datetime('now'));
+         INSERT INTO run_inputs (id, run_id, image_file_id, input_order, input_path,
+                                 decision, file_hash, created_at)
+         VALUES (1, 'run-c', 'img-full', 0, 'full.png', 'process',
+                 'hash-f', datetime('now')),
+                (2, 'run-c', 'img-other', 1, 'other.png', 'process',
+                 'hash-o', datetime('now'));
+         INSERT INTO extraction_results (id, run_id, run_input_id, image_file_id, status, created_at)
+         VALUES ('res-full', 'run-c', 1, 'img-full', 'ok', datetime('now'));
+         INSERT INTO lap_records (id, run_id, image_file_id, extraction_result_id, lap_index,
+                                  best_lap_ms, created_at)
+         VALUES ('lap-full', 'run-c', 'img-full', 'res-full', 0, 90000, datetime('now'));
+         INSERT INTO review_cases (id, business_key, case_number, reason, status, outcome, image_file_id,
+                                   created_at, updated_at)
+         VALUES ('rc-full', 'dirty_lap:img-full:0', 1, 'dirty_lap', 'open', 'pending', 'img-full',
+                 datetime('now'), datetime('now'));
+         INSERT INTO image_flags (id, image_file_id, flag_key, flag_scope, flag_type,
+                                  status, created_by, reason, created_at)
+         VALUES ('flg-1', 'img-full', 'image:img-full:dirty_lap', 'image', 'dirty_lap',
+                 'active', 'system', 'dirty_lap', datetime('now'));",
+    )
+    .unwrap();
+    for (id, name) in [("img-full", "full.png"), ("img-other", "other.png")] {
+        let full = dir.path().join(name).to_string_lossy().to_string();
+        conn.execute(
+            "UPDATE image_files SET current_path = ?2 WHERE id = ?1",
+            rusqlite::params![id, full],
+        )
+        .unwrap();
+    }
+
+    let missing_ini =
+        std::env::temp_dir().join(format!("forza-gui-test-delc-{}.ini", std::process::id()));
+    let _ = std::fs::remove_file(&missing_ini);
+    let mut cfg = forza_config::load_config(&missing_ini, false).unwrap().0;
+    cfg.input_dir = dir.path().to_path_buf();
+    cfg.gamertag = "Player".to_string();
+    let ctx = WorkerContext::new(db.clone(), missing_ini, cfg);
+    let service = ImageInventoryService::new(db.clone());
+
+    match handle_request(
+        &ctx,
+        &service,
+        &Request::DeleteImages {
+            image_ids: vec!["img-full".to_string()],
+        },
+    ) {
+        Response::DeleteDone(result) => {
+            let (deleted, refused, sample) = result.unwrap();
+            assert_eq!((deleted, refused), (1, 0), "sample: {sample}");
+        }
+        other => panic!("expected delete response, got {other:?}"),
+    }
+
+    // File + row + all evidence gone; unrelated rows untouched.
+    assert!(!dir.path().join("full.png").exists());
+    assert!(dir.path().join("other.png").exists());
+    for (table, expected) in [
+        ("image_files", 1),
+        ("lap_records", 0),
+        ("extraction_results", 0),
+        ("run_inputs", 1),
+        ("review_cases", 0),
+        ("image_flags", 0),
+    ] {
+        let n: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, expected, "{table}");
+    }
+    let (total, processed): (i64, i64) = conn
+        .query_row(
+            "SELECT total_inputs, processed FROM extraction_runs WHERE id = 'run-c'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((total, processed), (1, 0));
+}

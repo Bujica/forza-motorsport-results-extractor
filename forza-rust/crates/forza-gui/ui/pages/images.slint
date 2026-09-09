@@ -297,7 +297,7 @@ export component ImagesPage inherits Rectangle {
                 }
                 if root.confirm-delete: HorizontalLayout {
                     spacing: 6px;
-                    Text { text: "Delete selected? Files + DB rows."; color: Theme.danger; font-size: Theme.font-sm; vertical-alignment: center; horizontal-stretch: 1; wrap: word-wrap; }
+                    Text { text: "Delete selected? Files + DB rows (laps, reviews, results)."; color: Theme.danger; font-size: Theme.font-sm; vertical-alignment: center; horizontal-stretch: 1; wrap: word-wrap; }
                     Button { text: "Confirm"; clicked => { root.confirm-delete = false; root.delete-selected(); } }
                     Button { text: "Cancel"; clicked => { root.confirm-delete = false; } }
                 }

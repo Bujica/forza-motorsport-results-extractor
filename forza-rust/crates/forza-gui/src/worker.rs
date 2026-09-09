@@ -804,43 +804,93 @@ fn delete_images(
             }
             continue;
         }
-        // Delete the DB row FIRST: if FK RESTRICT refuses (extraction
-        // evidence exists) the file on disk must be preserved. Deleting the
-        // file first would cause silent data loss with a misleading
-        // "has extraction evidence" report.
+        // Delete the DB evidence FIRST (Python `delete_image_files` parity):
+        // flags, corrections, cases, laps, attempts, results, artifacts and
+        // inputs that reference this image. Without this the FK RESTRICTs
+        // refuse every processed image, which blocks the supported workflow
+        // of deleting non-contributing images with their data. This runs
+        // only after explicit user confirmation (the GUI confirm step).
         //
-        // Duplicate-type flags are removed up front (Python parity: the
-        // writer deletes flags with the row). Review-type flags are
-        // intentionally left alone, so images under open review keep
-        // refusing with "has extraction evidence" instead of silently
-        // dropping review work. Without this, the duplicate flags owned by
-        // `sync_review_flags` would brick every duplicate delete via the
-        // same FK RESTRICT.
-        let _ = conn.execute(
-            "DELETE FROM image_flags WHERE image_file_id = ?1 AND flag_type = 'duplicate'",
-            [id],
-        );
-        // Run inputs that will be orphaned by the row delete (Python parity:
-        // the writer deletes them with the row instead of leaving NULLed
-        // leftovers). Collected BEFORE the row delete; removed only if the
-        // row delete below succeeds, so a refused image keeps everything.
-        // (Safe from result cascades: reaching the input delete implies no
-        // extraction_results reference this image, otherwise the row delete
-        // would already have refused via FK RESTRICT.)
-        let image_inputs: Vec<(i64, String)> = conn
-            .prepare("SELECT id, run_id FROM run_inputs WHERE image_file_id = ?1")
-            .and_then(|mut stmt| {
-                stmt.query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .map_err(|e| e.to_string())?;
-        match conn.execute("DELETE FROM image_files WHERE id = ?1", [id]) {
-            Ok(n) if n > 0 => {
+        // The cascade runs in a per-image SAVEPOINT: any failure rolls the
+        // image back to untouched and counts it refused, instead of leaving
+        // half-deleted evidence behind.
+        //
+        // Order is children-before-parents; `accepted_attempt_id` is nulled
+        // first or attempt deletes fail on its RESTRICT; artifacts go before
+        // the results/attempts their links resolve against.
+        let outcome: Result<bool, String> = (|| {
+            conn.execute("SAVEPOINT img_del", [])
+                .map_err(|e| e.to_string())?;
+            let step: Result<bool, String> = (|| {
+                conn.execute(
+                    "DELETE FROM model_artifacts WHERE image_file_id = ?1
+                     OR extraction_result_id IN (SELECT id FROM extraction_results WHERE image_file_id = ?1)
+                     OR attempt_id IN (SELECT id FROM extraction_attempts WHERE image_file_id = ?1)",
+                    rusqlite::params![id],
+                )
+                .map_err(|e| e.to_string())?;
+                for table in [
+                    "review_corrections",
+                    "review_cases",
+                    "image_flags",
+                    "lap_records",
+                    "extraction_attempts",
+                ] {
+                    conn.execute(
+                        &format!("DELETE FROM {table} WHERE image_file_id = ?1"),
+                        [id],
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+                conn.execute(
+                    "UPDATE extraction_results SET accepted_attempt_id = NULL WHERE image_file_id = ?1",
+                    [id],
+                )
+                .map_err(|e| e.to_string())?;
+                conn.execute(
+                    "DELETE FROM extraction_results WHERE image_file_id = ?1",
+                    [id],
+                )
+                .map_err(|e| e.to_string())?;
+                // Run inputs orphaned by the row delete (Python parity:
+                // deleted with the row instead of NULLed leftovers).
+                // Collected BEFORE the row delete; removed only if it
+                // succeeds, so a refused image keeps everything.
+                let image_inputs: Vec<(i64, String)> = conn
+                    .prepare("SELECT id, run_id FROM run_inputs WHERE image_file_id = ?1")
+                    .and_then(|mut stmt| {
+                        stmt.query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .map_err(|e| e.to_string())?;
+                let removed = conn
+                    .execute("DELETE FROM image_files WHERE id = ?1", [id])
+                    .map_err(|e| e.to_string())?;
+                if removed == 0 {
+                    return Ok(false);
+                }
                 for (input_id, run_id) in &image_inputs {
                     conn.execute("DELETE FROM run_inputs WHERE id = ?1", [input_id])
                         .map_err(|e| e.to_string())?;
                     touched_runs.insert(run_id.clone());
                 }
+                Ok(true)
+            })();
+            match step {
+                Ok(deleted_row) => {
+                    conn.execute("RELEASE img_del", [])
+                        .map_err(|e| e.to_string())?;
+                    Ok(deleted_row)
+                }
+                Err(e) => {
+                    let _ = conn.execute("ROLLBACK TO img_del", []);
+                    let _ = conn.execute("RELEASE img_del", []);
+                    Err(e)
+                }
+            }
+        })();
+        match outcome {
+            Ok(true) => {
                 if let Err(e) = std::fs::remove_file(&path) {
                     // Row is gone but the file remains: report it explicitly
                     // (recoverable via rescan) instead of counting success.
@@ -852,15 +902,15 @@ fn delete_images(
                 }
                 deleted += 1;
             }
-            Ok(_) => {
+            Ok(false) => {
                 refused += 1;
             }
             Err(e) => {
                 refused += 1;
-                let reason = if e.to_string().contains("FOREIGN KEY") {
+                let reason = if e.contains("FOREIGN KEY") {
                     "has extraction evidence".to_string()
                 } else {
-                    e.to_string()
+                    e
                 };
                 let reason = reason.as_str();
                 if refusal_sample.len() < 2000 {
@@ -887,6 +937,23 @@ fn delete_images(
             [run_id],
         )
         .map_err(|e| e.to_string())?;
+    }
+    // Recompute the best-lap frontier over the survivors (Python
+    // `_recompute_best_laps` parity): without this a deleted winner leaves
+    // its track/class with no best instead of promoting the runner-up.
+    if deleted > 0 {
+        let gamertag = ctx.gamertag();
+        let gamertag = gamertag.trim();
+        let gamertag = if gamertag.is_empty() {
+            None
+        } else {
+            Some(gamertag)
+        };
+        if let Err(e) =
+            forza_db::repositories::mark_best_laps(&conn, gamertag).map_err(|e| e.to_string())
+        {
+            refusal_sample.push_str(&format!("frontier recompute: {e}; "));
+        }
     }
     Ok((deleted, refused, refusal_sample))
 }
