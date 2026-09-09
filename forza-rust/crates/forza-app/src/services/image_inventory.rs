@@ -107,9 +107,38 @@ impl ImageInventoryService {
     /// This is the GUI equivalent of Python's `sync_input_folder`: it only
     /// updates the inventory and never contacts the model or creates a run.
     /// Returns the number of files newly registered.
+    ///
+    /// All writes run in one `BEGIN IMMEDIATE` transaction like the Python
+    /// single-commit: per-statement autocommit paid one fsync per file and
+    /// dominated scan time on large folders.
     pub fn sync_input_folder(&self, input_dir: &Path) -> Result<usize, forza_db::DbError> {
         let images = forza_pipeline::find_images(input_dir);
         let conn = forza_db::open_connection(&self.database_file)?;
+        if !conn.is_autocommit() {
+            return Err(forza_db::DbError::SchemaState {
+                message: "sync_input_folder requires autocommit (no outer transaction)".into(),
+            });
+        }
+        conn.execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| forza_db::DbError::Pool(format!("BEGIN IMMEDIATE: {e}")))?;
+        let inner = Self::sync_input_folder_inner(&conn, &images);
+        match inner {
+            Ok(inserted) => {
+                conn.execute_batch("COMMIT")
+                    .map_err(|e| forza_db::DbError::Pool(format!("COMMIT sync: {e}")))?;
+                Ok(inserted)
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                Err(e)
+            }
+        }
+    }
+
+    fn sync_input_folder_inner(
+        conn: &rusqlite::Connection,
+        images: &[PathBuf],
+    ) -> Result<usize, forza_db::DbError> {
         let mut inserted = 0;
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -125,7 +154,7 @@ impl ImageInventoryService {
             // size + mtime match the DB, reuse the stored hash without re-reading
             // the whole file (like Python's plan_images would still hash, but we
             // avoid the heavy SHA256 for unchanged files).
-            let fs_meta = std::fs::metadata(&path).ok();
+            let fs_meta = std::fs::metadata(path).ok();
             let fs_size = fs_meta.as_ref().map(|m| m.len() as i64);
             let fs_mtime: Option<String> =
                 fs_meta.as_ref().and_then(|m| m.modified().ok()).map(|t| {
@@ -159,10 +188,10 @@ impl ImageInventoryService {
                 continue;
             }
 
-            let Ok(file_hash) = forza_pipeline::file_hash(&path) else {
+            let Ok(file_hash) = forza_pipeline::file_hash(path) else {
                 continue;
             };
-            let Some(metadata) = forza_pipeline::inspect_metadata(&path).ok() else {
+            let Some(metadata) = forza_pipeline::inspect_metadata(path).ok() else {
                 continue;
             };
 

@@ -51,17 +51,30 @@ pub fn inspect_metadata(path: &Path) -> Result<ImageMetadataInfo, PipelineError>
         })?;
     // Container truth first (like PIL's `img.format`): sniffed magic bytes,
     // falling back to the extension only when sniffing yields nothing.
-    let detected = reader.format().map(container_format_name);
-    let img = reader.decode().map_err(|e| PipelineError::Encode {
-        path: path.to_path_buf(),
-        detail: e.to_string(),
-    })?;
+    let sniffed = reader.format();
+    let detected = sniffed.map(container_format_name);
+    // Header-only dimensions: PIL's `Image.open` is lazy and never decodes
+    // the pixels for `.size`. A full `decode()` here decompressed every 4K
+    // screenshot and dominated folder-scan time.
+    let (width_px, height_px) = reader
+        .into_dimensions()
+        .map_err(|e| PipelineError::Encode {
+            path: path.to_path_buf(),
+            detail: e.to_string(),
+        })?;
+    // Same for the color type: per-format header reads, with a full decode
+    // fallback only for containers without a header-only path.
+    let color = header_color_type(path, sniffed)
+        .or_else(|| decode_color_type(path))
+        .ok_or_else(|| PipelineError::Encode {
+            path: path.to_path_buf(),
+            detail: "could not determine image color type".to_string(),
+        })?;
 
-    let format = detected.unwrap_or_else(|| guess_format_name(path, &img));
+    let format = detected.unwrap_or_else(|| guess_format_name(path));
     let mime = mime_for(&format);
-    let (width_px, height_px) = (img.width(), img.height());
-    let color_mode = color_mode_name(img.color());
-    let bit_depth = bits_per_pixel_estimate(&img);
+    let color_mode = color_mode_name(color);
+    let bit_depth = bits_per_pixel_estimate(color);
 
     let file_modified_at: Option<String> = std::fs::metadata(path)
         .ok()
@@ -113,15 +126,49 @@ fn container_format_name(format: image::ImageFormat) -> String {
     .to_string()
 }
 
-fn guess_format_name(path: &Path, img: &image::DynamicImage) -> String {
-    // The `image` crate reports the decoded buffer layout; the container
-    // format comes from the extension for our supported set.
-    let ext = path
-        .extension()
+/// Color type from container headers only (no pixel decode), mirroring PIL's
+/// lazy `img.mode`. Falls back to `None` for containers without a
+/// header-only path; the caller then pays for one full decode.
+fn header_color_type(path: &Path, format: Option<image::ImageFormat>) -> Option<image::ColorType> {
+    use image::ImageDecoder;
+    let file = std::fs::File::open(path).ok()?;
+    let reader = std::io::BufReader::new(file);
+    match format? {
+        image::ImageFormat::Png => Some(
+            image::codecs::png::PngDecoder::new(reader)
+                .ok()?
+                .color_type(),
+        ),
+        image::ImageFormat::Jpeg => Some(
+            image::codecs::jpeg::JpegDecoder::new(reader)
+                .ok()?
+                .color_type(),
+        ),
+        image::ImageFormat::WebP => Some(
+            image::codecs::webp::WebPDecoder::new(reader)
+                .ok()?
+                .color_type(),
+        ),
+        _ => None,
+    }
+}
+
+/// Full-decode fallback for the color type (rare containers only).
+fn decode_color_type(path: &Path) -> Option<image::ColorType> {
+    image::ImageReader::open(path)
+        .ok()?
+        .with_guessed_format()
+        .ok()?
+        .decode()
+        .ok()
+        .map(|img| img.color())
+}
+
+fn guess_format_name(path: &Path) -> String {
+    // The container format comes from the extension for our supported set.
+    path.extension()
         .map(|e| e.to_string_lossy().to_uppercase())
-        .unwrap_or_else(|| "PNG".into());
-    let _ = img;
-    ext
+        .unwrap_or_else(|| "PNG".into())
 }
 
 fn mime_for(format_upper: &str) -> Option<String> {
@@ -150,9 +197,9 @@ fn color_mode_name(color: image::ColorType) -> String {
     .to_string()
 }
 
-fn bits_per_pixel_estimate(img: &image::DynamicImage) -> Option<u32> {
+fn bits_per_pixel_estimate(color: image::ColorType) -> Option<u32> {
     use image::ColorType as C;
-    let bits = match img.color() {
+    let bits = match color {
         C::L8 => 8,
         C::La8 => 16,
         C::Rgb8 => 24,

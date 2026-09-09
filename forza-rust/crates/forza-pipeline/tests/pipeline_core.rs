@@ -202,6 +202,9 @@ fn metadata_inspection_reports_dimensions_and_mime() {
     assert_eq!(meta.height_px, 240);
     assert_eq!(meta.image_format, "PNG");
     assert_eq!(meta.mime_type.as_deref(), Some("image/png"));
+    // Header-only path must agree with the old full-decode values.
+    assert_eq!(meta.color_mode, "RGB");
+    assert_eq!(meta.bit_depth, Some(24));
     assert_eq!(
         meta.file_size_bytes,
         std::fs::metadata(&path).unwrap().len()
