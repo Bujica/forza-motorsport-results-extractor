@@ -1817,6 +1817,7 @@ dependencies = [
  "forza-pipeline",
  "rusqlite",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
