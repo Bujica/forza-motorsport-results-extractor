@@ -175,7 +175,20 @@ pub fn derive_and_insert_laps(
         }
     };
     let weather = normalize_weather(parsed.get("w").and_then(|v| v.as_str()));
-    let temp_f = parsed.get("tf").and_then(|v| v.as_f64());
+    // Python parity (`process_image`): `tf` may arrive as a number or a
+    // comma-decimal string, and it is persisted only when inside the
+    // plausibility window — out-of-range temps become NULL, not raw values.
+    let temp_f: Option<f64> = match parsed.get("tf") {
+        Some(v) if v.is_number() => v.as_f64(),
+        Some(v) if v.is_string() => v
+            .as_str()
+            .and_then(|s| s.trim().replace(',', ".").parse::<f64>().ok()),
+        _ => None,
+    };
+    let (temp_min, temp_max) = temp_range.unwrap_or((40.0, 140.0));
+    let temp_c =
+        temp_f.and_then(|tf| forza_domain::lap::fahrenheit_to_celsius(tf, temp_min, temp_max));
+    let temp_f = temp_f.filter(|_| temp_c.is_some());
 
     let entries = parsed
         .get("e")
@@ -223,10 +236,6 @@ pub fn derive_and_insert_laps(
             "model_best_lap": best_lap_str,
         })
         .to_string();
-        let (temp_min, temp_max) = temp_range.unwrap_or((40.0, 140.0));
-        let temp_c =
-            temp_f.and_then(|tf| forza_domain::lap::fahrenheit_to_celsius(tf, temp_min, temp_max));
-
         let id = format!("lap-{image_file_id}-{extraction_result_id}-{}", index + 1);
         conn.execute(
             "INSERT INTO lap_records

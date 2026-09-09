@@ -271,3 +271,70 @@ fn malformed_fixture_also_replays_cleanly_under_current_rules() {
 
     assert!(outcome.accepted);
 }
+
+fn temp_db_with_result(dir: &std::path::Path, tag: &str) -> (rusqlite::Connection, String, String) {
+    let db_path = dir.join(format!("temp-{tag}.sqlite3"));
+    let conn = fresh_db(&db_path);
+    let run_id = forza_db::repositories::insert_run(
+        &conn,
+        &forza_db::repositories::RunInsert::demo(&format!("20260101_000000_{tag}")),
+    )
+    .unwrap();
+    forza_db::repositories::images::insert_image_file(
+        &conn,
+        &forza_db::repositories::ImageFileInsert {
+            id: "img-temp",
+            file_hash: "temp-hash",
+            current_name: "temp.png",
+            current_path: r"C:\shots\temp.png",
+            size_bytes: 1024,
+            width_px: 1920,
+            height_px: 1080,
+        },
+    )
+    .unwrap();
+    let result_id = forza_db::repositories::runs::insert_input_and_result(
+        &conn, &run_id, "img-temp", "process", "running", 1,
+    )
+    .unwrap();
+    (conn, run_id, result_id)
+}
+
+fn stored_temp(conn: &rusqlite::Connection) -> (Option<f64>, Option<f64>) {
+    conn.query_row("SELECT temp_f, temp_c FROM lap_records LIMIT 1", [], |r| {
+        Ok((r.get(0)?, r.get(1)?))
+    })
+    .unwrap()
+}
+
+#[test]
+fn out_of_window_temperature_persists_null_like_python() {
+    let guard = tempfile::tempdir().unwrap();
+    // tf=24 is outside [40,140]: Python stores NULL, not the raw value.
+    for (tag, tf_json, expect_f) in [
+        ("cold", "24", None),
+        ("ok", "72", Some(72.0)),
+        ("comma", "\"72,5\"", Some(72.5)),
+        ("missing", "null", None),
+    ] {
+        let (conn, run_id, result_id) = temp_db_with_result(guard.path(), tag);
+        let parsed: serde_json::Value = serde_json::from_str(&format!(
+            r#"{{"t":"Fuji Speedway","tf":{tf_json},"w":"dry",
+                "e":[{{"dr":"D","ca":"Audi R8 LMS","cl":"A","bl":"1:30.000"}}]}}"#,
+        ))
+        .unwrap();
+        derive_and_insert_laps(
+            &conn,
+            &run_id,
+            "img-temp",
+            &result_id,
+            &parsed,
+            Some("temp.png"),
+            Some((40.0, 140.0)),
+        )
+        .unwrap();
+        let (temp_f, temp_c) = stored_temp(&conn);
+        assert_eq!(temp_f, expect_f, "tf={tf_json}");
+        assert!(temp_c.is_some() == expect_f.is_some(), "tf={tf_json}");
+    }
+}
