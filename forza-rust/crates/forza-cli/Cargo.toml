@@ -22,5 +22,8 @@ forza-pipeline = { path = "../forza-pipeline" }
 serde_json = "1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 
+[dev-dependencies]
+tempfile = "3"
+
 [lints]
 workspace = true

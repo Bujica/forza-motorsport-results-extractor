@@ -753,7 +753,7 @@ fn main() -> anyhow::Result<()> {
                 Ok(())
             }
             MaintenanceCommand::Reset { yes } => cmd_db_reset(&database_file(&cli.config), yes),
-            MaintenanceCommand::Heal => cmd_db_heal(&database_file(&cli.config)),
+            MaintenanceCommand::Heal => cmd_db_heal(&cli.config, &database_file(&cli.config)),
         },
     }
 }
@@ -762,7 +762,7 @@ fn main() -> anyhow::Result<()> {
 /// request_hash/runtime_snapshot_id/prompt_snapshot_id stamping. Only rows
 /// failing the corresponding doctor checks are touched; values are derived
 /// with the same canonical implementation the doctor recomputes with.
-fn cmd_db_heal(db_path: &Path) -> anyhow::Result<()> {
+fn cmd_db_heal(config_path: &Path, db_path: &Path) -> anyhow::Result<()> {
     let conn = forza_db::open_connection(db_path)?;
 
     // 0. Recover runs left running by a crashed/closed process first: this
@@ -928,6 +928,15 @@ fn cmd_db_heal(db_path: &Path) -> anyhow::Result<()> {
         }
     }
 
+    // 5. Laps: null temps persisted outside the validation window by
+    //    builds predating the insert-time gate (same window the live path
+    //    and Python enforce).
+    let (temp_min, temp_max) = match forza_config::load_config(config_path, false) {
+        Ok((cfg, _)) => (cfg.validation.temp_min_f, cfg.validation.temp_max_f),
+        Err(_) => (40.0, 140.0),
+    };
+    let temps_healed = heal_out_of_window_temps(&conn, temp_min, temp_max)?;
+
     println!("db-heal: evidence backfill complete");
     println!("  abandoned runs reconciled  : {reconciled} run(s)");
     println!("  run counters recomputed    : {counters_healed} run(s)");
@@ -935,8 +944,26 @@ fn cmd_db_heal(db_path: &Path) -> anyhow::Result<()> {
     println!("  attempts.runtime_snapshot  : {runtime_healed} row(s)");
     println!("  attempts.request_hash      : {hashes_healed} row(s)");
     println!("  images.semantic_name       : {names_healed} row(s)");
+    println!("  laps.out_of_window_temp    : {temps_healed} row(s)");
     println!("next step: run `forza rebuild` to refresh best-lap status and review cases");
     Ok(())
+}
+
+/// Null out-of-window lap temperatures produced before the insert-time gate
+/// (Python parity: `process_image` persists `temp_f` only inside
+/// `[validation] temp_min_f/temp_max_f`). Without this, old rows keep raw
+/// values that skew the temperature-aware frontier after rebuild.
+fn heal_out_of_window_temps(
+    conn: &rusqlite::Connection,
+    temp_min: f64,
+    temp_max: f64,
+) -> anyhow::Result<usize> {
+    let healed = conn.execute(
+        "UPDATE lap_records SET temp_f = NULL, temp_c = NULL
+         WHERE temp_f IS NOT NULL AND (temp_f < ?1 OR temp_f > ?2)",
+        rusqlite::params![temp_min, temp_max],
+    )?;
+    Ok(healed)
 }
 
 #[cfg(test)]
@@ -987,5 +1014,42 @@ mod tests {
         // Missing config resolves to defaults, never panics.
         let db = database_file(&missing);
         assert!(!db.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn heal_nulls_only_out_of_window_temps() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("heal.sqlite3");
+        forza_db::upgrade(&db).unwrap();
+        let conn = forza_db::open_connection(&db).unwrap();
+        conn.execute_batch(
+            "INSERT INTO image_files (id, file_hash, first_seen_at, created_at, updated_at)
+             VALUES ('img-h', 'h', datetime('now'), datetime('now'), datetime('now'));
+             INSERT INTO extraction_runs (id, status, mode, model, created_at)
+             VALUES ('run-h', 'completed', 'normal', 'm', datetime('now'));
+             INSERT INTO run_inputs (id, run_id, input_order, input_path, decision, created_at)
+             VALUES (1, 'run-h', 0, 'h.png', 'process', datetime('now'));
+             INSERT INTO extraction_results (id, run_id, run_input_id, image_file_id, status, created_at)
+             VALUES ('res-h', 'run-h', 1, 'img-h', 'ok', datetime('now'));
+             INSERT INTO lap_records (id, run_id, image_file_id, extraction_result_id, lap_index, best_lap_ms, temp_f, temp_c, created_at)
+             VALUES ('lap-cold', 'run-h', 'img-h', 'res-h', 0, 90000, 24.0, NULL, datetime('now')),
+                    ('lap-ok', 'run-h', 'img-h', 'res-h', 1, 91000, 72.0, 22.2, datetime('now')),
+                     ('lap-null', 'run-h', 'img-h', 'res-h', 2, 92000, NULL, NULL, datetime('now'));",
+        )
+        .unwrap();
+
+        let healed = heal_out_of_window_temps(&conn, 40.0, 140.0).unwrap();
+        assert_eq!(healed, 1);
+        let temps: Vec<(Option<f64>, Option<f64>)> = conn
+            .prepare("SELECT temp_f, temp_c FROM lap_records ORDER BY lap_index")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            temps,
+            vec![(None, None), (Some(72.0), Some(22.2)), (None, None)]
+        );
     }
 }
