@@ -95,6 +95,9 @@ def test_view_sends_combo_value_for_inventory_filter() -> None:
     source = (ROOT / "forza" / "gui" / "views" / "image_browser_view.py").read_text(encoding="utf-8")
     assert "_combo_value(self.inventory_filter)" in source
     assert "self.inventory_filter.currentText()" not in source
+    # No bare bound methods in the emit: every currentText must be a call.
+    assert ".currentText," not in source
+    assert ".currentText()" in source
 
 def test_delete_duplicates_keeps_canonical_and_clears_group(tmp_path) -> None:
     db = tmp_path / "dup.sqlite3"
