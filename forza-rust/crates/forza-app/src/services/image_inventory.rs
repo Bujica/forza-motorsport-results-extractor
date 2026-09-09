@@ -111,9 +111,11 @@ impl ImageInventoryService {
         let images = forza_pipeline::find_images(input_dir);
         let conn = forza_db::open_connection(&self.database_file)?;
         let mut inserted = 0;
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         for path in images {
             let path_text = path.to_string_lossy().to_string();
+            seen.insert(path_text.clone());
             let name = path
                 .file_name()
                 .map(|value| value.to_string_lossy().to_string())
@@ -268,6 +270,29 @@ impl ImageInventoryService {
             )?;
             inserted += 1;
         }
+
+        // Missing pass (Python `sync_input_folder` parity): rows still
+        // `available` whose file is neither scanned now nor on disk become
+        // `missing`. Without this, deleting files from the input folder left
+        // stale `available` rows until a per-row rescan touched them.
+        let mut missing_stmt = conn.prepare(
+            "SELECT id, current_path FROM image_files
+             WHERE current_path IS NOT NULL AND file_status = 'available'",
+        )?;
+        let missing_ids: Vec<(String, String)> = missing_stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .filter_map(|item| item.ok())
+            .filter(|(_, path)| !seen.contains(path) && !Path::new(path).exists())
+            .collect();
+        drop(missing_stmt);
+        for (id, _) in missing_ids {
+            conn.execute(
+                "UPDATE image_files SET file_status = 'missing',
+                        missing_at = datetime('now'), updated_at = datetime('now')
+                 WHERE id = ?1",
+                params![id],
+            )?;
+        }
         Ok(inserted)
     }
 
@@ -279,3 +304,54 @@ impl ImageInventoryService {
 }
 
 use rusqlite::OptionalExtension;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status_of(conn: &rusqlite::Connection, id: &str) -> String {
+        conn.query_row(
+            "SELECT file_status FROM image_files WHERE id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn sync_marks_deleted_files_missing_like_python() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("inv.sqlite3");
+        forza_db::upgrade(&db).unwrap();
+        let conn = forza_db::open_connection(&db).unwrap();
+        // Two available rows; only b.png exists on disk (content need not
+        // decode: the missing pass only checks existence).
+        let gone = dir.path().join("gone.png");
+        std::fs::write(&gone, "x").unwrap();
+        let kept = dir.path().join("kept.png");
+        std::fs::write(&kept, "x").unwrap();
+        for (id, path) in [("img-gone", &gone), ("img-kept", &kept)] {
+            conn.execute(
+                "INSERT INTO image_files
+                    (id, file_hash, current_name, current_path, file_status,
+                     first_seen_at, last_seen_at, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 'available',
+                         datetime('now'), datetime('now'), datetime('now'), datetime('now'))",
+                rusqlite::params![
+                    id,
+                    format!("h-{id}"),
+                    path.file_name().unwrap().to_string_lossy(),
+                    path.to_string_lossy(),
+                ],
+            )
+            .unwrap();
+        }
+        std::fs::remove_file(&gone).unwrap();
+
+        let service = ImageInventoryService::new(&db);
+        service.sync_input_folder(dir.path()).unwrap();
+
+        assert_eq!(status_of(&conn, "img-gone"), "missing");
+        assert_eq!(status_of(&conn, "img-kept"), "available");
+    }
+}
