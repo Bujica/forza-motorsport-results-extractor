@@ -94,7 +94,22 @@ fn apply_inventory_sort(ui: &MainWindow) {
                 e.name.to_lowercase(),
             ),
             3 => (e.file_status.clone(), e.name.to_lowercase()),
-            4 => (e.duplicate_label.clone(), e.name.to_lowercase()),
+            4 => {
+                // Group-aware like Python `_group_sort_key`: members inherit
+                // the canonical name so each duplicate stays next to its
+                // canonical; canonical first, then children by own name.
+                // Packed into one string (`\0` sorts before any name char).
+                let group = e
+                    .canonical_name
+                    .clone()
+                    .unwrap_or_else(|| e.name.clone())
+                    .to_lowercase();
+                let role = u8::from(e.duplicate_label == "Duplicate");
+                (
+                    format!("{group}\0{role}\0{}", e.name.to_lowercase()),
+                    String::new(),
+                )
+            }
             5 => (e.processing_status.clone(), e.name.to_lowercase()),
             _ => (e.best_lap_status.clone(), e.name.to_lowercase()),
         };

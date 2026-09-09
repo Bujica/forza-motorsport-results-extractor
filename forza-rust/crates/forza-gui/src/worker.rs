@@ -806,6 +806,18 @@ fn delete_images(
         // evidence exists) the file on disk must be preserved. Deleting the
         // file first would cause silent data loss with a misleading
         // "has extraction evidence" report.
+        //
+        // Duplicate-type flags are removed up front (Python parity: the
+        // writer deletes flags with the row). Review-type flags are
+        // intentionally left alone, so images under open review keep
+        // refusing with "has extraction evidence" instead of silently
+        // dropping review work. Without this, the duplicate flags owned by
+        // `sync_review_flags` would brick every duplicate delete via the
+        // same FK RESTRICT.
+        let _ = conn.execute(
+            "DELETE FROM image_flags WHERE image_file_id = ?1 AND flag_type = 'duplicate'",
+            [id],
+        );
         match conn.execute("DELETE FROM image_files WHERE id = ?1", [id]) {
             Ok(n) if n > 0 => {
                 if let Err(e) = std::fs::remove_file(&path) {

@@ -481,7 +481,6 @@ fn run_input_contract_checks(conn: &Connection) -> Result<Vec<DoctorCheck>, DbEr
                         AND (
                             p.id IS NULL
                             OR p.run_id <> d.run_id
-                            OR p.input_order >= d.input_order
                             OR p.file_hash <> d.duplicate_of_hash
                         )
                     )
@@ -496,6 +495,10 @@ fn run_input_contract_checks(conn: &Connection) -> Result<Vec<DoctorCheck>, DbEr
             )
         "#,
     )?;
+    // NOTE: no input_order comparison between duplicate and canonical rows:
+    // the runner records duplicate inputs before process inputs exist, so
+    // the backfilled canonical link legitimately points forward in order.
+    // Same-run + hash match is the evidence that matters.
 
     let final_runs = check_sql(
         conn,

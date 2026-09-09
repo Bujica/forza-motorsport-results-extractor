@@ -18,6 +18,9 @@ pub struct ImageInventoryEntry {
     pub semantic_name: Option<String>,
     pub file_hash: String,
     pub current_path: Option<String>,
+    /// Canonical's name for group members (own name otherwise): group sort
+    /// key for the Duplicate column (Python `_group_sort_key` parity).
+    pub canonical_name: Option<String>,
     /// "Duplicate" / "Canonical" / "" display value.
     pub duplicate_label: String,
 }
@@ -60,6 +63,7 @@ fn to_entry(row: db::ImageInventoryRow) -> ImageInventoryEntry {
             Some(true) => "Canonical".to_string(),
             None => String::new(),
         },
+        canonical_name: row.canonical_name.clone(),
         id: row.id,
         name: row.current_name,
         file_status: row.file_status,

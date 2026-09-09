@@ -463,3 +463,48 @@ fn full_doctor_short_circuits_on_noncurrent_schema() {
     assert_eq!(report.checks[0].key, "schema_head");
     assert_eq!(report.checks[0].count, 1);
 }
+
+#[test]
+fn duplicate_link_accepts_forward_canonical_link() {
+    // The runner records duplicate inputs before process inputs exist, so
+    // the backfilled canonical link points forward in input_order. Same-run
+    // + hash match is the evidence; order is not (writer/runner parity).
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("duplink.sqlite3");
+    upgrade(&path).unwrap();
+    let conn = forza_db::open_connection(&path).unwrap();
+    conn.execute_batch(
+        "INSERT INTO extraction_runs (id, status, mode, model, created_at)
+         VALUES ('run-d', 'completed', 'normal', 'm', datetime('now'));
+         INSERT INTO run_inputs (id, run_id, input_order, input_path, decision,
+                                 file_hash, duplicate_kind, duplicate_of_hash,
+                                 duplicate_of_input_id, created_at)
+         VALUES (1, 'run-d', 0, 'dup.png', 'duplicate',
+                 'hash-1', 'batch', 'hash-1', 2, datetime('now')),
+                (2, 'run-d', 1, 'canon.png', 'process',
+                 'hash-1', NULL, NULL, NULL, datetime('now'));",
+    )
+    .unwrap();
+
+    let report = doctor::run_full_doctor(&conn, "current".to_string()).unwrap();
+    let link = report
+        .checks
+        .iter()
+        .find(|c| c.key == "run_input_duplicate_link_invalid")
+        .unwrap();
+    assert_eq!(link.count, 0, "{link:?}");
+
+    // A mismatched hash is still flagged.
+    conn.execute(
+        "UPDATE run_inputs SET duplicate_of_hash = 'other' WHERE id = 1",
+        [],
+    )
+    .unwrap();
+    let report = doctor::run_full_doctor(&conn, "current".to_string()).unwrap();
+    let link = report
+        .checks
+        .iter()
+        .find(|c| c.key == "run_input_duplicate_link_invalid")
+        .unwrap();
+    assert_eq!(link.count, 1, "{link:?}");
+}

@@ -61,7 +61,15 @@ class ImageTableModel(QAbstractTableModel):
     def sort(self, column: int, order=Qt.SortOrder.AscendingOrder) -> None:  # noqa: N802
         reverse = order == Qt.SortOrder.DescendingOrder
         self.layoutAboutToBeChanged.emit()
-        self._images.sort(key=lambda image: _sort_value(image, column), reverse=reverse)
+        # Group-aware: every member inherits its canonical's column value as
+        # the primary key, so duplicate groups stay adjacent under ANY column
+        # sort (a plain column sort scattered canonicals away from their
+        # duplicates). Canonical first, then children by their own value.
+        by_id = {image.id: image for image in self._images}
+        self._images.sort(
+            key=lambda image: _group_sort_key(image, by_id, column),
+            reverse=reverse,
+        )
         self.layoutChanged.emit()
 
 
@@ -76,6 +84,21 @@ def _sort_value(image: ImageFile, column: int) -> str:
         image.best_lap_status,
     )
     return str(values[column]).lower()
+
+
+def _group_sort_key(image: ImageFile, by_id: dict, column: int) -> tuple[str, int, str]:
+    """Sort key keeping duplicate groups adjacent under any column.
+
+    Every member inherits its canonical's column value as the primary key,
+    then canonical (role 0) before children (role 1), then its own value.
+    Unknown parents fall back to the row itself (orphans sort standalone).
+    """
+    parent_id = image.duplicate_of_image_file_id
+    canonical = by_id.get(parent_id) if parent_id else None
+    if canonical is None:
+        canonical = image
+    role = 0 if image.duplicate_of_image_file_id is None else 1
+    return (_sort_value(canonical, column), role, _sort_value(image, column))
 
 
 def _race_date_label(image: ImageFile) -> str:

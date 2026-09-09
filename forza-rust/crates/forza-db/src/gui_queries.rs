@@ -26,6 +26,10 @@ pub struct ImageInventoryRow {
     /// None = not part of a duplicate group; Some(false) = duplicate,
     /// Some(true) = canonical owner of a duplicate group.
     pub duplicate_role: Option<bool>,
+    /// Canonical's `current_name` for group members (own name when standalone
+    /// or canonical): group sort key so a column sort keeps each duplicate
+    /// next to its canonical (Python `_group_sort_key` parity).
+    pub canonical_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -62,6 +66,7 @@ pub(crate) const PROCESSING_PROJECTION: &str = "
 fn row_to_inventory(row: &Row<'_>) -> rusqlite::Result<ImageInventoryRow> {
     let duplicate_of: Option<String> = row.get(10)?;
     let is_canonical: i64 = row.get(11)?;
+    let canonical_name: Option<String> = row.get(12)?;
     Ok(ImageInventoryRow {
         id: row.get(0)?,
         current_name: row.get(1)?,
@@ -80,6 +85,7 @@ fn row_to_inventory(row: &Row<'_>) -> rusqlite::Result<ImageInventoryRow> {
         } else {
             None
         },
+        canonical_name,
     })
 }
 
@@ -124,7 +130,8 @@ pub fn image_inventory(
                     '' AS processing_status, i.size_bytes,
                     i.race_date, i.semantic_name, i.file_hash, i.current_path,
                     i.duplicate_of_image_file_id,
-                    COALESCE(dup.cnt, 0) AS is_canonical
+                    COALESCE(dup.cnt, 0) AS is_canonical,
+                    canon.current_name AS canonical_name
              FROM image_files i
              LEFT JOIN (
                 SELECT duplicate_of_image_file_id, COUNT(*) AS cnt
@@ -132,6 +139,7 @@ pub fn image_inventory(
                 WHERE duplicate_of_image_file_id IS NOT NULL
                 GROUP BY duplicate_of_image_file_id
              ) dup ON dup.duplicate_of_image_file_id = i.id
+             LEFT JOIN image_files canon ON canon.id = i.duplicate_of_image_file_id
              WHERE i.id IN ({placeholders})
              ORDER BY LOWER(i.current_name), i.id"
         );

@@ -258,7 +258,48 @@ pub fn sync_review_flags(conn: &Connection) -> Result<(usize, usize), DbError> {
         stmt.execute(refs.as_slice())?
     };
 
-    Ok((ensured, resolved))
+    // Duplicate-file flags (Python `_ensure_active_duplicate_flag` parity):
+    // every image pointing at a canonical owns one active `duplicate` flag.
+    // The doctor's review-flag checks scope to the six review reasons, so
+    // these neither satisfy nor violate them.
+    let dup_ids: Vec<String> = {
+        let mut stmt = conn
+            .prepare("SELECT id FROM image_files WHERE duplicate_of_image_file_id IS NOT NULL")?;
+        stmt.query_map([], |r| r.get(0))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(DbError::from)?
+    };
+    let mut dup_ensured = 0usize;
+    for image_id in &dup_ids {
+        let flag_key = format!("image:{image_id}:duplicate");
+        let fid = super::new_id("flg");
+        conn.execute(
+            "INSERT INTO image_flags
+                (id, image_file_id, flag_key, flag_scope, flag_type,
+                 status, created_by, reason, created_at)
+             VALUES (?1, ?2, ?3, 'image', 'duplicate',
+                     'active', 'system', 'duplicate_file_hash', datetime('now'))
+             ON CONFLICT(flag_key) DO UPDATE SET
+                 status = 'active',
+                 resolved_at = NULL,
+                 reason = excluded.reason",
+            params![fid, image_id, flag_key],
+        )?;
+        dup_ensured += 1;
+    }
+    // Resolve duplicate flags whose image lost its canonical link (Python
+    // `_resolve_active_duplicate_flags` parity). Images deleted outright
+    // take their flags via the worker's flag cleanup (FK RESTRICT).
+    let dup_resolved = conn.execute(
+        "UPDATE image_flags SET status = 'resolved', resolved_at = datetime('now')
+         WHERE status = 'active' AND created_by = 'system' AND flag_type = 'duplicate'
+           AND image_file_id NOT IN (
+               SELECT id FROM image_files WHERE duplicate_of_image_file_id IS NOT NULL
+           )",
+        [],
+    )?;
+
+    Ok((ensured + dup_ensured, resolved + dup_resolved))
 }
 
 fn fallback_lap(
