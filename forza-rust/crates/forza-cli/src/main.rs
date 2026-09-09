@@ -937,6 +937,19 @@ fn cmd_db_heal(config_path: &Path, db_path: &Path) -> anyhow::Result<()> {
     };
     let temps_healed = heal_out_of_window_temps(&conn, temp_min, temp_max)?;
 
+    // 6. Inputs: drop duplicate rows orphaned by image deletes (their links
+    //    rot and their run counters lie until then).
+    let orphan_inputs_healed = heal_orphan_duplicate_inputs(&conn)?;
+    // Recompute counters: the delete above changes duplicate_count/total.
+    let _ = conn.execute(
+        "UPDATE extraction_runs SET
+            total_inputs = (SELECT COUNT(*) FROM run_inputs WHERE run_id = extraction_runs.id),
+            duplicate_count = (SELECT COUNT(*) FROM run_inputs WHERE run_id = extraction_runs.id
+                               AND decision = 'duplicate')
+         WHERE status != 'running'",
+        [],
+    )?;
+
     println!("db-heal: evidence backfill complete");
     println!("  abandoned runs reconciled  : {reconciled} run(s)");
     println!("  run counters recomputed    : {counters_healed} run(s)");
@@ -945,8 +958,35 @@ fn cmd_db_heal(config_path: &Path, db_path: &Path) -> anyhow::Result<()> {
     println!("  attempts.request_hash      : {hashes_healed} row(s)");
     println!("  images.semantic_name       : {names_healed} row(s)");
     println!("  laps.out_of_window_temp    : {temps_healed} row(s)");
+    println!("  run_inputs.orphan_duplicate: {orphan_inputs_healed} row(s)");
     println!("next step: run `forza rebuild` to refresh best-lap status and review cases");
     Ok(())
+}
+
+/// Drop duplicate inputs orphaned by image deletes.
+///
+/// Duplicate inputs always reference their own image row (runner parity with
+/// Python); a NULL image means the image is gone and no flow will ever clean
+/// the row — it only rots links and counters. Running runs are excluded
+/// (their inputs are still being written). Rows targeted by a surviving link
+/// are kept: deleting them would NULL a live link and trade one doctor
+/// error for another.
+fn heal_orphan_duplicate_inputs(conn: &rusqlite::Connection) -> anyhow::Result<usize> {
+    let healed = conn.execute(
+        "DELETE FROM run_inputs
+         WHERE image_file_id IS NULL AND decision = 'duplicate'
+           AND run_id IN (SELECT id FROM extraction_runs WHERE status != 'running')
+           AND id NOT IN (
+               SELECT keeper.duplicate_of_input_id FROM run_inputs keeper
+               WHERE keeper.duplicate_of_input_id IS NOT NULL
+                 AND NOT (keeper.image_file_id IS NULL
+                          AND keeper.decision = 'duplicate'
+                          AND keeper.run_id IN (SELECT id FROM extraction_runs
+                                                WHERE status != 'running'))
+           )",
+        [],
+    )?;
+    Ok(healed)
 }
 
 /// Null out-of-window lap temperatures produced before the insert-time gate
@@ -1051,5 +1091,48 @@ mod tests {
             temps,
             vec![(None, None), (Some(72.0), Some(22.2)), (None, None)]
         );
+    }
+
+    #[test]
+    fn heal_drops_orphan_duplicate_inputs_but_keeps_live_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("healorphan.sqlite3");
+        forza_db::upgrade(&db).unwrap();
+        let conn = forza_db::open_connection(&db).unwrap();
+        conn.execute_batch(
+            "INSERT INTO extraction_runs (id, status, mode, model, created_at)
+             VALUES ('run-o', 'completed', 'normal', 'm', datetime('now')),
+                    ('run-live', 'running', 'normal', 'm', datetime('now'));
+             INSERT INTO image_files (id, file_hash, first_seen_at, created_at, updated_at)
+             VALUES ('img-live', 'hash-1', datetime('now'), datetime('now'), datetime('now'));
+             INSERT INTO run_inputs (id, run_id, image_file_id, input_order, input_path,
+                                     decision, file_hash, duplicate_kind, duplicate_of_hash,
+                                     duplicate_of_input_id, created_at)
+             VALUES (1, 'run-o', NULL, 0, 'gone-a.png', 'duplicate',
+                     'hash-1', 'batch', 'hash-1', NULL, datetime('now')),
+                    (2, 'run-o', NULL, 1, 'gone-b.png', 'duplicate',
+                     'hash-1', 'batch', 'hash-1', 3, datetime('now')),
+                    (3, 'run-o', 'img-live', 2, 'live.png', 'process',
+                     'hash-1', NULL, NULL, NULL, datetime('now')),
+                    (4, 'run-o', NULL, 3, 'gone-c.png', 'duplicate',
+                     'hash-1', 'batch', 'hash-1', NULL, datetime('now')),
+                    (5, 'run-live', NULL, 0, 'live-dup.png', 'duplicate',
+                     'hash-1', 'batch', 'hash-1', 4, datetime('now'));",
+        )
+        .unwrap();
+
+        // Rows 1-2 are fully orphaned. Row 4 is NULL-image but targeted by
+        // row 5, which survives (running run): deleting 4 would NULL a live
+        // link, so 4 stays. Row 5 stays (running run).
+        let healed = heal_orphan_duplicate_inputs(&conn).unwrap();
+        assert_eq!(healed, 2);
+        let remaining: Vec<i64> = conn
+            .prepare("SELECT id FROM run_inputs ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(remaining, vec![3, 4, 5]);
     }
 }

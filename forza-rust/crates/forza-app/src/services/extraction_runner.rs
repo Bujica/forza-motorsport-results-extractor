@@ -615,13 +615,27 @@ where
         } else {
             None
         };
+        // The duplicate input references its own image row (Python parity:
+        // `discovery_input` upserts/links the dup image). Without this the
+        // row is orphaned on day one: deleting the image later leaves a
+        // NULL-image leftover no flow ever cleans, and its link breaks the
+        // doctor the moment the canonical input is deleted. Fall back to
+        // NULL only when the image row is genuinely absent.
+        let dup_image_id: Option<String> = conn
+            .query_row(
+                "SELECT id FROM image_files WHERE current_path = ?1 AND file_hash = ?2 LIMIT 1",
+                rusqlite::params![dup.path.to_string_lossy(), dup.file_hash],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
         // Record the canonical hash itself so later batch rows can link.
         // (The canonical *image* row keeps its own process/skip input.)
         insert_run_input_full(
             &conn,
             &run_id,
             &RunInputOnly {
-                image_file_id: None,
+                image_file_id: dup_image_id.as_deref(),
                 decision: "duplicate",
                 input_order,
                 input_path: &dup.path.to_string_lossy(),
