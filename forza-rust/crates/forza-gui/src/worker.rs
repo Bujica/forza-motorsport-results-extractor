@@ -829,6 +829,14 @@ fn delete_images(
                     rusqlite::params![id],
                 )
                 .map_err(|e| e.to_string())?;
+                // `accepted_attempt_id` is nulled BEFORE attempt deletes:
+                // results reference attempts via RESTRICT (Python flushes the
+                // NULL first for the same reason).
+                conn.execute(
+                    "UPDATE extraction_results SET accepted_attempt_id = NULL WHERE image_file_id = ?1",
+                    [id],
+                )
+                .map_err(|e| e.to_string())?;
                 for table in [
                     "review_corrections",
                     "review_cases",
@@ -842,11 +850,6 @@ fn delete_images(
                     )
                     .map_err(|e| e.to_string())?;
                 }
-                conn.execute(
-                    "UPDATE extraction_results SET accepted_attempt_id = NULL WHERE image_file_id = ?1",
-                    [id],
-                )
-                .map_err(|e| e.to_string())?;
                 conn.execute(
                     "DELETE FROM extraction_results WHERE image_file_id = ?1",
                     [id],
