@@ -15,13 +15,17 @@ use detail_views::{
     apply_debug_cases, apply_debug_detail, apply_image_detail, apply_settings, step_detail,
 };
 use ui_state::{
-    BESTLAP_ALL, BESTLAP_FILTER, BESTLAP_MODEL, BESTLAP_SORT, CONFIG_PATH, DEBUG_CASE_MODEL,
-    DEBUG_CASES_CACHE, DEBUG_DETAIL_CACHE, DEBUG_RESULT_MODEL, DETAIL_ATTEMPT_MODEL, DETAIL_INDEX,
-    DETAIL_LAP_MODEL, DETAIL_RESULT_MODEL, DETAIL_REVIEW_MODEL, GAMERTAG, LIST_MODEL, LOGS_APP_RAW,
-    LOGS_ERROR_RAW, PENDING_IMPORT_MESSAGE, PENDING_SETTINGS, REVIEW_MODEL, ROW_CACHE, RUN_CONFIG,
-    RUN_CONTROL, RUN_LOG, RUN_SELECTED_IDS, RUN_START, SELECTED_IMAGE_IDS, SETTINGS_LOADED,
-    SETTINGS_MODEL, WORKER_TX, append_run_log, compute_rate_eta, enqueue, image_items,
-    run_info_line, send_request, set_status, update_image_selection,
+    BESTLAP_ALL, BESTLAP_FILTER, BESTLAP_MODEL, BESTLAP_SORT, CONFIG_PATH, CURRENT_INVENTORY_FILTER,
+    DEBUG_CASE_MODEL, DEBUG_CASES_CACHE, DEBUG_DETAIL_CACHE, DEBUG_RESULT_MODEL,
+    DETAIL_ATTEMPT_MODEL, DETAIL_INDEX, DETAIL_LAP_MODEL, DETAIL_RESULT_MODEL, DETAIL_REVIEW_MODEL,
+    GAMERTAG, INVENTORY_REFRESH_IN_FLIGHT, LIST_MODEL, LOGS_APP_RAW, LOGS_ERROR_RAW,
+    PENDING_IMPORT_MESSAGE, PENDING_INVENTORY_FILTER, PENDING_REVIEW_FILTER, PENDING_SETTINGS,
+    REVIEW_CASES_CACHE, REVIEW_FILTER, REVIEW_INDEX, REVIEW_MODEL, REVIEW_REFRESH_IN_FLIGHT,
+    REVIEW_TRACKS, ROW_CACHE, RUN_CONFIG, RUN_CONTROL, RUN_LOG, RUN_SELECTED_IDS, RUN_START,
+    SELECTED_IMAGE_IDS, SELECTION_ANCHOR, SETTINGS_LOADED, SETTINGS_MODEL, SETTINGS_PREVIEW_SEQ,
+    SORT_STATE, WORKER_TX, append_run_log, compute_rate_eta, current_inventory_filter, enqueue,
+    image_items, remember_inventory_filter, run_info_line, send_request, set_status,
+    update_image_selection,
 };
 
 use std::cell::RefCell;
@@ -36,44 +40,6 @@ use forza_app::{ImageInventoryEntry, ImageInventoryFilter, ReviewQueueFilter};
 
 slint::include_modules!();
 
-thread_local! {
-    /// Anchor row for Shift+click range selection.
-    static SELECTION_ANCHOR: std::cell::RefCell<usize> = const { std::cell::RefCell::new(0) };
-    /// (column index, ascending)
-    static SORT_STATE: std::cell::RefCell<(usize, bool)> = const { std::cell::RefCell::new((0, true)) };
-    /// Coalesce rapid filter changes like Python's _refresh_pending_args.
-    static INVENTORY_REFRESH_IN_FLIGHT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static PENDING_INVENTORY_FILTER: std::cell::RefCell<Option<ImageInventoryFilter>> =
-        const { std::cell::RefCell::new(None) };
-    /// Last inventory filter actually issued, so background refreshes
-    /// (post-decision, rescan, rebuild) don't clobber the user's filter bar
-    /// with defaults.
-    static CURRENT_INVENTORY_FILTER: std::cell::RefCell<ImageInventoryFilter> =
-        const { std::cell::RefCell::new(ImageInventoryFilter {
-            file_status: None,
-            best_lap_status: None,
-            inventory_filter: None,
-            track: None,
-            run_id: None,
-            processing_status: None,
-            include_missing_files: false,
-        }) };
-    static REVIEW_REFRESH_IN_FLIGHT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static PENDING_REVIEW_FILTER: std::cell::RefCell<Option<ReviewQueueFilter>> =
-        const { std::cell::RefCell::new(None) };
-    /// Monotonic id for settings previews: preview jobs run concurrently, so
-    /// an older response arriving last must be dropped instead of restoring
-    /// stale rows over newer edits.
-    static SETTINGS_PREVIEW_SEQ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
-
-pub(crate) fn current_inventory_filter() -> ImageInventoryFilter {
-    CURRENT_INVENTORY_FILTER.with(|s| s.borrow().clone())
-}
-
-fn remember_inventory_filter(filter: &ImageInventoryFilter) {
-    CURRENT_INVENTORY_FILTER.with(|s| *s.borrow_mut() = filter.clone());
-}
 
 /// Re-sort the cached rows per SORT_STATE and refresh the visible model and
 /// the header arrows.
@@ -310,20 +276,6 @@ fn apply_bestlaps_filters(ui: &MainWindow) {
     });
 }
 
-thread_local! {
-    /// Currently listed review cases (source of truth for details/actions).
-    static REVIEW_CASES_CACHE: RefCell<Vec<forza_app::ReviewCaseEntry>> =
-        const { RefCell::new(Vec::new()) };
-    /// Active review filter (set by the filter bar, reused on reload).
-    static REVIEW_FILTER: RefCell<ReviewQueueFilter> = RefCell::new(ReviewQueueFilter {
-        bucket: String::from("open"),
-        ..Default::default()
-    });
-    /// Selected review case position (isize: -1 = none).
-    static REVIEW_INDEX: RefCell<isize> = const { RefCell::new(-1) };
-    /// Reference tracks offered on the track-correction combo.
-    static REVIEW_TRACKS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-}
 
 fn set_review_track_model(main: &MainWindow, values: Vec<slint::SharedString>) {
     main.set_review_tracks(ModelRc::from(Rc::new(VecModel::from(values))));

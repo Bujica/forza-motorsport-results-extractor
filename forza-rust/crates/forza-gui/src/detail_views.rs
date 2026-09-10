@@ -8,12 +8,12 @@ use crate::ui_state::{
     DEBUG_CASE_MODEL, DEBUG_CASES_CACHE, DEBUG_DETAIL_CACHE, DEBUG_RESULT_MODEL,
     DETAIL_ATTEMPT_MODEL, DETAIL_CACHE, DETAIL_INDEX, DETAIL_LAP_MODEL, DETAIL_RESULT_MODEL,
     DETAIL_REVIEW_MODEL, GAMERTAG, PENDING_SETTINGS, ROW_CACHE, RUN_CONFIG, SETTINGS_MODEL,
-    run_info_line, send_request, set_status,
+    current_inventory_filter, run_info_line, send_request, set_status,
 };
 use crate::worker::Request;
 use crate::{
     DebugCaseItem, DebugResultComboItem, DetailAttemptItem, DetailLapItem, DetailResultItem,
-    DetailReviewItem, MainWindow, SettingItem, current_inventory_filter,
+    DetailReviewItem, MainWindow, SettingItem,
 };
 
 pub(crate) fn step_detail(ui: &slint::Weak<MainWindow>, delta: i32) {

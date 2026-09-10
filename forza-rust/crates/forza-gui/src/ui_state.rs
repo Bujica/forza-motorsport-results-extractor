@@ -15,7 +15,7 @@ use crate::{
     DetailResultItem, DetailReviewItem, ImageItem, MainWindow, ReviewItem, SettingItem,
     worker::Request,
 };
-use forza_app::ImageInventoryEntry;
+use forza_app::{ImageInventoryEntry, ImageInventoryFilter, ReviewQueueFilter};
 
 thread_local! {
     pub(crate) static LIST_MODEL: RefCell<Option<Rc<VecModel<ImageItem>>>> = const { RefCell::new(None) };
@@ -168,4 +168,64 @@ pub(crate) fn enqueue(request: Request, ui: &slint::Weak<MainWindow>, loading: &
     if let Some(w) = ui.upgrade() {
         set_status(&w, loading);
     }
+}
+
+// ── Selection/sort/filter state (moved from lib.rs: single owner for all ──
+// UI-thread locals, alongside the models above).
+
+thread_local! {
+    /// Anchor row for Shift+click range selection.
+    pub(crate) static SELECTION_ANCHOR: std::cell::RefCell<usize> =
+        const { std::cell::RefCell::new(0) };
+    /// (column index, ascending)
+    pub(crate) static SORT_STATE: std::cell::RefCell<(usize, bool)> =
+        const { std::cell::RefCell::new((0, true)) };
+    /// Coalesce rapid filter changes like Python's _refresh_pending_args.
+    pub(crate) static INVENTORY_REFRESH_IN_FLIGHT: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+    pub(crate) static PENDING_INVENTORY_FILTER: std::cell::RefCell<Option<ImageInventoryFilter>> =
+        const { std::cell::RefCell::new(None) };
+    /// Last inventory filter actually issued, so background refreshes
+    /// (post-decision, rescan, rebuild) don't clobber the user's filter bar
+    /// with defaults.
+    pub(crate) static CURRENT_INVENTORY_FILTER: std::cell::RefCell<ImageInventoryFilter> =
+        const { std::cell::RefCell::new(ImageInventoryFilter {
+            file_status: None,
+            best_lap_status: None,
+            inventory_filter: None,
+            track: None,
+            run_id: None,
+            processing_status: None,
+            include_missing_files: false,
+        }) };
+    pub(crate) static REVIEW_REFRESH_IN_FLIGHT: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+    pub(crate) static PENDING_REVIEW_FILTER: std::cell::RefCell<Option<ReviewQueueFilter>> =
+        const { std::cell::RefCell::new(None) };
+    /// Monotonic id for settings previews: preview jobs run concurrently, so
+    /// an older response arriving last must be dropped instead of restoring
+    /// stale rows over newer edits.
+    pub(crate) static SETTINGS_PREVIEW_SEQ: std::cell::Cell<u64> =
+        const { std::cell::Cell::new(0) };
+    /// Currently listed review cases (source of truth for details/actions).
+    pub(crate) static REVIEW_CASES_CACHE: RefCell<Vec<forza_app::ReviewCaseEntry>> =
+        const { RefCell::new(Vec::new()) };
+    /// Active review filter (set by the filter bar, reused on reload).
+    pub(crate) static REVIEW_FILTER: RefCell<ReviewQueueFilter> =
+        RefCell::new(ReviewQueueFilter {
+            bucket: String::from("open"),
+            ..Default::default()
+        });
+    /// Selected review case position (isize: -1 = none).
+    pub(crate) static REVIEW_INDEX: RefCell<isize> = const { RefCell::new(-1) };
+    /// Reference tracks offered on the track-correction combo.
+    pub(crate) static REVIEW_TRACKS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+pub(crate) fn current_inventory_filter() -> ImageInventoryFilter {
+    CURRENT_INVENTORY_FILTER.with(|s| s.borrow().clone())
+}
+
+pub(crate) fn remember_inventory_filter(filter: &ImageInventoryFilter) {
+    CURRENT_INVENTORY_FILTER.with(|s| *s.borrow_mut() = filter.clone());
 }
