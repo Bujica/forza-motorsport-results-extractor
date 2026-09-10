@@ -68,6 +68,29 @@ fn clamp_split(value: f32, base: f32) -> f32 {
     value.clamp(150.0, (base - 150.0).max(150.0))
 }
 
+/// Outcome of [`ensure_database`].
+#[derive(Debug)]
+struct DbReady {
+    created: bool,
+}
+
+/// Create the database from zero when missing (see call site).
+fn ensure_database(db_path: &Path) -> anyhow::Result<DbReady> {
+    use forza_db::migration::{SchemaStatus, schema_status, upgrade};
+    match schema_status(db_path).map_err(|e| anyhow::anyhow!("{e}"))? {
+        SchemaStatus::Empty => {
+            upgrade(db_path).map_err(|e| anyhow::anyhow!("{e}"))?;
+            Ok(DbReady { created: true })
+        }
+        SchemaStatus::Current => Ok(DbReady { created: false }),
+        SchemaStatus::Incompatible { found } => Err(anyhow::anyhow!(
+            "database {} has incompatible schema (user_version={found}); \
+             delete it or run `forza maintenance db-reset --yes` to recreate",
+            db_path.display()
+        )),
+    }
+}
+
 /// Launch the GUI. Blocks until the window closes.
 pub fn run(config_path: &Path) -> anyhow::Result<()> {
     let (mut cfg, warnings) = forza_config::load_config(config_path, false)?;
@@ -144,11 +167,16 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             cfg.database_file = db_path.clone();
         }
     }
-    if !db_path.exists() {
-        return Err(anyhow::anyhow!(
-            "database {} does not exist; run `forza maintenance db-upgrade` first",
-            db_path.display()
-        ));
+    // Create the database from zero when none was found (Python `app.py`
+    // parity for the missing/empty case, minus the question dialog: there
+    // is nothing to destroy). Incompatible databases refuse with reset
+    // guidance instead of silent destruction.
+    // Create the database from zero when none was found (Python `app.py`
+    // parity for the missing/empty case, minus the question dialog: there
+    // is nothing to destroy). Incompatible databases refuse with reset
+    // guidance instead of silent destruction.
+    if ensure_database(&db_path)?.created {
+        eprintln!("database created: {}", db_path.display());
     }
 
     let main = MainWindow::new()?;
@@ -441,4 +469,39 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
 
     main.run()?;
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::ensure_database;
+
+    #[test]
+    fn missing_database_is_created_from_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("fresh.sqlite3");
+        assert!(!db.exists());
+        let ready = ensure_database(&db).unwrap();
+        assert!(ready.created);
+        // Second call is a no-op on the now-current database.
+        let again = ensure_database(&db).unwrap();
+        assert!(!again.created);
+        assert!(matches!(
+            forza_db::migration::schema_status(&db).unwrap(),
+            forza_db::migration::SchemaStatus::Current
+        ));
+    }
+
+    #[test]
+    fn incompatible_database_is_refused_with_guidance() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("foreign.sqlite3");
+        ensure_database(&db).unwrap();
+        let conn = forza_db::open_connection(&db).unwrap();
+        conn.execute_batch("PRAGMA user_version = 424242").unwrap();
+        drop(conn);
+        let err = ensure_database(&db).unwrap_err().to_string();
+        assert!(err.contains("incompatible schema"), "{err}");
+        assert!(err.contains("db-reset"), "{err}");
+    }
 }
