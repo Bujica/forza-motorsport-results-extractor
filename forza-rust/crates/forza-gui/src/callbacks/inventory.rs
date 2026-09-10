@@ -156,8 +156,11 @@ pub(crate) fn wire_inventory(main: &MainWindow) {
     {
         let ui = main.as_weak();
         main.on_selection_toggle(move |index| {
-            SELECTION_ANCHOR.with(|slot| *slot.borrow_mut() = index as usize);
-            let id = ROW_CACHE.with(|rows| rows.borrow().get(index as usize).map(|e| e.id.clone()));
+            let Ok(index) = usize::try_from(index) else {
+                return;
+            };
+            SELECTION_ANCHOR.with(|slot| *slot.borrow_mut() = index);
+            let id = ROW_CACHE.with(|rows| rows.borrow().get(index).map(|e| e.id.clone()));
             if let Some(id) = id {
                 SELECTED_IMAGE_IDS.with(|selected| {
                     let mut selected = selected.borrow_mut();
@@ -187,8 +190,11 @@ pub(crate) fn wire_inventory(main: &MainWindow) {
     {
         let ui = main.as_weak();
         main.on_selection_single(move |index| {
-            SELECTION_ANCHOR.with(|slot| *slot.borrow_mut() = index as usize);
-            let id = ROW_CACHE.with(|rows| rows.borrow().get(index as usize).map(|e| e.id.clone()));
+            let Ok(index) = usize::try_from(index) else {
+                return;
+            };
+            SELECTION_ANCHOR.with(|slot| *slot.borrow_mut() = index);
+            let id = ROW_CACHE.with(|rows| rows.borrow().get(index).map(|e| e.id.clone()));
             if let Some(id) = id {
                 SELECTED_IMAGE_IDS.with(|selected| {
                     *selected.borrow_mut() = vec![id];
@@ -203,16 +209,21 @@ pub(crate) fn wire_inventory(main: &MainWindow) {
     {
         let ui = main.as_weak();
         main.on_selection_range(move |end| {
+            // A negative index (`-1` = no selection) must never reach the
+            // anchor arithmetic below: `usize::MAX + 1` would overflow.
+            let Ok(end) = usize::try_from(end) else {
+                return;
+            };
             let (ids, anchor) = ROW_CACHE.with(|rows| {
                 let rows = rows.borrow();
                 let anchor = SELECTION_ANCHOR.with(|slot| *slot.borrow());
                 // Both directions include the target row: down is
                 // [anchor, end], up is [end, anchor]. (The old up-branch
                 // started at end+1 and silently dropped the clicked row.)
-                let (lo, hi) = if anchor <= end as usize {
-                    (anchor, end as usize + 1)
+                let (lo, hi) = if anchor <= end {
+                    (anchor, end + 1)
                 } else {
-                    (end as usize, anchor + 1)
+                    (end, anchor + 1)
                 };
                 let ids: Vec<String> = rows
                     .get(lo..hi.min(rows.len()))
@@ -247,15 +258,18 @@ pub(crate) fn wire_inventory(main: &MainWindow) {
     {
         let ui = main.as_weak();
         main.on_sort_changed(move |column| {
+            let Ok(column) = usize::try_from(column) else {
+                return;
+            };
             SORT_STATE.with(|slot| {
                 let mut state = slot.borrow_mut();
                 let (current_col, current_asc) = *state;
-                let ascending = if current_col == column as usize {
+                let ascending = if current_col == column {
                     !current_asc
                 } else {
                     true
                 };
-                *state = (column as usize, ascending);
+                *state = (column, ascending);
             });
             if let Some(w) = ui.upgrade() {
                 apply_inventory_sort(&w);

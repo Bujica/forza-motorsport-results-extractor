@@ -170,15 +170,14 @@ pub(crate) fn wire_bestlaps(main: &MainWindow) {
     {
         let ui = main.as_weak();
         main.on_bestlaps_sort_changed(move |col| {
+            let Ok(col) = usize::try_from(col) else {
+                return;
+            };
             BESTLAP_SORT.with(|slot| {
                 let mut state = slot.borrow_mut();
                 let (cur_col, cur_asc) = *state;
-                let asc = if cur_col == col as usize {
-                    !cur_asc
-                } else {
-                    true
-                };
-                *state = (col as usize, asc);
+                let asc = if cur_col == col { !cur_asc } else { true };
+                *state = (col, asc);
             });
             if let Some(w) = ui.upgrade() {
                 apply_bestlaps_filters(&w);
