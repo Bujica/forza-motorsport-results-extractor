@@ -134,6 +134,10 @@ pub fn list_review_cases(
 
 /// Apply an operator decision to a case. `value` semantics depend on field
 /// (`dirty`: true/false; others: corrected text).
+///
+/// A confirmed `car` correction also seeds the reference catalog: once the
+/// operator confirms a novel car exists, later images match it without a new
+/// review case (`INSERT OR IGNORE`, so re-confirming is a no-op).
 pub fn decide_case(
     conn: &mut Connection,
     case_number: i64,
@@ -142,7 +146,12 @@ pub fn decide_case(
 ) -> Result<(), String> {
     apply_manual_correction(conn, case_number, field, value, None)
         .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if field == "car" && !value.trim().is_empty() {
+        forza_db::repositories::external_records::seed_reference_cars(conn, &[value.to_string()])
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Ignore a case without touching data (operator says it is not actionable).

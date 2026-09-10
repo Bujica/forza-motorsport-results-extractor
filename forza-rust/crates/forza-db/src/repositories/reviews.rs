@@ -100,12 +100,24 @@ fn known_track_keys() -> HashSet<String> {
         .collect()
 }
 
-fn known_cars() -> HashSet<String> {
-    embedded_reference_data()
+fn known_cars(conn: &Connection) -> HashSet<String> {
+    let mut set: HashSet<String> = embedded_reference_data()
         .cars
         .iter()
         .map(|c| c.trim().to_lowercase())
-        .collect()
+        .collect();
+    // Operator-confirmed cars live in the DB catalog (seeded from review
+    // decisions as well as assets/imports): without this union every new
+    // image with a confirmed-novel car reopens a review case.
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT COALESCE(normalized_name, lower(name)) FROM reference_cars WHERE active = 1",
+    ) && let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0))
+    {
+        for name in rows.flatten() {
+            set.insert(name);
+        }
+    }
+    set
 }
 
 const VALID_CLASSES: &[&str] = &["E", "D", "C", "B", "A", "TCR", "S", "R", "P", "X"];
@@ -136,7 +148,7 @@ pub fn query_review_candidates(conn: &Connection) -> Result<Vec<ReviewCandidate>
     let laps: Vec<LapCandidateRow> = rows.collect::<Result<_, _>>()?;
 
     let tracks = known_track_keys();
-    let cars = known_cars();
+    let cars = known_cars(conn);
     let mut candidates: Vec<ReviewCandidate> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     let mut push = |reason: &'static str,

@@ -389,6 +389,27 @@ fn apply_review_detail(ui: &MainWindow) {
             );
             ui.set_review_reason_note(c.reason.clone().into());
             ui.set_review_suggestions(String::new().into());
+            // Pre-fill correction inputs with the model's value (Python
+            // parity: the field shows e.g. "Cadillac #3 ATS" so a correct
+            // read is one Apply click). Prefer an existing corrected value
+            // when revisiting a decided case; clear otherwise so text never
+            // leaks from the previously selected case.
+            let prefill = c
+                .corrected_value
+                .clone()
+                .filter(|v| !v.is_empty())
+                .or_else(|| c.model_value.clone())
+                .unwrap_or_default();
+            if c.reason == "car" {
+                ui.set_review_car_text(prefill.into());
+                ui.set_review_driver_text(String::new().into());
+            } else if c.reason == "driver_name" {
+                ui.set_review_driver_text(prefill.into());
+                ui.set_review_car_text(String::new().into());
+            } else {
+                ui.set_review_car_text(String::new().into());
+                ui.set_review_driver_text(String::new().into());
+            }
             if let Some(image_file_id) = c.image_file_id.clone() {
                 send_request(Request::LoadPreview { image_file_id });
             } else {
