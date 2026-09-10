@@ -21,6 +21,18 @@ pub(crate) fn set_review_class_model(main: &MainWindow, values: Vec<slint::Share
     main.set_review_classes(ModelRc::from(Rc::new(VecModel::from(values))));
 }
 
+/// Outcome label for display. The stored `outcome` vocabulary
+/// (`pending|confirmed|model_error|ignored`) has no system-resolved value by
+/// design (Python parity, CHECK-enforced), so auto-resolved rows keep
+/// `outcome='pending'` in the DB. The table/detail would then read as
+/// "awaiting action" for a closed case — show the lifecycle truth instead.
+pub(super) fn display_outcome(status: &str, outcome: Option<&str>) -> String {
+    if status == "auto_resolved" {
+        return "auto_resolved".to_string();
+    }
+    outcome.unwrap_or_default().to_string()
+}
+
 /// Build the details-panel text for the selected review case (Python
 /// details grid labels) and refresh the reason/suggestion hints.
 pub(super) fn apply_review_detail(ui: &MainWindow) {
@@ -60,7 +72,7 @@ pub(super) fn apply_review_detail(ui: &MainWindow) {
                     "Case: {}\nStable ID: {}\nOutcome: {}\nReason: {}\nTrigger: {}\nModel value: {}\nCorrected value: {}\nDecision: {}\nError: {}\nResolution: {}\nFile: {}\nCurrent track: {}\nCurrent class: {}\nCurrent weather: {}\nTemp: {}\nCurrent driver: {}\nCurrent car: {}\nCurrent lap: {}",
                     c.case_number,
                     c.image_file_id.clone().unwrap_or_default(),
-                    c.outcome.clone().unwrap_or_default(),
+                    display_outcome(&c.status, c.outcome.as_deref()),
                     c.reason,
                     c.trigger.clone().unwrap_or_default(),
                     c.model_value.clone().unwrap_or_default(),
@@ -226,5 +238,22 @@ pub(crate) fn wire_review(main: &MainWindow) {
                 image_file_id: image_file_id.to_string(),
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::display_outcome;
+
+    #[test]
+    fn auto_resolved_rows_show_lifecycle_not_stale_pending() {
+        assert_eq!(
+            display_outcome("auto_resolved", Some("pending")),
+            "auto_resolved"
+        );
+        assert_eq!(display_outcome("auto_resolved", None), "auto_resolved");
+        assert_eq!(display_outcome("open", Some("pending")), "pending");
+        assert_eq!(display_outcome("resolved", Some("confirmed")), "confirmed");
+        assert_eq!(display_outcome("open", None), "");
     }
 }

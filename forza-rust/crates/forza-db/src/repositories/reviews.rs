@@ -284,8 +284,13 @@ pub fn upsert_review_cases(
     let mut auto_resolved = 0;
     for key in existing_open {
         if !incoming_keys.contains(key.as_str()) {
+            // Python parity (`reviews.py::upsert_review_cases`): the outcome
+            // vocabulary has no system-resolved value, so only the status
+            // flips — outcome stays 'pending' by design, and the GUI maps it
+            // for display (see `display_outcome`).
             conn.execute(
-                "UPDATE review_cases SET status='auto_resolved', updated_at=datetime('now')
+                "UPDATE review_cases SET status='auto_resolved', resolved_at=datetime('now'),
+                        resolution_note='no_longer_detected', updated_at=datetime('now')
                  WHERE business_key=?1 AND status='open'",
                 params![key],
             )?;

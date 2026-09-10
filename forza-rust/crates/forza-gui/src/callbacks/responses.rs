@@ -7,7 +7,7 @@ use slint::{ModelRc, VecModel};
 
 use super::bestlaps::apply_bestlaps_filters;
 use super::inventory::{apply_inventory_sort, update_selection_summary};
-use super::review::apply_review_detail;
+use super::review::{apply_review_detail, display_outcome};
 use crate::detail_views::{
     apply_debug_cases, apply_debug_detail, apply_image_detail, apply_settings,
 };
@@ -102,7 +102,8 @@ pub(crate) fn handle_response(response: Response, ui: slint::Weak<MainWindow>) {
                                 .iter()
                                 .map(|c| ReviewItem {
                                     number: c.case_number as i32,
-                                    outcome: c.outcome.clone().unwrap_or_default().into(),
+                                    outcome: display_outcome(&c.status, c.outcome.as_deref())
+                                        .into(),
                                     reason: c.reason.clone().into(),
                                     trigger: c.trigger.clone().unwrap_or_default().into(),
                                     decision: match (
