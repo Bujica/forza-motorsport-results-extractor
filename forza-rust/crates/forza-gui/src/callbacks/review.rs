@@ -22,7 +22,7 @@ pub(crate) fn set_review_class_model(main: &MainWindow, values: Vec<slint::Share
 }
 
 /// Outcome label for display. The stored `outcome` vocabulary
-/// (`pending|confirmed|model_error|ignored`) has no system-resolved value by
+/// (`pending|confirmed|model_error`) has no system-resolved value by design
 /// design (Python parity, CHECK-enforced), so auto-resolved rows keep
 /// `outcome='pending'` in the DB. The table/detail would then read as
 /// "awaiting action" for a closed case — show the lifecycle truth instead.
@@ -190,18 +190,6 @@ pub(crate) fn wire_review(main: &MainWindow) {
                 },
                 &ui,
                 "applying correction…",
-            );
-        });
-    }
-    {
-        let ui = main.as_weak();
-        main.on_review_ignore(move |case_number| {
-            enqueue(
-                Request::IgnoreCase {
-                    case_number: case_number as i64,
-                },
-                &ui,
-                "ignoring case…",
             );
         });
     }

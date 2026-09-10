@@ -42,7 +42,6 @@ export component MainWindow inherits Window {
     callback review-filter-changed(string, string, string, string);
     callback review-selected(int);
     callback review-apply(int, string, string);
-    callback review-ignore(int);
     callback review-reopen(int);
     callback review-open-detail(int);
     callback review-preview-requested(string);
@@ -441,7 +440,6 @@ export component MainWindow inherits Window {
                 review-filter-changed(status, reason, outcome, run) => { root.review-filter-changed(status, reason, outcome, run); }
                 review-selected(i) => { root.review-selected(i); }
                 review-apply(n, f, v) => { root.review-apply(n, f, v); }
-                review-ignore(n) => { root.review-ignore(n); }
                 review-reopen(n) => { root.review-reopen(n); }
                 review-open-detail(n) => { root.review-open-detail(n); }
             }

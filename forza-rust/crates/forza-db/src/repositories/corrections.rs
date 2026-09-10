@@ -175,11 +175,17 @@ pub fn apply_manual_correction(
         });
     }
 
-    let (case_id, business_key, linked_lap): (String, String, Option<String>) = conn
+    let (case_id, business_key, linked_lap, reason, stored_model): (
+        String,
+        String,
+        Option<String>,
+        String,
+        Option<String>,
+    ) = conn
         .query_row(
-            "SELECT id, business_key, lap_record_id FROM review_cases WHERE case_number=?1",
+            "SELECT id, business_key, lap_record_id, reason, model_value FROM review_cases WHERE case_number=?1",
             params![case_number],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
         )
         .map_err(|e| DbError::SchemaState {
             message: format!("review case {case_number}: {e}"),
@@ -245,12 +251,40 @@ pub fn apply_manual_correction(
         apply_to_lap(conn, lap_id, &correction)?;
     }
 
+    // Outcome records whether the operator confirmed the model or corrected
+    // it (normalized comparison): the doctor's `model_error_*` checks and the
+    // error taxonomy depend on the distinction. `error_type` is only set for
+    // model errors; the resolution note audits every decision.
+    let norm = |v: &str| v.trim().to_lowercase();
+    let model_text = stored_model.as_deref().unwrap_or("");
+    let outcome = if norm(model_text) == norm(new_value) {
+        "confirmed"
+    } else {
+        "model_error"
+    };
+    let error_type: Option<String> = if outcome != "model_error" {
+        None
+    } else if reason == "dirty_lap" {
+        let was_true = bool_value(model_text);
+        let now_true = bool_value(new_value);
+        Some(if was_true && !now_true {
+            "dirty_lap_false_positive".to_string()
+        } else if !was_true && now_true {
+            "dirty_lap_false_negative".to_string()
+        } else {
+            format!("{field}_wrong")
+        })
+    } else {
+        Some(format!("{field}_wrong"))
+    };
+    let note = format!("decision:{field}={new_value}");
     conn.execute(
-        "UPDATE review_cases SET status='resolved', outcome='confirmed',
-            decision_field=?2, corrected_value=?3, resolved_at=datetime('now'),
+        "UPDATE review_cases SET status='resolved', outcome=?2,
+            decision_field=?3, corrected_value=?4, error_type=?5,
+            resolution_note=?6, resolved_at=datetime('now'),
             updated_at=datetime('now')
          WHERE case_number=?1",
-        params![case_number, field, new_value],
+        params![case_number, outcome, field, new_value, error_type, note],
     )?;
 
     Ok(linked_lap.unwrap_or(business_key))

@@ -152,21 +152,19 @@ value_enum! {
 }
 
 value_enum! {
-    pub enum ReviewCaseStatus {
-        Open = "open",
-        Resolved = "resolved",
-        Ignored = "ignored",
-        AutoResolved = "auto_resolved",
-    }
+pub enum ReviewCaseStatus {
+    Open = "open",
+    Resolved = "resolved",
+    AutoResolved = "auto_resolved",
+}
 }
 
 value_enum! {
-    pub enum ReviewOutcome {
-        Pending = "pending",
-        Confirmed = "confirmed",
-        ModelError = "model_error",
-        Ignored = "ignored",
-    }
+pub enum ReviewOutcome {
+    Pending = "pending",
+    Confirmed = "confirmed",
+    ModelError = "model_error",
+}
 }
 
 value_enum! {
@@ -267,11 +265,11 @@ mod tests {
         );
         assert_eq!(
             ReviewCaseStatus::VALUES,
-            ["open", "resolved", "ignored", "auto_resolved"]
+            ["open", "resolved", "auto_resolved"]
         );
         assert_eq!(
             ReviewOutcome::VALUES,
-            ["pending", "confirmed", "model_error", "ignored"]
+            ["pending", "confirmed", "model_error"]
         );
         assert_eq!(
             ReviewTrigger::VALUES,

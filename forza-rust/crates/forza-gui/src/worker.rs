@@ -18,9 +18,8 @@ use std::sync::mpsc;
 
 use forza_app::{
     ImageDebugFilter, ImageInventoryFilter, ImageInventoryService, ReviewCaseEntry,
-    ReviewQueueFilter, decide_case, ignore_case, list_debug_cases, list_review_cases,
-    load_debug_detail, load_debug_detail_by_result, load_image_detail, rebuild, reopen_case,
-    settings_snapshot,
+    ReviewQueueFilter, decide_case, list_debug_cases, list_review_cases, load_debug_detail,
+    load_debug_detail_by_result, load_image_detail, rebuild, reopen_case, settings_snapshot,
 };
 
 /// Live configuration owned by the worker thread.
@@ -77,9 +76,6 @@ pub enum Request {
         case_number: i64,
         field: String,
         value: String,
-    },
-    IgnoreCase {
-        case_number: i64,
     },
     ListBestLaps,
     RunDoctor,
@@ -193,7 +189,6 @@ fn review_options(conn: &rusqlite::Connection) -> Result<ReviewOptions, String> 
         "pending".to_string(),
         "confirmed".to_string(),
         "model_error".to_string(),
-        "ignored".to_string(),
     ];
     for value in distinct("outcome")? {
         if !outcomes.contains(&value) {
@@ -369,14 +364,6 @@ pub fn handle_request(
             // A correction changes lap facts: refresh derived state.
             let outcome = rebuild(&conn, &gamertag)?;
             let _ = outcome;
-            Ok(())
-        })()),
-        Request::IgnoreCase { case_number } => Response::CaseDecided((|| {
-            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
-            ignore_case(&conn, *case_number)?;
-            // An ignored case must not keep an active system flag behind
-            // (stale-flag doctor failure until the next run/rebuild).
-            forza_db::repositories::sync_review_flags(&conn).map_err(|e| e.to_string())?;
             Ok(())
         })()),
         Request::ListBestLaps => Response::BestLaps((|| {

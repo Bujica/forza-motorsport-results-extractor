@@ -263,8 +263,11 @@ pub fn query_review_candidates(conn: &Connection) -> Result<Vec<ReviewCandidate>
     Ok(candidates)
 }
 
-/// Upsert candidates preserving user-owned terminal states. Returns
+/// Upsert candidates preserving operator decisions. Returns
 /// (inserted, kept, auto_resolved).
+///
+/// A reappearing condition reopens a system-resolved row (it is actionable
+/// again, not history); operator `resolved` rows are never touched.
 pub fn upsert_review_cases(
     conn: &Connection,
     candidates: &[ReviewCandidate],
@@ -300,9 +303,33 @@ pub fn upsert_review_cases(
 
     for candidate in candidates {
         let key = canonical_business_key(candidate);
+        // System-resolved rows resurface when their condition returns:
+        // reset to actionable with fresh evidence links.
+        let auto: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM review_cases WHERE business_key=?1 AND status='auto_resolved'",
+            params![key],
+            |r| r.get(0),
+        )?;
+        if auto > 0 {
+            conn.execute(
+                "UPDATE review_cases SET status='open', outcome='pending',
+                        resolved_at=NULL, resolution_note=NULL,
+                        lap_record_id=?2, \"trigger\"=?3, model_value=?4,
+                        updated_at=datetime('now')
+                 WHERE business_key=?1 AND status='auto_resolved'",
+                params![
+                    key,
+                    candidate.row.lap_id,
+                    candidate.trigger,
+                    candidate.model_value
+                ],
+            )?;
+            kept += 1;
+            continue;
+        }
         let exists: bool = conn
             .query_row(
-                "SELECT COUNT(*) FROM review_cases WHERE business_key=?1 AND status IN ('open','resolved','ignored','auto_resolved')",
+                "SELECT COUNT(*) FROM review_cases WHERE business_key=?1 AND status IN ('open','resolved','auto_resolved')",
                 params![key],
                 |r| r.get::<_, i64>(0),
             )

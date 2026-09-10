@@ -40,7 +40,6 @@ export component ReviewPage inherits Rectangle {
     callback review-filter-changed(string, string, string, string);
     callback review-selected(int);
     callback review-apply(int, string, string);
-    callback review-ignore(int);
     callback review-reopen(int);
     callback review-open-detail(int);
 
@@ -57,7 +56,7 @@ export component ReviewPage inherits Rectangle {
                             ? "Type the corrected car name and apply."
                             : reason == "driver_name"
                                 ? "Type the corrected driver name and apply."
-                                : "No semantic action available for this reason. Inspect the image or ignore the case.";
+                                : "No semantic action available for this reason. Inspect the image.";
     }
 
     function selected-reason() -> string {
@@ -83,7 +82,7 @@ export component ReviewPage inherits Rectangle {
             Text { text: "Status:"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
             ComboBox {
                 min-width: 100px;
-                model: ["open", "resolved", "ignored", "all"];
+                model: ["open", "resolved", "all"];
                 current-index: 0;
                 selected => {
                     root.review-status-filter = self.current-value;
@@ -240,9 +239,6 @@ export component ReviewPage inherits Rectangle {
                         } else if event.text == "c" && root.selected-reason() == "dirty_lap" {
                             root.review-apply(root.selected-number(), "dirty", "false");
                             accept
-                        } else if event.text == "i" && root.selected-number() >= 0 {
-                            root.review-ignore(root.selected-number());
-                            accept
                         } else {
                             reject
                         }
@@ -305,7 +301,6 @@ export component ReviewPage inherits Rectangle {
                         }
                         HorizontalLayout {
                             spacing: 6px;
-                            Button { text: "Ignore case"; enabled: root.selected-number() >= 0; clicked => { root.review-ignore(root.selected-number()); } }
                             Button { text: "Reopen case"; enabled: root.selected-number() >= 0 && root.reviews[root.review-selected-index].status != "open"; clicked => { root.review-reopen(root.selected-number()); } }
                             Button { text: "Image details"; enabled: root.selected-number() >= 0; clicked => { root.review-open-detail(root.selected-number()); } }
                         }

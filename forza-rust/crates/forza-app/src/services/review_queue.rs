@@ -216,27 +216,7 @@ pub fn decide_case(
     Ok(())
 }
 
-/// Ignore a case without touching data (operator says it is not actionable).
-///
-/// Errors when no open case was touched (mirroring `reopen_case`): silently
-/// returning `Ok` made the UI report "case updated; derived state rebuilt"
-/// and trigger full reloads for hotkey presses with no selection (-1).
-pub fn ignore_case(conn: &Connection, case_number: i64) -> Result<(), String> {
-    let changed = conn
-        .execute(
-            "UPDATE review_cases SET status='ignored', outcome='ignored',
-                resolved_at=datetime('now'), updated_at=datetime('now')
-             WHERE case_number=?1 AND status='open'",
-            rusqlite::params![case_number],
-        )
-        .map_err(|e| e.to_string())?;
-    if changed == 0 {
-        return Err(format!("case {case_number} is not open"));
-    }
-    Ok(())
-}
-
-/// Reopen a resolved/ignored case back to open (Python reopen_review_case).
+/// Reopen a resolved case back to open (Python reopen_review_case).
 pub fn reopen_case(conn: &Connection, case_number: i64) -> Result<(), String> {
     let changed = conn
         .execute(

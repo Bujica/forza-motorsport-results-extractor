@@ -453,8 +453,8 @@ pub const TABLE_DDL: &[&str] = &[
 	FOREIGN KEY(extraction_result_id) REFERENCES extraction_results (id) ON DELETE SET NULL, 
 	FOREIGN KEY(lap_record_id) REFERENCES lap_records (id) ON DELETE SET NULL
 ,
-	CONSTRAINT ck_review_cases_status_vocab CHECK (status IN ('open', 'resolved', 'ignored', 'auto_resolved')),
-	CONSTRAINT ck_review_cases_outcome_vocab CHECK (outcome IN ('pending', 'confirmed', 'model_error', 'ignored')),
+	CONSTRAINT ck_review_cases_status_vocab CHECK (status IN ('open', 'resolved', 'auto_resolved')),
+	CONSTRAINT ck_review_cases_outcome_vocab CHECK (outcome IN ('pending', 'confirmed', 'model_error')),
 	CONSTRAINT ck_review_cases_reason_vocab CHECK (reason IN ('dirty_lap', 'track', 'weather', 'race_class', 'car', 'driver_name')),
 	CONSTRAINT ck_review_cases_trigger_vocab CHECK ("trigger" IS NULL OR "trigger" IN ('model_marked_dirty', 'weather_unknown', 'rain_time_suspicious', 'track_unknown', 'track_unresolved', 'track_not_in_reference', 'class_unknown', 'class_invalid', 'car_empty', 'car_not_in_reference', 'driver_name_empty', 'numeric_prefix', 'invalid_symbol')),
 	CONSTRAINT ck_review_cases_decision_field_vocab CHECK (decision_field IS NULL OR decision_field IN ('dirty', 'track', 'weather', 'race_class', 'car', 'driver'))

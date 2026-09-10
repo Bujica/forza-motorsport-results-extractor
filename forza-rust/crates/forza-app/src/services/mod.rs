@@ -38,7 +38,7 @@ pub use image_rename::{
 };
 pub use rebuild::{RebuildOutcome, rebuild};
 pub use review_queue::{
-    ReviewCaseEntry, ReviewQueueFilter, decide_case, ignore_case, list_review_cases, reopen_case,
+    ReviewCaseEntry, ReviewQueueFilter, decide_case, list_review_cases, reopen_case,
 };
 pub use run_control::RunControl;
 pub use run_log::{append_log_file, errors_log_path};
