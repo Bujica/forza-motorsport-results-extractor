@@ -292,8 +292,17 @@ export component ImagesPage inherits Rectangle {
                 }
                 Card {
                     vertical-stretch: 1;
-                    Text { x: 10px; y: 8px; width: parent.width - 20px;
-                           text: root.detail-lines; color: Theme.text-muted; wrap: word-wrap; font-size: Theme.font-md; }
+                    clip: true;
+                    Flickable {
+                        width: parent.width;
+                        height: parent.height;
+                        viewport-width: self.width;
+                        viewport-height: detail-text.preferred-height;
+                        detail-text := Text {
+                            x: 10px; y: 8px; width: parent.width - 20px;
+                            text: root.detail-lines; color: Theme.text-muted; wrap: word-wrap; font-size: Theme.font-md;
+                        }
+                    }
                 }
                 if root.confirm-delete: HorizontalLayout {
                     spacing: 6px;
