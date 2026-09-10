@@ -154,16 +154,12 @@ fn selected_image_paths(
 mod tests {
     use super::*;
 
-    fn write_png(path: &Path, w: u32, h: u32) {
-        write_png_seed(path, w, h, 77);
-    }
-
-    fn write_png_seed(path: &Path, w: u32, h: u32, seed: u8) {
+    fn write_png(path: &Path, w: u32, h: u32, seed: u8) {
         let img = image::RgbImage::from_fn(w, h, |x, y| {
             image::Rgb([
                 (x % 251) as u8,
                 (y % 251) as u8,
-                x.wrapping_add(y as u32).wrapping_add(seed as u32) as u8,
+                x.wrapping_add(y).wrapping_add(seed as u32) as u8,
             ])
         });
         img.save_with_format(path, image::ImageFormat::Png).unwrap();
@@ -244,9 +240,9 @@ mod tests {
     fn limit_truncates_and_resets_total() {
         let (_d, conn) = open_db();
         let dir = tempfile::tempdir().unwrap();
-        write_png_seed(&dir.path().join("a.png"), 16, 16, 1);
-        write_png_seed(&dir.path().join("b.png"), 16, 16, 2);
-        write_png_seed(&dir.path().join("c.png"), 16, 16, 3);
+        write_png(&dir.path().join("a.png"), 16, 16, 1);
+        write_png(&dir.path().join("b.png"), 16, 16, 2);
+        write_png(&dir.path().join("c.png"), 16, 16, 3);
         let mut logs = Vec::new();
         let out = build_discovery_plan(
             DiscoveryInput {

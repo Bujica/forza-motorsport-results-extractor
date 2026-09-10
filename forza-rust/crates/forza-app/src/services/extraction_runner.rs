@@ -974,16 +974,16 @@ where
                 Ok(payload) => payload,
                 Err(e) => {
                     failed += 1;
-                    conn.execute(
-                        "UPDATE extraction_results SET status='error', error_type='encode', error_message=?2, updated_at=datetime('now') WHERE id=?1",
-                        rusqlite::params![result_id, e.to_string()],
-                    )
-                    .map_err(|e| e.to_string())?;
-                    on_event(RunEvent::ImageDone {
-                        name: name.clone(),
-                        ok: false,
-                        laps: 0,
-                    });
+                    fail_result(
+                        &conn,
+                        &result_id,
+                        "encode",
+                        &e.to_string(),
+                        None,
+                        &name,
+                        None,
+                        on_event,
+                    );
                     done += 1;
                     on_event(RunEvent::Progress {
                         done,
@@ -998,16 +998,16 @@ where
             // the run and all remaining results stuck in `running`.
             if let Err(e) = backend.ensure_loaded(&desired).await {
                 failed += 1;
-                let _ = conn.execute(
-                    "UPDATE extraction_results SET status='error', error_type='model_load', error_message=?2, updated_at=datetime('now') WHERE id=?1",
-                    rusqlite::params![result_id, e.to_string()],
+                fail_result(
+                    &conn,
+                    &result_id,
+                    "model_load",
+                    &e.to_string(),
+                    None,
+                    &name,
+                    Some(format!("ensure_loaded: {e}")),
+                    on_event,
                 );
-                on_event(RunEvent::ImageDone {
-                    name: name.clone(),
-                    ok: false,
-                    laps: 0,
-                });
-                on_event(RunEvent::Log(format!("ensure_loaded: {e}")));
                 done += 1;
                 on_event(RunEvent::Progress {
                     done,
@@ -1068,16 +1068,16 @@ where
                         Ok(l) => l,
                         Err(e) => {
                             failed += 1;
-                            let _ = conn.execute(
-                                "UPDATE extraction_results SET status='error', error_type='laps', error_message=?2, attempt_count=?3, updated_at=datetime('now') WHERE id=?1",
-                                rusqlite::params![result_id, e.to_string(), attempt_count],
+                            fail_result(
+                                &conn,
+                                &result_id,
+                                "laps",
+                                &e.to_string(),
+                                Some(attempt_count),
+                                &name,
+                                Some(format!("laps: {e}")),
+                                on_event,
                             );
-                            on_event(RunEvent::ImageDone {
-                                name: name.clone(),
-                                ok: false,
-                                laps: 0,
-                            });
-                            on_event(RunEvent::Log(format!("laps: {e}")));
                             done += 1;
                             on_event(RunEvent::Progress {
                                 done,
@@ -1086,29 +1086,19 @@ where
                             continue;
                         }
                     };
-                    let stats = forza_db::repositories::runs::ResultStats {
-                        model: Some(&params.model),
-                        model_instance_id: result.accepted_attempt.model_instance_id.as_deref(),
-                        input_tokens: result.accepted_attempt.input_tokens,
-                        output_tokens: result.accepted_attempt.output_tokens,
-                        reasoning_tokens: result.accepted_attempt.reasoning_tokens,
-                        total_tokens: result.accepted_attempt.total_tokens,
-                        tokens_per_second: result.accepted_attempt.tokens_per_second,
-                        time_to_first_token_s: result.accepted_attempt.time_to_first_token_s,
-                        model_load_time_s: result.accepted_attempt.model_load_time_s,
-                        duration_ms: result.accepted_attempt.duration_ms,
-                    };
+                    let stats = build_result_stats(&params.model, &result.accepted_attempt);
                     let Some(row_id) = accepted_row else {
                         failed += 1;
-                        let _ = conn.execute(
-                            "UPDATE extraction_results SET status='error', error_type='attempt', error_message='accepted attempt row missing', attempt_count=?2, updated_at=datetime('now') WHERE id=?1",
-                            rusqlite::params![result_id, attempt_count],
+                        fail_result(
+                            &conn,
+                            &result_id,
+                            "attempt",
+                            "accepted attempt row missing",
+                            Some(attempt_count),
+                            &name,
+                            None,
+                            on_event,
                         );
-                        on_event(RunEvent::ImageDone {
-                            name: name.clone(),
-                            ok: false,
-                            laps: 0,
-                        });
                         done += 1;
                         on_event(RunEvent::Progress {
                             done,
@@ -1116,31 +1106,17 @@ where
                         });
                         continue;
                     };
-                    forza_db::repositories::runs::finalize_result_ok(
+                    finalize_ok_stage(
                         &conn,
                         &result_id,
                         &row_id,
                         attempt_count,
                         &stats,
-                    )
-                    .map_err(|e| e.to_string())?;
-                    conn.execute(
-                        "UPDATE extraction_results SET request_image_format=?2,
-                                request_image_mime_type=?3, request_image_width=?4,
-                                request_image_height=?5, request_image_bytes=?6
-                         WHERE id=?1",
-                        rusqlite::params![
-                            result_id,
-                            encoded.format,
-                            encoded.mime_type,
-                            i64::from(encoded.width_px),
-                            i64::from(encoded.height_px),
-                            encoded.byte_count as i64,
-                        ],
-                    )
-                    .map_err(|e| e.to_string())?;
+                        &encoded,
+                        &image_file_id,
+                        &image.path,
+                    )?;
                     succeeded += 1;
-                    stamp_semantic_name(&conn, &image_file_id, &image.path, &result_id);
                     if params.verbose {
                         on_event(RunEvent::Log(format!(
                             "[debug] {name} result={result_id} hash={} attempts={attempt_count} attempt={row_id} laps={laps}",
@@ -1155,16 +1131,16 @@ where
                 }
                 Err(err) => {
                     failed += 1;
-                    conn.execute(
-                        "UPDATE extraction_results SET status='error', error_type='extraction', error_message=?2, attempt_count=?3, updated_at=datetime('now') WHERE id=?1",
-                        rusqlite::params![result_id, err.to_string(), attempt_count],
-                    )
-                    .map_err(|e| e.to_string())?;
-                    on_event(RunEvent::ImageDone {
-                        name: name.clone(),
-                        ok: false,
-                        laps: 0,
-                    });
+                    fail_result(
+                        &conn,
+                        &result_id,
+                        "extraction",
+                        &err.to_string(),
+                        Some(attempt_count),
+                        &name,
+                        None,
+                        on_event,
+                    );
                 }
             }
 
@@ -1205,6 +1181,112 @@ where
     }
 
     Ok((processed, succeeded, failed, 0, 0))
+}
+
+/// Mark one result failed and emit its outcome (+ optional log line).
+///
+/// Single owner for every per-image `status='error'` write in both the
+/// sequential loop and the parallel workers, so the `error_type` vocabulary
+/// and the `ImageDone{ok:false}` event cannot diverge between the paths.
+/// (The bulk `worker_lost` safety net stays separate: one UPDATE with no
+/// per-image event. The worker image-lookup DB-error branch also stays:
+/// it emits without a DB write.)
+/// DB write failures are ignored here, like the majority of the previous
+/// call sites: failing to record a failure must not abort the run.
+#[allow(clippy::too_many_arguments)]
+fn fail_result(
+    conn: &Connection,
+    result_id: &str,
+    error_type: &str,
+    message: &str,
+    attempt_count: Option<i64>,
+    image_name: &str,
+    log: Option<String>,
+    emit: impl Fn(RunEvent),
+) {
+    if let Some(n) = attempt_count {
+        let _ = conn.execute(
+            "UPDATE extraction_results SET status='error', error_type=?2, error_message=?3, attempt_count=?4, updated_at=datetime('now') WHERE id=?1",
+            rusqlite::params![result_id, error_type, message, n],
+        );
+    } else {
+        let _ = conn.execute(
+            "UPDATE extraction_results SET status='error', error_type=?2, error_message=?3, updated_at=datetime('now') WHERE id=?1",
+            rusqlite::params![result_id, error_type, message],
+        );
+    }
+    emit(RunEvent::ImageDone {
+        name: image_name.to_string(),
+        ok: false,
+        laps: 0,
+    });
+    if let Some(line) = log {
+        emit(RunEvent::Log(line));
+    }
+}
+
+/// Build the finalize stats from the accepted attempt. Pure constructor so
+/// both paths record identical token/timing columns.
+fn build_result_stats<'a>(
+    model: &'a str,
+    accepted: &'a ModelAttemptRecord,
+) -> forza_db::repositories::runs::ResultStats<'a> {
+    forza_db::repositories::runs::ResultStats {
+        model: Some(model),
+        model_instance_id: accepted.model_instance_id.as_deref(),
+        input_tokens: accepted.input_tokens,
+        output_tokens: accepted.output_tokens,
+        reasoning_tokens: accepted.reasoning_tokens,
+        total_tokens: accepted.total_tokens,
+        tokens_per_second: accepted.tokens_per_second,
+        time_to_first_token_s: accepted.time_to_first_token_s,
+        model_load_time_s: accepted.model_load_time_s,
+        duration_ms: accepted.duration_ms,
+    }
+}
+
+/// Persist the success path: finalize row + request-image columns + semantic
+/// name stamp. Single owner so both the sequential loop and the parallel
+/// workers write the same columns (audit lesson: the sequential path once
+/// silently missed the stamping). Returns Err without emitting; the caller
+/// decides how to surface it (`?` abort sequential vs. `finalize` error row
+/// in workers).
+#[allow(clippy::too_many_arguments)]
+fn finalize_ok_stage(
+    conn: &Connection,
+    result_id: &str,
+    accepted_row_id: &str,
+    attempt_count: i64,
+    stats: &forza_db::repositories::runs::ResultStats<'_>,
+    encoded: &forza_pipeline::EncodedImage,
+    image_file_id: &str,
+    image_path: &std::path::Path,
+) -> Result<(), String> {
+    forza_db::repositories::runs::finalize_result_ok(
+        conn,
+        result_id,
+        accepted_row_id,
+        attempt_count,
+        stats,
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE extraction_results SET request_image_format=?2,
+                request_image_mime_type=?3, request_image_width=?4,
+                request_image_height=?5, request_image_bytes=?6
+         WHERE id=?1",
+        rusqlite::params![
+            result_id,
+            encoded.format,
+            encoded.mime_type,
+            i64::from(encoded.width_px),
+            i64::from(encoded.height_px),
+            encoded.byte_count as i64,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    stamp_semantic_name(conn, image_file_id, image_path, result_id);
+    Ok(())
 }
 
 /// Persist one backend attempt with the full evidence chain: encoded-image
@@ -1434,15 +1516,18 @@ async fn worker_loop(
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
-                let _ = conn.execute(
-                    "UPDATE extraction_results SET status='error', error_type='worker_backend', error_message=?2, updated_at=datetime('now') WHERE id=?1",
-                    rusqlite::params![image.result_id, e.to_string()],
+                fail_result(
+                    &conn,
+                    &image.result_id,
+                    "worker_backend",
+                    &e.to_string(),
+                    None,
+                    &name,
+                    None,
+                    |event| {
+                        let _ = event_tx.send(event);
+                    },
                 );
-                let _ = event_tx.send(RunEvent::ImageDone {
-                    name,
-                    ok: false,
-                    laps: 0,
-                });
             }
             return;
         }
@@ -1477,39 +1562,40 @@ async fn worker_loop(
         let result_id = image.result_id.clone();
         let _ = process_reason;
         let _ = prompt_snapshot_id;
-        let image_file_id = match find_image_id_by_hash(&conn, &image.file_hash)
-            .map_err(|e| e.to_string())
-        {
-            Ok(Some(id)) => id,
-            Ok(None) => {
-                let _ = event_tx.send(RunEvent::ImageDone {
-                    name: name.clone(),
-                    ok: false,
-                    laps: 0,
-                });
-                let _ = event_tx.send(RunEvent::Log(format!(
-                    "image row missing for pre-allocated result {result_id}"
-                )));
-                let _ = conn.execute(
-                    "UPDATE extraction_results SET status='error', error_type='upsert', error_message='image row missing', updated_at=datetime('now') WHERE id=?1",
-                    rusqlite::params![result_id],
-                );
-                done += 1;
-                let _ = event_tx.send(RunEvent::Progress { done, total });
-                continue;
-            }
-            Err(e) => {
-                let _ = event_tx.send(RunEvent::ImageDone {
-                    name: name.clone(),
-                    ok: false,
-                    laps: 0,
-                });
-                let _ = event_tx.send(RunEvent::Log(format!("image lookup: {e}")));
-                done += 1;
-                let _ = event_tx.send(RunEvent::Progress { done, total });
-                continue;
-            }
-        };
+        let image_file_id =
+            match find_image_id_by_hash(&conn, &image.file_hash).map_err(|e| e.to_string()) {
+                Ok(Some(id)) => id,
+                Ok(None) => {
+                    fail_result(
+                        &conn,
+                        &result_id,
+                        "upsert",
+                        "image row missing",
+                        None,
+                        &name,
+                        Some(format!(
+                            "image row missing for pre-allocated result {result_id}"
+                        )),
+                        |event| {
+                            let _ = event_tx.send(event);
+                        },
+                    );
+                    done += 1;
+                    let _ = event_tx.send(RunEvent::Progress { done, total });
+                    continue;
+                }
+                Err(e) => {
+                    let _ = event_tx.send(RunEvent::ImageDone {
+                        name: name.clone(),
+                        ok: false,
+                        laps: 0,
+                    });
+                    let _ = event_tx.send(RunEvent::Log(format!("image lookup: {e}")));
+                    done += 1;
+                    let _ = event_tx.send(RunEvent::Progress { done, total });
+                    continue;
+                }
+            };
 
         let encoded = match encode_image_payload(
             &image.path,
@@ -1520,15 +1606,18 @@ async fn worker_loop(
         ) {
             Ok(payload) => payload,
             Err(e) => {
-                let _ = conn.execute(
-                    "UPDATE extraction_results SET status='error', error_type='encode', error_message=?2, updated_at=datetime('now') WHERE id=?1",
-                    rusqlite::params![result_id, e.to_string()],
+                fail_result(
+                    &conn,
+                    &result_id,
+                    "encode",
+                    &e.to_string(),
+                    None,
+                    &name,
+                    None,
+                    |event| {
+                        let _ = event_tx.send(event);
+                    },
                 );
-                let _ = event_tx.send(RunEvent::ImageDone {
-                    name: name.clone(),
-                    ok: false,
-                    laps: 0,
-                });
                 done += 1;
                 let _ = event_tx.send(RunEvent::Progress { done, total });
                 continue;
@@ -1538,18 +1627,20 @@ async fn worker_loop(
         match backend.ensure_loaded(&desired).await {
             Ok(()) => {}
             Err(e) => {
-                let _ = event_tx.send(RunEvent::ImageDone {
-                    name: name.clone(),
-                    ok: false,
-                    laps: 0,
-                });
-                let _ = event_tx.send(RunEvent::Log(format!("ensure_loaded: {e}")));
+                fail_result(
+                    &conn,
+                    &result_id,
+                    "model_load",
+                    &e.to_string(),
+                    None,
+                    &name,
+                    Some(format!("ensure_loaded: {e}")),
+                    |event| {
+                        let _ = event_tx.send(event);
+                    },
+                );
                 done += 1;
                 let _ = event_tx.send(RunEvent::Progress { done, total });
-                let _ = conn.execute(
-                    "UPDATE extraction_results SET status='error', error_type='model_load', error_message=?2, updated_at=datetime('now') WHERE id=?1",
-                    rusqlite::params![result_id, e.to_string()],
-                );
                 continue;
             }
         };
@@ -1600,33 +1691,24 @@ async fn worker_loop(
                     Err(e) => {
                         // Never leave the result `running`: a laps failure is
                         // a per-image error, visible to retry_errors.
-                        let _ = conn.execute(
-                            "UPDATE extraction_results SET status='error', error_type='laps', error_message=?2, attempt_count=?3, updated_at=datetime('now') WHERE id=?1",
-                            rusqlite::params![result_id, e.to_string(), attempt_count],
+                        fail_result(
+                            &conn,
+                            &result_id,
+                            "laps",
+                            &e.to_string(),
+                            Some(attempt_count),
+                            &name,
+                            Some(format!("laps: {e}")),
+                            |event| {
+                                let _ = event_tx.send(event);
+                            },
                         );
-                        let _ = event_tx.send(RunEvent::ImageDone {
-                            name: name.clone(),
-                            ok: false,
-                            laps: 0,
-                        });
-                        let _ = event_tx.send(RunEvent::Log(format!("laps: {e}")));
                         done += 1;
                         let _ = event_tx.send(RunEvent::Progress { done, total });
                         continue;
                     }
                 };
-                let stats = forza_db::repositories::runs::ResultStats {
-                    model: Some(&params.model),
-                    model_instance_id: result.accepted_attempt.model_instance_id.as_deref(),
-                    input_tokens: result.accepted_attempt.input_tokens,
-                    output_tokens: result.accepted_attempt.output_tokens,
-                    reasoning_tokens: result.accepted_attempt.reasoning_tokens,
-                    total_tokens: result.accepted_attempt.total_tokens,
-                    tokens_per_second: result.accepted_attempt.tokens_per_second,
-                    time_to_first_token_s: result.accepted_attempt.time_to_first_token_s,
-                    model_load_time_s: result.accepted_attempt.model_load_time_s,
-                    duration_ms: result.accepted_attempt.duration_ms,
-                };
+                let stats = build_result_stats(&params.model, &result.accepted_attempt);
                 // Never stream ok:true while the DB row is still `running`:
                 // a failed finalize must surface as ok:false + error row.
                 let finalize_outcome: Result<(), String> = (|| {
@@ -1635,34 +1717,19 @@ async fn worker_loop(
                             "accepted attempt row missing (attempt insert failed)".to_string()
                         );
                     };
-                    forza_db::repositories::runs::finalize_result_ok(
+                    finalize_ok_stage(
                         &conn,
                         &result_id,
                         &row_id,
                         attempt_count,
                         &stats,
+                        &encoded,
+                        &image_file_id,
+                        &image.path,
                     )
-                    .map_err(|e| e.to_string())?;
-                    conn.execute(
-                        "UPDATE extraction_results SET request_image_format=?2,
-                                request_image_mime_type=?3, request_image_width=?4,
-                                request_image_height=?5, request_image_bytes=?6
-                         WHERE id=?1",
-                        rusqlite::params![
-                            result_id,
-                            encoded.format,
-                            encoded.mime_type,
-                            i64::from(encoded.width_px),
-                            i64::from(encoded.height_px),
-                            encoded.byte_count as i64,
-                        ],
-                    )
-                    .map_err(|e| e.to_string())?;
-                    Ok(())
                 })();
                 match finalize_outcome {
                     Ok(()) => {
-                        stamp_semantic_name(&conn, &image_file_id, &image.path, &result_id);
                         if params.verbose {
                             let _ = event_tx.send(RunEvent::Log(format!(
                                 "[debug] {name} result={result_id} hash={} attempts={attempt_count} laps={laps} (worker)",
@@ -1676,29 +1743,34 @@ async fn worker_loop(
                         });
                     }
                     Err(e) => {
-                        let _ = conn.execute(
-                            "UPDATE extraction_results SET status='error', error_type='finalize', error_message=?2, attempt_count=?3, updated_at=datetime('now') WHERE id=?1",
-                            rusqlite::params![result_id, e, attempt_count],
+                        fail_result(
+                            &conn,
+                            &result_id,
+                            "finalize",
+                            &e,
+                            Some(attempt_count),
+                            &name,
+                            Some(format!("finalize {result_id}: {e}")),
+                            |event| {
+                                let _ = event_tx.send(event);
+                            },
                         );
-                        let _ = event_tx.send(RunEvent::ImageDone {
-                            name: name.clone(),
-                            ok: false,
-                            laps: 0,
-                        });
-                        let _ = event_tx.send(RunEvent::Log(format!("finalize {result_id}: {e}")));
                     }
                 }
             }
             Err(err) => {
-                let _ = conn.execute(
-                    "UPDATE extraction_results SET status='error', error_type='extraction', error_message=?2, attempt_count=?3, updated_at=datetime('now') WHERE id=?1",
-                    rusqlite::params![result_id, err.to_string(), attempt_count],
+                fail_result(
+                    &conn,
+                    &result_id,
+                    "extraction",
+                    &err.to_string(),
+                    Some(attempt_count),
+                    &name,
+                    None,
+                    |event| {
+                        let _ = event_tx.send(event);
+                    },
                 );
-                let _ = event_tx.send(RunEvent::ImageDone {
-                    name: name.clone(),
-                    ok: false,
-                    laps: 0,
-                });
             }
         }
 
