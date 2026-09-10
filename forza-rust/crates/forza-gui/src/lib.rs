@@ -362,7 +362,11 @@ fn apply_review_detail(ui: &MainWindow) {
             };
             let current_driver = c.driver.clone().unwrap_or_default();
             let current_car = c.car.clone().unwrap_or_default();
-            let current_lap = c.best_lap.clone().unwrap_or_default();
+            let current_lap = c
+                .current_best_lap
+                .clone()
+                .or_else(|| c.best_lap.clone())
+                .unwrap_or_default();
             ui.set_review_detail_lines(
                 format!(
                     "Case: {}\nStable ID: {}\nOutcome: {}\nReason: {}\nTrigger: {}\nModel value: {}\nCorrected value: {}\nDecision: {}\nError: {}\nResolution: {}\nFile: {}\nCurrent track: {}\nCurrent class: {}\nCurrent weather: {}\nTemp: {}\nCurrent driver: {}\nCurrent car: {}\nCurrent lap: {}",
@@ -861,28 +865,28 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                                             }
                                             .into(),
                                             driver: c.driver.clone().unwrap_or_default().into(),
-                                            lap: if c
-                                                .best_lap
-                                                .clone()
-                                                .unwrap_or_default()
-                                                .is_empty()
-                                            {
-                                                String::new()
-                                            } else if c.status == "open" {
-                                                format!(
-                                                    "{} dirty",
-                                                    c.best_lap.clone().unwrap_or_default()
-                                                )
-                                            } else {
-                                                c.best_lap.clone().unwrap_or_default()
+                                            // Live lap resolved per case (Python
+                                            // `_current_lap_label` parity):
+                                            // current time first, stored
+                                            // snapshot as fallback; "dirty"
+                                            // only when the lap really is.
+                                            lap: {
+                                                let best = c
+                                                    .current_best_lap
+                                                    .clone()
+                                                    .or_else(|| c.best_lap.clone())
+                                                    .unwrap_or_default();
+                                                let dirty = c.current_lap_dirty.unwrap_or(false);
+                                                if best.is_empty() {
+                                                    String::new()
+                                                } else if dirty {
+                                                    format!("{best} dirty")
+                                                } else {
+                                                    best
+                                                }
                                             }
                                             .into(),
-                                            lap_dirty: c.status == "open"
-                                                && !c
-                                                    .best_lap
-                                                    .clone()
-                                                    .unwrap_or_default()
-                                                    .is_empty(),
+                                            lap_dirty: c.current_lap_dirty.unwrap_or(false),
                                             status: c.status.clone().into(),
                                             image_file_id: c
                                                 .image_file_id

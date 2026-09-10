@@ -78,3 +78,40 @@ fn confirmed_car_enters_reference_and_suppresses_future_cases() {
         again.iter().map(|c| &c.reason).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn review_list_resolves_current_lap_per_case() {
+    use forza_app::services::review_queue::{ReviewQueueFilter, list_review_cases};
+
+    let dir = tempfile::tempdir().unwrap();
+    let conn = seed_db(&dir.path().join("lap.sqlite3"));
+    // Case linked to the lap row, and case with only image + index.
+    conn.execute_batch(
+        "INSERT INTO review_cases (id, business_key, case_number, reason, status, outcome,
+                                   image_file_id, lap_record_id, lap_index, car,
+                                   created_at, updated_at)
+         VALUES ('rc-lap', 'car:img-car:0', 7, 'car', 'open', 'pending',
+                 'img-car', 'lap-car', 0, 'Cadillac #3 ATS',
+                 datetime('now'), datetime('now'));
+         INSERT INTO review_cases (id, business_key, case_number, reason, status, outcome,
+                                   image_file_id, lap_index, car, created_at, updated_at)
+         VALUES ('rc-idx', 'car:img-car:1', 8, 'car', 'open', 'pending',
+                 'img-car', 0, 'Cadillac #3 ATS', datetime('now'), datetime('now'));",
+    )
+    .unwrap();
+
+    let filter = ReviewQueueFilter {
+        bucket: "open".to_string(),
+        reason: None,
+        outcome: None,
+        run_id: None,
+        image_file_id: None,
+    };
+    let entries = list_review_cases(&conn, &filter).unwrap();
+    assert_eq!(entries.len(), 2);
+    for entry in &entries {
+        // Seed lap is clean 1:30.000.
+        assert_eq!(entry.current_best_lap.as_deref(), Some("1:30.000"));
+        assert_eq!(entry.current_lap_dirty, Some(false));
+    }
+}

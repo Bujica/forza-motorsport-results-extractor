@@ -31,6 +31,14 @@ pub struct ReviewCaseEntry {
     pub run_id: Option<String>,
     pub source_file: Option<String>,
     pub resolution_note: Option<String>,
+    /// Linked lap row id (resolution order: this, then image+index, then
+    /// first lap of the image — Python `_current_review_lap` parity).
+    pub lap_record_id: Option<String>,
+    /// Live lap time/dirtness resolved per case (Python `current_best_lap` /
+    /// `current_dirty` parity). The stored `best_lap` column is never
+    /// written by upsert, so the Lap column would stay empty without this.
+    pub current_best_lap: Option<String>,
+    pub current_lap_dirty: Option<bool>,
 }
 
 /// Filters for the review listing; `None`/empty/"all" values pass through.
@@ -93,7 +101,8 @@ pub fn list_review_cases(
                 COALESCE(race_class,''), COALESCE(weather,''), COALESCE(best_lap,''),
                 temp_f, COALESCE(model_value,''), corrected_value,
                 COALESCE(decision_field,''), COALESCE(error_type,''), lap_index,
-                image_file_id, run_id, COALESCE(source_file,''), COALESCE(resolution_note,'')
+                image_file_id, run_id, COALESCE(source_file,''), COALESCE(resolution_note,''),
+                lap_record_id
          FROM review_cases
          WHERE {}
          ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, case_number",
@@ -126,10 +135,63 @@ pub fn list_review_cases(
                 run_id: row.get(18)?,
                 source_file: Some(row.get(19)?),
                 resolution_note: Some(row.get(20)?),
+                lap_record_id: row.get(21)?,
+                current_best_lap: None,
+                current_lap_dirty: None,
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+    let mut rows = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    // Resolve the live lap per case (Python `_current_review_lap` parity):
+    // linked row, else image+index, else first lap of the image.
+    for entry in &mut rows {
+        let current: Option<(String, bool)> = entry
+            .lap_record_id
+            .as_deref()
+            .and_then(|id| lap_best_where(conn, "id = ?1", [id]))
+            .or_else(|| match (&entry.image_file_id, entry.lap_index) {
+                (Some(image), Some(index)) => lap_best_where(
+                    conn,
+                    "image_file_id = ?1 AND lap_index = ?2",
+                    rusqlite::params![image, index],
+                ),
+                _ => None,
+            })
+            .or_else(|| {
+                entry.image_file_id.as_deref().and_then(|image| {
+                    lap_best_where(
+                        conn,
+                        "image_file_id = ?1 ORDER BY lap_index LIMIT 1",
+                        [image],
+                    )
+                })
+            });
+        if let Some((best_lap, dirty)) = current {
+            entry.current_best_lap = Some(best_lap);
+            entry.current_lap_dirty = Some(dirty);
+        }
+    }
+    Ok(rows)
+}
+
+/// Best lap + dirty flag of the first lap row matching a predicate.
+fn lap_best_where(
+    conn: &Connection,
+    predicate: &str,
+    params: impl rusqlite::Params,
+) -> Option<(String, bool)> {
+    conn.query_row(
+        &format!("SELECT best_lap, dirty FROM lap_records WHERE {predicate}"),
+        params,
+        |row| {
+            let best_lap: String = row.get(0)?;
+            let dirty: i64 = row.get(1)?;
+            Ok((best_lap, dirty != 0))
+        },
+    )
+    .ok()
 }
 
 /// Apply an operator decision to a case. `value` semantics depend on field
