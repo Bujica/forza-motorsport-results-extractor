@@ -16,7 +16,8 @@ pub mod repositories;
 pub mod schema_ddl;
 
 pub use connection::{
-    BUSY_TIMEOUT_MS, SqlitePool, configure_connection, connection_pool, open_connection,
+    BUSY_TIMEOUT_MS, PooledConnection, SqlitePool, configure_connection, connection_pool,
+    open_connection,
 };
 pub use error::DbError;
 pub use gui_queries::{ImageInventoryFilter, ImageInventoryRow, image_inventory};

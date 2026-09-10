@@ -487,3 +487,28 @@ fn delete_image_with_evidence_cascades_like_python() {
         .unwrap();
     assert_eq!((total, processed), (1, 0));
 }
+
+#[test]
+fn pooled_workers_drain_rapid_requests_without_loss() {
+    use std::time::Duration;
+    let (_guard, db) = seeded_db();
+    let ctx = context(&db, "TestDriver");
+    let (tx, rx) = mpsc::channel::<Request>();
+    let (resp_tx, resp_rx) = mpsc::channel::<Response>();
+    let handle = forza_gui::worker::spawn_thread(rx, ctx, move |r| {
+        let _ = resp_tx.send(r);
+    });
+    let n = 50;
+    for _ in 0..n {
+        tx.send(Request::ListBestLaps).unwrap();
+    }
+    drop(tx);
+    let mut got = 0;
+    for _ in 0..n {
+        let r = resp_rx.recv_timeout(Duration::from_secs(120)).unwrap();
+        assert!(matches!(r, Response::BestLaps(_)));
+        got += 1;
+    }
+    assert_eq!(got, n);
+    handle.join().unwrap();
+}

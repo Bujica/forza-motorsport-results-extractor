@@ -27,7 +27,14 @@ pub struct WorkerContext {
     pub database_file: PathBuf,
     pub config_path: PathBuf,
     pub cfg: Mutex<forza_config::AppConfig>,
+    pool: Mutex<Option<forza_db::SqlitePool>>,
 }
+
+/// Fixed pool size: enough for a heavy `RunFullDoctor` plus interactive
+/// filter/detail traffic; SQLite serializes internally anyway.
+const WORKER_THREADS: usize = 4;
+/// r2d2 headroom above the worker count (each job holds one checkout).
+const POOL_SIZE: u32 = 8;
 
 impl WorkerContext {
     pub fn new(database_file: PathBuf, config_path: PathBuf, cfg: forza_config::AppConfig) -> Self {
@@ -35,7 +42,24 @@ impl WorkerContext {
             database_file,
             config_path,
             cfg: Mutex::new(cfg),
+            pool: Mutex::new(None),
         }
+    }
+
+    /// Check out a pooled connection. The pool is created on first use so
+    /// `new` stays infallible; every handler shares it instead of opening
+    /// one connection per request.
+    pub fn conn(&self) -> Result<forza_db::PooledConnection, forza_db::DbError> {
+        let mut guard = self
+            .pool
+            .lock()
+            .map_err(|e| forza_db::DbError::Pool(e.to_string()))?;
+        if guard.is_none() {
+            *guard = Some(forza_db::connection_pool(&self.database_file, POOL_SIZE)?);
+        }
+        let pool = guard.clone().expect("pool just initialized");
+        drop(guard);
+        pool.get().map_err(forza_db::DbError::from)
     }
 
     pub fn gamertag(&self) -> String {
@@ -315,8 +339,7 @@ pub fn handle_request(
         }
         Request::ListReviews { filter } => {
             let outcome = (|| -> Result<(Vec<ReviewCaseEntry>, ReviewOptions), String> {
-                let conn =
-                    forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+                let conn = ctx.conn().map_err(|e| e.to_string())?;
                 let cases = list_review_cases(&conn, filter)?;
                 let options = review_options(&conn)?;
                 Ok((cases, options))
@@ -335,7 +358,7 @@ pub fn handle_request(
             }
         }
         Request::ReopenCase { case_number } => Response::CaseReopen((|| -> Result<(), String> {
-            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            let conn = ctx.conn().map_err(|e| e.to_string())?;
             reopen_case(&conn, *case_number)?;
             // A reopened case needs its active system flag back.
             forza_db::repositories::sync_review_flags(&conn).map_err(|e| e.to_string())?;
@@ -343,8 +366,7 @@ pub fn handle_request(
         })()),
         Request::LoadPreview { image_file_id } => {
             let result = (|| -> Result<Option<String>, String> {
-                let conn =
-                    forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+                let conn = ctx.conn().map_err(|e| e.to_string())?;
                 conn.query_row(
                     "SELECT current_path FROM image_files WHERE id = ?1",
                     [image_file_id],
@@ -361,8 +383,7 @@ pub fn handle_request(
             value,
         } => Response::CaseDecided((|| {
             let gamertag = ctx.gamertag();
-            let mut conn =
-                forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            let mut conn = ctx.conn().map_err(|e| e.to_string())?;
             decide_case(&mut conn, *case_number, field, value)?;
             // A correction changes lap facts: refresh derived state.
             let outcome = rebuild(&conn, &gamertag)?;
@@ -371,7 +392,7 @@ pub fn handle_request(
         })()),
         Request::ListBestLaps => Response::BestLaps((|| {
             let gamertag = ctx.gamertag();
-            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            let conn = ctx.conn().map_err(|e| e.to_string())?;
             forza_app::list_best_laps(&conn, &gamertag.to_lowercase())
         })()),
         Request::RunDoctor => Response::Doctor(
@@ -384,13 +405,12 @@ pub fn handle_request(
         ),
         Request::RunRebuild => Response::Rebuild((|| {
             let gamertag = ctx.gamertag();
-            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            let conn = ctx.conn().map_err(|e| e.to_string())?;
             rebuild(&conn, &gamertag)
         })()),
         Request::RunDryRun { input_dir } => {
             let summary = (|| -> Result<String, String> {
-                let conn =
-                    forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+                let conn = ctx.conn().map_err(|e| e.to_string())?;
                 let known_paths =
                     forza_db::repositories::known_path_hashes(&conn).map_err(|e| e.to_string())?;
                 let known =
@@ -418,11 +438,11 @@ pub fn handle_request(
             Response::RunDryRunDone(summary)
         }
         Request::LoadImageDetail { image_id } => Response::ImageDetail((|| {
-            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            let conn = ctx.conn().map_err(|e| e.to_string())?;
             load_image_detail(&conn, image_id)
         })()),
         Request::PreviewRename { image_ids } => Response::RenamePreview((|| {
-            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            let conn = ctx.conn().map_err(|e| e.to_string())?;
             forza_app::preview_rename(&conn, image_ids)
         })()),
         Request::RenameImages { image_ids } => Response::RenameDone(rename_images(ctx, image_ids)),
@@ -484,8 +504,7 @@ pub fn handle_request(
                     Ok(saved) => {
                         *ctx.cfg.lock().map_err(|e| e.to_string())? = saved.config.clone();
                         let gamertag_recomputed = if saved.gamertag_changed {
-                            let conn = forza_db::open_connection(&ctx.database_file)
-                                .map_err(|e| e.to_string())?;
+                            let conn = ctx.conn().map_err(|e| e.to_string())?;
                             rebuild(&conn, &saved.config.gamertag)?;
                             true
                         } else {
@@ -528,20 +547,20 @@ pub fn handle_request(
             Response::Settings(outcome)
         }
         Request::ListImageDebugCases { filter } => Response::ImageDebugCases((|| {
-            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            let conn = ctx.conn().map_err(|e| e.to_string())?;
             list_debug_cases(&conn, filter)
         })()),
         Request::LoadImageDebugDetail {
             image_file_id,
             selected_result_id,
         } => Response::ImageDebugDetail((|| {
-            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            let conn = ctx.conn().map_err(|e| e.to_string())?;
             load_debug_detail(&conn, image_file_id, selected_result_id.as_deref())
         })()),
         Request::LoadImageDebugByResult {
             extraction_result_id,
         } => Response::ImageDebugDetail((|| {
-            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            let conn = ctx.conn().map_err(|e| e.to_string())?;
             load_debug_detail_by_result(&conn, extraction_result_id)
         })()),
         Request::LoadLogs => Response::Logs((|| {
@@ -608,18 +627,18 @@ pub fn handle_request(
         })()),
         Request::RefreshOverview => Response::Overview((|| {
             let cfg = ctx.cfg.lock().map_err(|e| e.to_string())?.clone();
-            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            let conn = ctx.conn().map_err(|e| e.to_string())?;
             Ok(forza_app::build_overview_snapshot(&conn, &cfg))
         })()),
         Request::ImportExternalRecords { path } => Response::ImportDone((|| {
-            let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+            let conn = ctx.conn().map_err(|e| e.to_string())?;
             forza_app::services::external_import::import_to_db(&conn, Path::new(path))
         })()),
     }
 }
 
 fn rename_images(ctx: &WorkerContext, image_ids: &[String]) -> Result<String, String> {
-    let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+    let conn = ctx.conn().map_err(|e| e.to_string())?;
     let outcomes = forza_app::rename_files(&conn, image_ids, false)?;
     let changed = outcomes.iter().filter(|o| o.renamed).count();
     let errors: Vec<String> = outcomes
@@ -649,7 +668,7 @@ fn export_images(
     dest_dir: &str,
 ) -> Result<(usize, usize), String> {
     std::fs::create_dir_all(dest_dir).map_err(|e| format!("create destination: {e}"))?;
-    let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+    let conn = ctx.conn().map_err(|e| e.to_string())?;
     let mut exported = 0usize;
     let mut skipped = 0usize;
     for id in image_ids {
@@ -716,7 +735,7 @@ fn sanitize_export_name(name: &str) -> String {
 /// Re-check on-disk existence: now-missing files get file_status='missing'
 /// (+missing_at), files that reappeared go back to 'available'.
 fn rescan_images(ctx: &WorkerContext, image_ids: &[String]) -> Result<(usize, usize), String> {
-    let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+    let conn = ctx.conn().map_err(|e| e.to_string())?;
     let mut available = 0usize;
     let mut missing = 0usize;
     for id in image_ids {
@@ -758,7 +777,7 @@ fn delete_images(
     ctx: &WorkerContext,
     image_ids: &[String],
 ) -> Result<(usize, usize, String), String> {
-    let conn = forza_db::open_connection(&ctx.database_file).map_err(|e| e.to_string())?;
+    let conn = ctx.conn().map_err(|e| e.to_string())?;
     let input_dir = ctx.input_dir();
     let mut deleted = 0usize;
     let mut refused = 0usize;
@@ -984,10 +1003,12 @@ fn read_log_file(path: &Path) -> String {
     }
 }
 
-/// Spawn the long-lived worker thread. Each request is handled on its own
-/// short-lived thread so a heavy `RunFullDoctor` (63 checks + file I/O) does
-/// not block `LoadImageDetail` / `LoadImageDebugDetail` — parity with Python's
-/// per-controller QThread workers.
+/// Spawn the fixed worker pool. `WORKER_THREADS` long-lived threads share
+/// the request queue instead of spawning one OS thread per request, and jobs
+/// check out connections from one r2d2 pool instead of opening one per
+/// request. A heavy `RunFullDoctor` (63 checks + file I/O) still never blocks
+/// `LoadImageDetail` / `LoadImageDebugDetail` (separate pool thread) —
+/// parity with Python's per-controller QThread workers.
 pub fn spawn_thread<F>(
     rx: mpsc::Receiver<Request>,
     ctx: WorkerContext,
@@ -997,21 +1018,32 @@ where
     F: Fn(Response) + Send + 'static,
 {
     use std::sync::{Arc, Mutex};
+    let rx = Arc::new(Mutex::new(rx));
     let ctx = Arc::new(ctx);
     let service = Arc::new(ImageInventoryService::new(ctx.database_file.clone()));
     let on_response = Arc::new(Mutex::new(on_response));
-    std::thread::Builder::new()
-        .name("forza-gui-worker".into())
-        .spawn(move || {
-            while let Ok(request) = rx.recv() {
-                let ctx = Arc::clone(&ctx);
-                let service = Arc::clone(&service);
-                let on_response = Arc::clone(&on_response);
-                // Handle each request concurrently; response marshals back via
-                // `slint::invoke_from_event_loop` inside `on_response`.
-                std::thread::Builder::new()
-                    .name("forza-gui-worker-job".into())
-                    .spawn(move || {
+    let mut handles = Vec::with_capacity(WORKER_THREADS);
+    for idx in 0..WORKER_THREADS {
+        let rx = Arc::clone(&rx);
+        let ctx = Arc::clone(&ctx);
+        let service = Arc::clone(&service);
+        let on_response = Arc::clone(&on_response);
+        handles.push(
+            std::thread::Builder::new()
+                .name(format!("forza-gui-worker-{idx}"))
+                .spawn(move || {
+                    loop {
+                        // Drop the guard before handling: only the `recv`
+                        // itself runs serialized. A poisoned mutex (dead
+                        // sibling) recovers via `into_inner` instead of
+                        // wedging the whole pool.
+                        let request = {
+                            let guard = rx.lock().unwrap_or_else(|poison| poison.into_inner());
+                            guard.recv()
+                        };
+                        let Ok(request) = request else {
+                            break;
+                        };
                         // Never let a panicking job wedge the coalescing flags:
                         // the UI only resets IN_FLIGHT on a delivered response,
                         // so a silent thread death would freeze inventory/review
@@ -1025,12 +1057,23 @@ where
                                     "background job panicked; please retry".to_string(),
                                 ),
                             };
-                        if let Ok(f) = on_response.lock() {
-                            f(response);
-                        }
-                    })
-                    .expect("job thread");
+                        // Same poison rule: a dead sibling must not swallow
+                        // responses forever.
+                        let deliver = on_response
+                            .lock()
+                            .unwrap_or_else(|poison| poison.into_inner());
+                        deliver(response);
+                    }
+                })
+                .expect("worker thread"),
+        );
+    }
+    std::thread::Builder::new()
+        .name("forza-gui-worker-sup".into())
+        .spawn(move || {
+            for handle in handles {
+                let _ = handle.join();
             }
         })
-        .expect("worker thread")
+        .expect("worker supervisor")
 }

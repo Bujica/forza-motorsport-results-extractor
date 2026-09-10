@@ -41,6 +41,10 @@ pub fn open_connection(path: &Path) -> Result<Connection, DbError> {
 
 pub type SqlitePool = Pool<Manager>;
 
+/// A checked-out pooled connection: derefs to `rusqlite::Connection`, so
+/// handler code using `&conn` compiles unchanged.
+pub type PooledConnection = r2d2::PooledConnection<Manager>;
+
 /// Build a pool whose connections all satisfy the contract above.
 pub fn connection_pool(path: &Path, max_size: u32) -> Result<SqlitePool, DbError> {
     let manager = SqliteConnectionManager::file(path).with_init(|conn| apply_pragmas(conn));
