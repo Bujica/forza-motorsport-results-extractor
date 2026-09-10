@@ -185,10 +185,13 @@ fn review_options(conn: &rusqlite::Connection) -> Result<ReviewOptions, String> 
     };
     // Python hardcodes the outcome vocabulary before DB values so the filter
     // is usable on an empty queue; DB-only values append after.
+    // `auto_resolved` is a display label (stored outcome stays `pending`):
+    // the listing maps it back to status (see `list_review_cases`).
     let mut outcomes = vec![
         "pending".to_string(),
         "confirmed".to_string(),
         "model_error".to_string(),
+        "auto_resolved".to_string(),
     ];
     for value in distinct("outcome")? {
         if !outcomes.contains(&value) {

@@ -10,6 +10,7 @@
 #66 Astra
 #91 BMW M2
 #96 BMW M4 GT3
+#97 Vantage GTE
 #98 Elantra
 #98 Veloster
 911 GT3 R '23
@@ -80,6 +81,7 @@ Austin 3000 '65
 AutoUnion Type D
 Aventador '16
 BAC Mono '14
+Bentley #17 C
 Bentley C SS '17
 BMW #1 M8
 BMW #24 M6
@@ -121,6 +123,7 @@ Bugatti Veyron
 Buick #6 Regal
 Buick GNX '87
 Buick GSX '70
+Cadillac #3 ATS
 Cadillac ATS '16
 Cadillac CT4 '22
 Cadillac CT5 '22

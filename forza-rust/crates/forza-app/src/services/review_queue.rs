@@ -79,8 +79,18 @@ pub fn list_review_cases(
         .as_deref()
         .filter(|v| !v.is_empty() && *v != "all")
     {
-        clauses.push("outcome = ?".to_string());
-        args.push(Box::new(outcome.to_string()));
+        // The stored outcome vocabulary has no system-resolved value
+        // (CHECK-enforced): `auto_resolved` rows keep `outcome='pending'`,
+        // so both labels map back to the lifecycle status here. Without
+        // this, `pending` would also match system-closed rows.
+        if outcome == "auto_resolved" {
+            clauses.push("status = 'auto_resolved'".to_string());
+        } else if outcome == "pending" {
+            clauses.push("status = 'open'".to_string());
+        } else {
+            clauses.push("outcome = ?".to_string());
+            args.push(Box::new(outcome.to_string()));
+        }
     }
     if let Some(run) = filter
         .run_id

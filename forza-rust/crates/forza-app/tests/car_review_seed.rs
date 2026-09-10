@@ -21,7 +21,7 @@ fn seed_db(path: &std::path::Path) -> rusqlite::Connection {
                                   lap_index, weather, track, race_class, driver, car,
                                   best_lap, best_lap_ms, dirty, created_at)
          VALUES ('lap-car', 'run-car', 'img-car', 'res-car', 0, 'dry', 'Fuji Speedway',
-                 'A', 'Driver One', 'Cadillac #3 ATS', '1:30.000', 90000, 0, datetime('now'));",
+                 'A', 'Driver One', 'Novacar Phantom 999', '1:30.000', 90000, 0, datetime('now'));",
     )
     .unwrap();
     conn
@@ -50,11 +50,11 @@ fn confirmed_car_enters_reference_and_suppresses_future_cases() {
     assert_eq!(cases.len(), 1);
 
     // Confirming seeds the catalog (idempotent on repeat).
-    decide_case(&mut conn, cases[0], "car", "Cadillac #3 ATS").unwrap();
-    decide_case(&mut conn, cases[0], "car", "Cadillac #3 ATS").unwrap();
+    decide_case(&mut conn, cases[0], "car", "Novacar Phantom 999").unwrap();
+    decide_case(&mut conn, cases[0], "car", "Novacar Phantom 999").unwrap();
     let seeded: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM reference_cars WHERE normalized_name = 'cadillac #3 ats'",
+            "SELECT COUNT(*) FROM reference_cars WHERE normalized_name = 'novacar phantom 999'",
             [],
             |r| r.get(0),
         )
@@ -67,7 +67,7 @@ fn confirmed_car_enters_reference_and_suppresses_future_cases() {
                                   lap_index, weather, track, race_class, driver, car,
                                   best_lap, best_lap_ms, dirty, created_at)
          VALUES ('lap-car2', 'run-car', 'img-car', 'res-car', 1, 'dry', 'Fuji Speedway',
-                 'A', 'Driver Two', 'Cadillac #3 ATS', '1:31.000', 91000, 0, datetime('now'));",
+                 'A', 'Driver Two', 'Novacar Phantom 999', '1:31.000', 91000, 0, datetime('now'));",
         [],
     )
     .unwrap();
@@ -91,12 +91,12 @@ fn review_list_resolves_current_lap_per_case() {
                                    image_file_id, lap_record_id, lap_index, car,
                                    created_at, updated_at)
          VALUES ('rc-lap', 'car:img-car:0', 7, 'car', 'open', 'pending',
-                 'img-car', 'lap-car', 0, 'Cadillac #3 ATS',
+                 'img-car', 'lap-car', 0, 'Novacar Phantom 999',
                  datetime('now'), datetime('now'));
          INSERT INTO review_cases (id, business_key, case_number, reason, status, outcome,
                                    image_file_id, lap_index, car, created_at, updated_at)
          VALUES ('rc-idx', 'car:img-car:1', 8, 'car', 'open', 'pending',
-                 'img-car', 0, 'Cadillac #3 ATS', datetime('now'), datetime('now'));",
+                 'img-car', 0, 'Novacar Phantom 999', datetime('now'), datetime('now'));",
     )
     .unwrap();
 
