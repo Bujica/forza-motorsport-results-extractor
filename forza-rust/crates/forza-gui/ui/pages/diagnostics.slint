@@ -1,7 +1,7 @@
 // Diagnostics page: DB doctor full battery + Overview (LM Studio + fast DB report).
 // Parity with Python DbDoctorView + DeveloperOverviewView.
 
-import { Button, ComboBox, LineEdit, ListView } from "std-widgets.slint";
+import { Button, ComboBox, LineEdit, ListView, TextEdit } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { Card, Badge, EmptyState, TableHeaderCell, TableCell, TabBar } from "../components/common.slint";
 import { DoctorCheckItem, DebugCaseItem, DebugResultComboItem } from "../models.slint";
@@ -277,14 +277,14 @@ export component DiagnosticsPage inherits Rectangle {
             Card {
                 vertical-stretch: 1;
                 clip: true;
-                Text {
+                TextEdit {
                     x: 10px; y: 8px;
                     width: parent.width - 20px;
                     height: parent.height - 16px;
-                    text: root.logs-tab == "app" ? root.app-log-text : root.error-log-text;
-                    color: Theme.text-muted;
+                    read-only: true;
                     font-size: Theme.font-sm;
                     wrap: word-wrap;
+                    text: root.logs-tab == "app" ? root.app-log-text : root.error-log-text;
                 }
             }
         }

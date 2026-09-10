@@ -591,23 +591,30 @@ pub fn handle_request(
             // The folder may not exist yet (fresh install, no run logged):
             // create it so the OS dialog never reports "cannot find".
             std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+            // Resolve against the process CWD before handing off: Explorer
+            // is a singleton that does NOT inherit our working directory,
+            // so a relative path opens Documents (or This PC) instead.
+            let folder_abs = std::path::absolute(&folder).map_err(|e| e.to_string())?;
             // Open Explorer directly instead of the generic opener: on a
             // directory that was just created this avoids a misleading
             // "Windows cannot find" shell dialog from opener backends.
             #[cfg(windows)]
             {
                 std::process::Command::new("explorer")
-                    .arg(&folder)
+                    .arg(&folder_abs)
                     .spawn()
                     .map_err(|e| {
-                        format!("could not launch explorer for {}: {e}", folder.display())
+                        format!(
+                            "could not launch explorer for {}: {e}",
+                            folder_abs.display()
+                        )
                     })?;
             }
             #[cfg(not(windows))]
             {
-                opener::open(&folder).map_err(|e| e.to_string())?;
+                opener::open(&folder_abs).map_err(|e| e.to_string())?;
             }
-            Ok(format!("opened {}", folder.display()))
+            Ok(format!("opened {}", folder_abs.display()))
         })()),
         Request::RefreshOverview => Response::Overview((|| {
             let cfg = ctx.cfg.lock().map_err(|e| e.to_string())?.clone();

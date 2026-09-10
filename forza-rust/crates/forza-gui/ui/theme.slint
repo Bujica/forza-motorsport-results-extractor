@@ -86,9 +86,16 @@ export global Theme {
         return result == "FAIL" ? #b3261e : result == "WARN" ? #8a6116 : #1d7a45;
     }
     public pure function doctor-badge-bg(level: string) -> color {
-        return level == "FAIL" ? #481818 : level == "WARN" ? #4a3a12 : #183a24;
+        // Doctor battery levels (FAIL/WARN/PASS) plus the LM Studio status
+        // vocabulary (error/warning/ok/info): without the lowercase branches
+        // every LM state rendered pass-green.
+        return level == "FAIL" ? #481818 : level == "WARN" ? #4a3a12
+            : level == "error" ? #481818 : level == "warning" ? #4a3a12
+            : level == "info" ? #3a3f45 : #183a24;
     }
     public pure function doctor-badge-fg(level: string) -> color {
-        return level == "FAIL" ? #ffb4b4 : level == "WARN" ? #ffdf8a : #a8e8b0;
+        return level == "FAIL" ? #ffb4b4 : level == "WARN" ? #ffdf8a
+            : level == "error" ? #ffb4b4 : level == "warning" ? #ffdf8a
+            : level == "info" ? #d0d7de : #a8e8b0;
     }
 }
