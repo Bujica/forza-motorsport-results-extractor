@@ -220,8 +220,17 @@ pub fn decide_case(
         .map(|_| ())
         .map_err(|e| e.to_string())?;
     if field == "car" && !value.trim().is_empty() {
-        forza_db::repositories::external_records::seed_reference_cars(conn, &[value.to_string()])
-            .map_err(|e| e.to_string())?;
+        let inserted = forza_db::repositories::external_records::seed_reference_cars(
+            conn,
+            &[value.to_string()],
+        )
+        .map_err(|e| e.to_string())?;
+        // A genuinely novel confirmation also joins the shipped assets so a
+        // regenerated database does not redetect it. Best-effort: the DB
+        // catalog already holds it, so asset failures never fail the decision.
+        if inserted > 0 {
+            let _ = super::reference_assets::sync_confirmed_car(value);
+        }
     }
     Ok(())
 }

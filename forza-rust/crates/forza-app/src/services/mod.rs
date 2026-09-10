@@ -8,6 +8,7 @@ pub mod image_detail;
 pub mod image_inventory;
 pub mod image_rename;
 pub mod rebuild;
+pub mod reference_assets;
 pub mod review_queue;
 pub mod run_control;
 pub mod run_log;
