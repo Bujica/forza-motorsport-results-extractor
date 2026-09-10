@@ -1,4 +1,5 @@
 pub mod best_laps;
+pub mod discovery_plan;
 pub mod external_import;
 pub mod extraction_replay;
 pub mod extraction_runner;
@@ -24,6 +25,7 @@ pub(crate) fn path_key(path: &std::path::Path) -> String {
 
 use rusqlite::Connection;
 
+pub use discovery_plan::{DiscoveryInput, DiscoveryOutput, build_discovery_plan};
 pub use extraction_replay::{ReplayOutcome, replay_recorded_response};
 pub use extraction_runner::{RunEvent, RunParams, spawn_extraction};
 pub use image_debug::{

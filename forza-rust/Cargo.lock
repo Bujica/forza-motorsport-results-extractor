@@ -1795,6 +1795,7 @@ dependencies = [
  "forza-lmstudio",
  "forza-output",
  "forza-pipeline",
+ "image",
  "opener",
  "rusqlite",
  "serde_json",

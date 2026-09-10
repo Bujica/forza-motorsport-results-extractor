@@ -433,50 +433,29 @@ fn cmd_run(
 
     let conn = forza_db::open_connection(&cfg.database_file)?;
 
-    // Retry mode replaces discovery: only images whose latest result is
-    // still `error` are selected (Python `_retry_error_discovery`).
-    let mut inventory_empty = false;
-    let mut plan = if retry_errors {
-        let failed = forza_db::repositories::images::list_failed_images_for_retry(&conn)?;
-        let mut new_images = Vec::new();
-        for (path, _stored_hash) in failed {
-            let candidate = PathBuf::from(&path);
-            if candidate.exists() {
-                // Never silently reuse the stored hash: a failed re-hash means
-                // the file cannot be trusted for dedup, so skip loudly instead
-                // of planning it under a stale identity.
-                let live_hash = match forza_pipeline::file_hash(&candidate) {
-                    Ok(h) => h,
-                    Err(e) => {
-                        eprintln!("  SKIP  {}  (re-hash failed: {e})", candidate.display());
-                        continue;
-                    }
-                };
-                new_images.push(forza_pipeline::planning::DiscoveredImage {
-                    path: candidate,
-                    file_hash: live_hash,
-                });
-            }
-        }
-        println!("retry_errors = {} image(s) selected", new_images.len());
-        forza_pipeline::planning::ImageDiscoveryPlan {
-            total: new_images.len(),
-            new_images,
-            duplicates: Vec::new(),
-            existing_images: Vec::new(),
-            skipped_images: Vec::new(),
-        }
-    } else {
-        let known_paths = forza_db::repositories::images::known_path_hashes(&conn)?;
-        let known_hashes = forza_db::repositories::images::known_hashes(&conn)?;
-
-        inventory_empty = known_hashes.is_empty() && known_paths.is_empty();
-        let images = forza_pipeline::find_images(&cfg.input_dir);
-        forza_pipeline::plan_images(&images, &known_hashes, &known_paths, force)?
-    };
-
-    if let Some(limit) = limit {
-        plan.new_images.truncate(limit);
+    // Single owner for discovery planning (see forza_app::build_discovery_plan):
+    // retry/force/limit rules live there so CLI dry-run and the live runner
+    // cannot diverge.
+    let mut skipped_logs: Vec<String> = Vec::new();
+    let discovery = forza_app::build_discovery_plan(
+        forza_app::DiscoveryInput {
+            conn: &conn,
+            input_dir: &cfg.input_dir,
+            force,
+            retry_errors,
+            limit,
+            selected_image_file_ids: None,
+        },
+        &mut |line| skipped_logs.push(line),
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    for line in &skipped_logs {
+        eprintln!("  {line}");
+    }
+    let plan = discovery.plan;
+    let inventory_empty = discovery.inventory_empty;
+    if retry_errors {
+        println!("retry_errors = {} image(s) selected", plan.new_images.len());
     }
 
     println!("input_dir     = {}", cfg.input_dir.display());

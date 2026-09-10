@@ -26,7 +26,6 @@ struct WorkerImage {
     input_order: i64,
 }
 
-use super::path_key;
 use crate::services::run_control::RunControl;
 use forza_config::AppConfig;
 use forza_db::repositories::runs::{
@@ -35,13 +34,11 @@ use forza_db::repositories::runs::{
     insert_run_input_full, insert_run_input_only, insert_runtime_snapshot,
     link_run_prompt_snapshot, mark_run_running, reconcile_abandoned_runs, update_run_metadata,
 };
-use forza_db::repositories::{known_hashes, known_path_hashes, list_failed_images_for_retry};
 use forza_lmstudio::backend::{BackendConfig, LMStudioBackend};
 use forza_lmstudio::load_config::DesiredLoadConfig;
 use forza_lmstudio::prompts;
 use forza_lmstudio::protocol::ModelAttemptRecord;
-use forza_pipeline::planning::KnownPathHashes;
-use forza_pipeline::{encode_image_payload, find_images, plan_images};
+use forza_pipeline::encode_image_payload;
 
 /// Events streamed back to the UI thread (plain data — widget-free).
 #[derive(Debug, Clone)]
@@ -412,78 +409,47 @@ where
         )));
     }
 
-    // ── Discovery + plan ─────────────────────────────────────────────────
-    // Retry mode replaces discovery: only images whose latest result is
-    // still `error` are selected (Python `_retry_error_discovery`).
-    let mut plan = if params.retry_errors {
-        let failed = list_failed_images_for_retry(&conn).map_err(|e| e.to_string())?;
-        let mut new_images = Vec::new();
-        let mut missing = 0usize;
-        for (path, hash) in failed {
-            let candidate = PathBuf::from(&path);
-            if candidate.exists() {
-                // Re-hash the live file: the stored hash may be stale (bytes
-                // changed after the failed run) and upsert/insert by a stale
-                // hash mislinks the image.
-                let live_hash = forza_pipeline::file_hash(&candidate).unwrap_or(hash);
-                new_images.push(forza_pipeline::planning::DiscoveredImage {
-                    path: candidate,
-                    file_hash: live_hash,
-                });
-            } else {
-                missing += 1;
-            }
-        }
-        if new_images.is_empty() {
+    // ── Discovery + plan (single owner: discovery_plan) ────────────────────
+    let had_selection = params.selected_image_file_ids.is_some();
+    let discovery = super::discovery_plan::build_discovery_plan(
+        super::discovery_plan::DiscoveryInput {
+            conn: &conn,
+            input_dir: &params.input_dir,
+            force: params.force,
+            retry_errors: params.retry_errors,
+            limit: params.max_images,
+            selected_image_file_ids: params.selected_image_file_ids.as_deref(),
+        },
+        &mut |line| on_event(RunEvent::Log(line)),
+    )?;
+    let plan = discovery.plan;
+    if params.retry_errors {
+        if plan.new_images.is_empty() {
             on_event(RunEvent::Log("No failed images to retry.".into()));
         } else {
             on_event(RunEvent::Log(format!(
                 "retry: {} failed image(s) selected{}",
-                new_images.len(),
-                if missing > 0 {
-                    format!(" ({missing} missing on disk ignored)")
+                plan.new_images.len(),
+                if discovery.missing_retry > 0 {
+                    format!(" ({} missing on disk ignored)", discovery.missing_retry)
                 } else {
                     String::new()
                 }
             )));
         }
-        let total = new_images.len();
-        forza_pipeline::planning::ImageDiscoveryPlan {
-            total,
-            new_images,
-            duplicates: Vec::new(),
-            existing_images: Vec::new(),
-            skipped_images: Vec::new(),
-        }
     } else {
-        let mut images = find_images(&params.input_dir);
-        if let Some(selected_ids) = &params.selected_image_file_ids {
-            let selected_paths = selected_image_paths(&conn, selected_ids)?;
-            images.retain(|image| selected_paths.contains(&path_key(image)));
+        if had_selection {
             on_event(RunEvent::Log(format!(
                 "selected run: {} image(s) from Images",
-                images.len()
+                plan.process_count()
+                    + plan.duplicates.len()
+                    + plan.existing_images.len()
+                    + plan.skipped_images.len(),
             )));
         }
-        if images.is_empty() {
+        if plan.total == 0 {
             on_event(RunEvent::Log("no supported images in input folder".into()));
         }
-        let known_paths: KnownPathHashes = known_path_hashes(&conn).map_err(|e| e.to_string())?;
-        let known_set = known_hashes(&conn).map_err(|e| e.to_string())?;
-        let plan = plan_images(&images, &known_set, &known_paths, params.force)
-            .map_err(|e| e.to_string())?;
-        // Python's inventory register step logs every duplicate skip in place.
-        let _skipped_duplicates = forza_pipeline::log_duplicate_skips(&plan);
-        plan
-    };
-
-    if let Some(max_images) = params.max_images {
-        plan.new_images.truncate(max_images);
-        // The run-start event describes the work this invocation can actually
-        // perform, not the number of files discovered before applying the CLI
-        // cap. Keep the full discovery count in the plan only when no cap was
-        // requested.
-        plan.total = plan.new_images.len();
     }
 
     let cached = plan
@@ -1401,23 +1367,6 @@ fn fail_run_preflight(conn: &Connection, run_id: &str, detail: &str) -> String {
         rusqlite::params![run_id, message],
     );
     message
-}
-
-fn selected_image_paths(
-    conn: &Connection,
-    image_ids: &[String],
-) -> Result<std::collections::HashSet<String>, String> {
-    let mut paths = std::collections::HashSet::new();
-    let mut stmt = conn
-        .prepare("SELECT current_path FROM image_files WHERE id=?1")
-        .map_err(|e| e.to_string())?;
-    for image_id in image_ids {
-        if let Ok(path) = stmt.query_row(rusqlite::params![image_id], |row| row.get::<_, String>(0))
-        {
-            paths.insert(path_key(std::path::Path::new(&path)));
-        }
-    }
-    Ok(paths)
 }
 
 fn insert_attempt_full_checked(

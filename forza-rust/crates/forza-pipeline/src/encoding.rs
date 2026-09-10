@@ -125,11 +125,10 @@ pub fn encode_image_payload(
     }
 
     let bytes = buffer.into_inner();
-    let (width_px, height_px) = {
-        let decoded =
-            image::load_from_memory(&bytes).map_err(|e| EncodeError::Io(e.to_string()))?;
-        (decoded.width(), decoded.height())
-    };
+    // Dimensions are already known from `dynamic` (post-resize): PNG/JPEG/WebP
+    // encoders never change dimensions, so re-decoding `bytes` here just to
+    // re-read width/height wasted a full decode per image.
+    let (width_px, height_px) = (dynamic.width(), dynamic.height());
     Ok(EncodedImage {
         data_b64: base64::engine::general_purpose::STANDARD.encode(&bytes),
         mime_type: mime,
