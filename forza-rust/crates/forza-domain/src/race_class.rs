@@ -1,8 +1,5 @@
 //! Class letter ordering and presentation colors.
 
-use std::collections::HashMap;
-use std::sync::LazyLock;
-
 /// Canonical class ordering used by reports, GUI, and frontier sorting.
 pub fn class_order(race_class: &str) -> u32 {
     match race_class {
@@ -22,23 +19,24 @@ pub fn class_order(race_class: &str) -> u32 {
     }
 }
 
-/// Presentation colors per class, matching the Python PDF/GUI contract.
-pub static CLASS_COLORS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
-    HashMap::from([
-        ("E", "#C7368E"),
-        ("D", "#127F85"),
-        ("C", "#BB7A00"),
-        ("B", "#C54E00"),
-        ("A", "#992800"),
-        ("TCR", "#1E90FF"),
-        ("S", "#613BBF"),
-        ("R", "#105DAB"),
-        ("P", "#0C8540"),
-        ("X", "#006000"),
-        ("Mixed", "#555555"),
-        ("Unknown", "#000000"),
-    ])
-});
+/// Presentation color per class, matching the Python PDF/GUI contract.
+/// Plain `match` (was a `LazyLock<HashMap>`): 12 fixed entries need no hash.
+pub fn class_color(race_class: &str) -> &'static str {
+    match race_class {
+        "E" => "#C7368E",
+        "D" => "#127F85",
+        "C" => "#BB7A00",
+        "B" => "#C54E00",
+        "A" => "#992800",
+        "TCR" => "#1E90FF",
+        "S" => "#613BBF",
+        "R" => "#105DAB",
+        "P" => "#0C8540",
+        "X" => "#006000",
+        "Mixed" => "#555555",
+        _ => "#000000",
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -56,13 +54,22 @@ mod tests {
 
     #[test]
     fn class_colors_complete() {
-        for class in [
-            "E", "D", "C", "B", "A", "TCR", "S", "R", "P", "X", "Mixed", "Unknown",
+        for (class, color) in [
+            ("E", "#C7368E"),
+            ("D", "#127F85"),
+            ("C", "#BB7A00"),
+            ("B", "#C54E00"),
+            ("A", "#992800"),
+            ("TCR", "#1E90FF"),
+            ("S", "#613BBF"),
+            ("R", "#105DAB"),
+            ("P", "#0C8540"),
+            ("X", "#006000"),
+            ("Mixed", "#555555"),
+            ("Unknown", "#000000"),
         ] {
-            assert!(
-                CLASS_COLORS.contains_key(class),
-                "missing color for {class}"
-            );
+            assert_eq!(class_color(class), color, "wrong color for {class}");
         }
+        assert_eq!(class_color("Whatever"), "#000000");
     }
 }

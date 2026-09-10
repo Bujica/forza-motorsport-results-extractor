@@ -26,12 +26,10 @@ pub fn track_order_map(track_order: &[String]) -> HashMap<String, usize> {
 pub fn track_order_key(track: &str, order_map: &HashMap<String, usize>) -> (usize, String) {
     let normalized = track.trim();
     let fallback = order_map.len() + 1;
+    let lowered = normalized.to_lowercase();
     (
-        order_map
-            .get(normalized.to_lowercase().as_str())
-            .copied()
-            .unwrap_or(fallback),
-        normalized.to_lowercase(),
+        order_map.get(lowered.as_str()).copied().unwrap_or(fallback),
+        lowered,
     )
 }
 

@@ -79,13 +79,16 @@ where
         return Vec::new();
     }
     let name_lower = gamertag.to_lowercase();
+    // Player-identity comparisons lowercase per row; hoist the conversion
+    // out of the four loops below (pure, same result).
+    let drivers_lower: Vec<String> = rows.iter().map(|row| row.driver().to_lowercase()).collect();
 
     // player laps grouped by car-condition and overall-condition.
     let mut player_by_car: PlayerGroups = HashMap::new();
     let mut player_overall: OverallGroups = HashMap::new();
 
     for (idx, row) in rows.iter().enumerate() {
-        if row.driver().to_lowercase() != name_lower {
+        if drivers_lower[idx] != name_lower {
             continue;
         }
         let condition = condition_key(row);
@@ -161,7 +164,7 @@ where
             continue;
         };
 
-        if row.driver().to_lowercase() == name_lower {
+        if drivers_lower[idx] == name_lower {
             let candidates = player_by_car
                 .get(&(
                     row.track().to_string(),
@@ -183,7 +186,7 @@ where
     let mut opponent_best: HashMap<(String, String, String, String, String), i64> = HashMap::new();
     for &idx in &kept {
         let row = &rows[idx];
-        if row.driver().to_lowercase() == name_lower {
+        if drivers_lower[idx] == name_lower {
             continue;
         }
         let key = (
@@ -204,7 +207,7 @@ where
     let mut final_rows: Vec<FrontierWinner> = Vec::new();
     for &idx in &kept {
         let row = &rows[idx];
-        if row.driver().to_lowercase() == name_lower {
+        if drivers_lower[idx] == name_lower {
             final_rows.push(FrontierWinner {
                 id: row.id().to_string(),
                 image_file_id: row.image_file_id().to_string(),
