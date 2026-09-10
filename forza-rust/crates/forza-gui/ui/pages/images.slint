@@ -301,15 +301,35 @@ export component ImagesPage inherits Rectangle {
                     Button { text: "Confirm"; clicked => { root.confirm-delete = false; root.delete-selected(); } }
                     Button { text: "Cancel"; clicked => { root.confirm-delete = false; } }
                 }
-                if root.confirm-rename: VerticalLayout {
-                    spacing: 4px;
-                    Text { text: "Confirm Metadata Rename"; color: Theme.text; font-weight: 700; font-size: Theme.font-sm; }
-                    Text { text: root.rename-summary; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
-                    Text { text: root.rename-plan-lines; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; max-height: 140px; overflow: elide; }
-                    HorizontalLayout {
-                        spacing: 6px;
-                        Button { text: "Confirm"; clicked => { root.execute-rename(); } }
-                        Button { text: "Cancel"; clicked => { root.confirm-rename = false; } }
+                // Fixed-height confirmation card: the plan list scrolls
+                // internally so Confirm/Cancel stay visible no matter how
+                // many files the batch holds (an unbounded Text pushed the
+                // buttons out of the panel and overlapped the rows above).
+                if root.confirm-rename: Card {
+                    height: 300px;
+                    clip: true;
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 4px;
+                        Text { text: "Confirm Metadata Rename"; color: Theme.text; font-weight: 700; font-size: Theme.font-sm; }
+                        Text { text: root.rename-summary; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; max-height: 36px; overflow: elide; }
+                        Flickable {
+                            vertical-stretch: 1;
+                            viewport-width: self.width;
+                            viewport-height: plan-text.preferred-height;
+                            plan-text := Text {
+                                width: parent.width;
+                                text: root.rename-plan-lines;
+                                color: Theme.text-muted;
+                                font-size: Theme.font-sm;
+                                wrap: word-wrap;
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Button { text: "Confirm"; clicked => { root.execute-rename(); } }
+                            Button { text: "Cancel"; clicked => { root.confirm-rename = false; } }
+                        }
                     }
                 }
                 Button {

@@ -1261,7 +1261,10 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                             Ok(preview) => {
                                 // Populate the inline confirmation panel (Python
                                 // `confirm_rename_plan` parity): totals plus
-                                // one `source -> target` line per change.
+                                // one `source -> target` line per change,
+                                // capped so a 700-file batch cannot push the
+                                // Confirm/Cancel buttons out of the panel.
+                                const MAX_PREVIEW_LINES: usize = 100;
                                 let lines: Vec<String> = preview
                                     .plans
                                     .iter()
@@ -1289,6 +1292,13 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
                                 );
                                 w.set_rename_plan_lines(if lines.is_empty() {
                                     "No filename changes are required.".into()
+                                } else if lines.len() > MAX_PREVIEW_LINES {
+                                    format!(
+                                        "{}\n… and {} more",
+                                        lines[..MAX_PREVIEW_LINES].join("\n"),
+                                        lines.len() - MAX_PREVIEW_LINES
+                                    )
+                                    .into()
                                 } else {
                                     lines.join("\n").into()
                                 });
