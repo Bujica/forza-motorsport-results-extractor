@@ -3,7 +3,7 @@
 //! persist attempts/result/laps → run counters. Emits typed events for the
 //! GUI (progress, per-image outcomes, log lines).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::channel;
 use std::time::Instant;
@@ -16,6 +16,65 @@ use rusqlite::OptionalExtension;
 /// Pure so the sizing rule is unit-testable.
 fn inference_permits(workers: u32, concurrency: u32) -> usize {
     (workers.min(concurrency).max(1)) as usize
+}
+
+/// Runs `work` holding one inference permit. The unit under test for the
+/// wiring in `worker_loop`: with one permit, gated sections never overlap,
+/// no matter how many tasks race for the semaphore.
+async fn with_inference_permit<Fut, T>(inference: Arc<tokio::sync::Semaphore>, work: Fut) -> T
+where
+    Fut: std::future::Future<Output = T>,
+{
+    let _permit = inference
+        .acquire_owned()
+        .await
+        .expect("inference semaphore closed");
+    work.await
+}
+
+/// Encode one image for the model request. Thin shared wrapper so both
+/// paths report the same error text; any retry/downscale policy around the
+/// encode lives here, not in two loops. Callers own fail/progress
+/// bookkeeping (counters vs channel differ by path).
+fn encode_stage(image_path: &Path, params: &RunParams) -> Result<EncodedImage, String> {
+    forza_pipeline::encode_image_payload(
+        image_path,
+        params.max_width,
+        params.encode_quality,
+        &params.image_format,
+        params.grayscale,
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Ensure the model is loaded before inference. Single owner so
+/// retry/backoff policy around `ensure_loaded` cannot diverge between the
+/// sequential and worker paths; callers own fail/progress bookkeeping.
+async fn ensure_loaded_stage(
+    backend: &mut LMStudioBackend,
+    desired: &DesiredLoadConfig,
+) -> Result<(), String> {
+    backend
+        .ensure_loaded(desired)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Outcome of the gated model section in `worker_loop`: computed under one
+/// inference permit; the caller only handles DB/events afterwards.
+enum GatedModelOutcome {
+    /// Cancel arrived while waiting for (or just after acquiring) the permit.
+    Cancelled,
+    LoadFailed(String),
+    Extracted(Box<GatedExtracted>),
+}
+
+/// Successful gated section payload, boxed: `ModelExtractionResult` dwarfs
+/// the other variants (clippy `large_enum_variant`).
+struct GatedExtracted {
+    result: Result<ModelExtractionResult, String>,
+    attempt_count: i64,
+    accepted_row: Option<String>,
 }
 
 /// Owned image data for worker threads (avoids borrowing `plan` across threads).
@@ -44,8 +103,8 @@ use forza_db::repositories::runs::{
 use forza_lmstudio::backend::{BackendConfig, LMStudioBackend};
 use forza_lmstudio::load_config::DesiredLoadConfig;
 use forza_lmstudio::prompts;
-use forza_lmstudio::protocol::ModelAttemptRecord;
-use forza_pipeline::encode_image_payload;
+use forza_lmstudio::protocol::{ModelAttemptRecord, ModelExtractionResult};
+use forza_pipeline::EncodedImage;
 
 /// Events streamed back to the UI thread (plain data — widget-free).
 #[derive(Debug, Clone)]
@@ -984,25 +1043,11 @@ where
             );
 
             // Encode.
-            let encoded = match encode_image_payload(
-                &image.path,
-                params.max_width,
-                params.encode_quality,
-                &params.image_format,
-                params.grayscale,
-            ) {
+            let encoded = match encode_stage(&image.path, params) {
                 Ok(payload) => payload,
-                Err(e) => {
+                Err(msg) => {
                     failed += 1;
-                    fail_result(
-                        &conn,
-                        &result_id,
-                        "encode",
-                        &e.to_string(),
-                        None,
-                        &name,
-                        on_event,
-                    );
+                    fail_result(&conn, &result_id, "encode", &msg, None, &name, on_event);
                     done += 1;
                     on_event(RunEvent::Progress {
                         done,
@@ -1015,17 +1060,9 @@ where
             // Ensure the model is loaded (first image or after config change).
             // Per-image error, not a whole-run abort: `?` here used to leave
             // the run and all remaining results stuck in `running`.
-            if let Err(e) = backend.ensure_loaded(&desired).await {
+            if let Err(msg) = ensure_loaded_stage(&mut backend, &desired).await {
                 failed += 1;
-                fail_result(
-                    &conn,
-                    &result_id,
-                    "model_load",
-                    &e.to_string(),
-                    None,
-                    &name,
-                    on_event,
-                );
+                fail_result(&conn, &result_id, "model_load", &msg, None, &name, on_event);
                 done += 1;
                 on_event(RunEvent::Progress {
                     done,
@@ -1609,95 +1646,94 @@ async fn worker_loop(
                 }
             };
 
-        let encoded = match encode_image_payload(
-            &image.path,
-            params.max_width,
-            params.encode_quality,
-            &params.image_format,
-            params.grayscale,
-        ) {
+        let encoded = match encode_stage(&image.path, params) {
             Ok(payload) => payload,
-            Err(e) => {
-                fail_result(
-                    &conn,
-                    &result_id,
-                    "encode",
-                    &e.to_string(),
-                    None,
-                    &name,
-                    |event| {
-                        let _ = event_tx.send(event);
-                    },
-                );
+            Err(msg) => {
+                fail_result(&conn, &result_id, "encode", &msg, None, &name, |event| {
+                    let _ = event_tx.send(event);
+                });
                 done += 1;
                 let _ = event_tx.send(RunEvent::Progress { done, total });
                 continue;
             }
         };
 
-        // Take an inference permit for the model HTTP calls below; local
-        // encode/persist/derive/finalize stay parallel. Permit count comes
-        // from the run config (`inference_concurrency`, capped at workers):
-        // local servers that fail concurrent vision calls run with 1.
-        // (Close is impossible here: the parent holds an Arc until join.)
-        let _permit = Arc::clone(&inference)
-            .acquire_owned()
-            .await
-            .unwrap_or_else(|_| panic!("inference semaphore closed"));
-        match backend.ensure_loaded(&desired).await {
-            Ok(()) => {}
-            Err(e) => {
-                drop(_permit);
-                fail_result(
-                    &conn,
-                    &result_id,
-                    "model_load",
-                    &e.to_string(),
-                    None,
+        // Model calls run under one inference permit (see
+        // `with_inference_permit`); local encode/persist/derive/finalize
+        // stay parallel. The permit releases when the gated future
+        // completes, before derive/finalize below.
+        let gated = with_inference_permit(Arc::clone(&inference), async {
+            // A worker past the top-of-loop checkpoint can wait on the
+            // permit while the run is cancelled: re-check before touching
+            // the model so cancellation stays between-images.
+            if !control.checkpoint() {
+                return GatedModelOutcome::Cancelled;
+            }
+            if let Err(msg) = ensure_loaded_stage(&mut backend, &desired).await {
+                return GatedModelOutcome::LoadFailed(msg);
+            }
+            let mut attempt_count = 0i64;
+            let mut accepted_row: Option<String> = None;
+            let model_name = params.model.clone();
+            let result = backend
+                .extract(
+                    &encoded.data_b64,
+                    &encoded.mime_type,
                     &name,
-                    |event| {
-                        let _ = event_tx.send(event);
+                    Some(&image.file_hash),
+                    &mut |record: &ModelAttemptRecord| {
+                        attempt_count += 1;
+                        if let Some(row_id) = persist_attempt_with_evidence(
+                            &conn,
+                            run_id,
+                            &image_file_id,
+                            &result_id,
+                            record,
+                            &encoded,
+                            prompt_snapshot_id,
+                            runtime_snapshot_id,
+                            &image.file_hash,
+                            &model_name,
+                            Some(params.context_length),
+                            params.reasoning_mode.as_deref(),
+                        ) {
+                            accepted_row = Some(row_id);
+                        }
                     },
-                );
+                )
+                .await;
+            GatedModelOutcome::Extracted(Box::new(GatedExtracted {
+                result: result.map_err(|e| e.to_string()),
+                attempt_count,
+                accepted_row,
+            }))
+        })
+        .await;
+
+        let (extract_result, attempt_count, accepted_row) = match gated {
+            GatedModelOutcome::Cancelled => {
+                let _ = event_tx.send(RunEvent::Log(
+                    "cancellation requested — stopping between images".into(),
+                ));
+                break;
+            }
+            GatedModelOutcome::LoadFailed(e) => {
+                fail_result(&conn, &result_id, "model_load", &e, None, &name, |event| {
+                    let _ = event_tx.send(event);
+                });
                 done += 1;
                 let _ = event_tx.send(RunEvent::Progress { done, total });
                 continue;
             }
+            GatedModelOutcome::Extracted(boxed) => {
+                let GatedExtracted {
+                    result,
+                    attempt_count,
+                    accepted_row,
+                } = *boxed;
+                (result, attempt_count, accepted_row)
+            }
         };
-
-        let mut attempt_count = 0i64;
-        let mut accepted_row: Option<String> = None;
-        let model_name = params.model.clone();
-        let extract_result = backend
-            .extract(
-                &encoded.data_b64,
-                &encoded.mime_type,
-                &name,
-                Some(&image.file_hash),
-                &mut |record: &ModelAttemptRecord| {
-                    attempt_count += 1;
-                    if let Some(row_id) = persist_attempt_with_evidence(
-                        &conn,
-                        run_id,
-                        &image_file_id,
-                        &result_id,
-                        record,
-                        &encoded,
-                        prompt_snapshot_id,
-                        runtime_snapshot_id,
-                        &image.file_hash,
-                        &model_name,
-                        Some(params.context_length),
-                        params.reasoning_mode.as_deref(),
-                    ) {
-                        accepted_row = Some(row_id);
-                    }
-                },
-            )
-            .await;
-        // Release the gate before local derive/finalize so parallel workers
-        // only serialize the model calls.
-        drop(_permit);
 
         match extract_result {
             Ok(result) => {
@@ -1801,7 +1837,11 @@ async fn worker_loop(
 
 #[cfg(test)]
 mod tests {
-    use super::inference_permits;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use super::{inference_permits, with_inference_permit};
 
     #[test]
     fn permits_cap_at_workers_and_floor_at_one() {
@@ -1810,5 +1850,45 @@ mod tests {
         assert_eq!(inference_permits(4, 2), 2);
         assert_eq!(inference_permits(2, 8), 2);
         assert_eq!(inference_permits(0, 0), 1);
+    }
+
+    /// The wiring `worker_loop` relies on: with one permit, gated sections
+    /// never overlap no matter how many tasks race; with two, they pair up.
+    /// Runs on a current-thread runtime (no `tokio::macros` needed).
+    fn peak_overlap(permits: usize, tasks: usize) -> usize {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let sem = Arc::new(tokio::sync::Semaphore::new(permits));
+            let active = Arc::new(AtomicUsize::new(0));
+            let peak = Arc::new(AtomicUsize::new(0));
+            let mut handles = Vec::with_capacity(tasks);
+            for _ in 0..tasks {
+                let (sem, active, peak) =
+                    (Arc::clone(&sem), Arc::clone(&active), Arc::clone(&peak));
+                handles.push(tokio::spawn(with_inference_permit(sem, async move {
+                    let n = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(n, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    active.fetch_sub(1, Ordering::SeqCst);
+                })));
+            }
+            for handle in handles {
+                handle.await.unwrap();
+            }
+            peak.load(Ordering::SeqCst)
+        })
+    }
+
+    #[test]
+    fn gated_sections_serialize_with_one_permit() {
+        assert_eq!(peak_overlap(1, 8), 1);
+    }
+
+    #[test]
+    fn gated_sections_pair_up_with_two_permits() {
+        assert_eq!(peak_overlap(2, 8), 2);
     }
 }

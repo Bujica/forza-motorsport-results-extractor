@@ -302,4 +302,57 @@ mod tests {
         assert_eq!(out.plan.process_count(), 0);
         assert_eq!(out.missing_retry, 1);
     }
+
+    #[test]
+    fn retry_limit_reports_post_cut_counts() {
+        // Intentional semantics: summaries built from the plan ("retry: N
+        // selected", "new=") describe the work actually planned, after the
+        // cap — not the eligible total before it.
+        let (_d, conn) = open_db();
+        let dir = tempfile::tempdir().unwrap();
+        for (i, seed) in [(1, 11u8), (2, 22), (3, 33)] {
+            let name = format!("r{i}.png");
+            write_png(&dir.path().join(&name), 16, 16, seed);
+            let live = format!("live-{i}");
+            conn.execute(
+                "INSERT INTO image_files
+                   (id, file_hash, current_name, current_path, file_status,
+                    first_seen_at, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 'available',
+                         datetime('now'), datetime('now'), datetime('now'))",
+                rusqlite::params![
+                    format!("img-r{i}"),
+                    live,
+                    name,
+                    dir.path().join(&name).display().to_string(),
+                ],
+            )
+            .unwrap();
+            conn.execute_batch(&format!(
+                "INSERT INTO extraction_runs (id, status, mode, model, created_at)
+                 VALUES ('run-r{i}', 'completed', 'normal', 'm', datetime('now'));
+                 INSERT INTO run_inputs (id, run_id, input_order, input_path, decision, created_at)
+                 VALUES ({i}, 'run-r{i}', 0, '{name}', 'process', datetime('now'));
+                 INSERT INTO extraction_results (id, run_id, run_input_id, image_file_id, status, created_at)
+                 VALUES ('res-r{i}', 'run-r{i}', {i}, 'img-r{i}', 'error', datetime('now'));"
+            ))
+            .unwrap();
+        }
+        let mut logs = Vec::new();
+        let out = build_discovery_plan(
+            DiscoveryInput {
+                conn: &conn,
+                input_dir: dir.path(),
+                force: false,
+                retry_errors: true,
+                limit: Some(2),
+                selected_image_file_ids: None,
+            },
+            &mut |line| logs.push(line),
+        )
+        .unwrap();
+        assert_eq!(out.plan.process_count(), 2);
+        assert_eq!(out.plan.total, 2);
+        assert_eq!(out.missing_retry, 0);
+    }
 }
