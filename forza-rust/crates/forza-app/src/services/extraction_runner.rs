@@ -11,6 +11,16 @@ use std::time::Instant;
 use rusqlite::Connection;
 use rusqlite::OptionalExtension;
 
+/// Global inference gate for the parallel path: LM Studio fails concurrent
+/// vision requests (HTTP 500 `failed to process mtmd chunk`, observed
+/// 2026-09-10 with workers=2) while every other stage is concurrency-safe
+/// (per-worker connections + WAL, pre-allocated inputs, shared evidence
+/// helpers). Workers still parallelize encode, persistence, laps derivation
+/// and finalize; only the model HTTP calls serialize. The sequential path
+/// needs no gate (already serial).
+static INFERENCE_GATE: std::sync::LazyLock<tokio::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
+
 /// Owned image data for worker threads (avoids borrowing `plan` across threads).
 ///
 /// `result_id`/`input_id`/`input_order` are pre-allocated on the main thread:
@@ -981,7 +991,6 @@ where
                         &e.to_string(),
                         None,
                         &name,
-                        None,
                         on_event,
                     );
                     done += 1;
@@ -1005,7 +1014,6 @@ where
                     &e.to_string(),
                     None,
                     &name,
-                    Some(format!("ensure_loaded: {e}")),
                     on_event,
                 );
                 done += 1;
@@ -1075,7 +1083,6 @@ where
                                 &e.to_string(),
                                 Some(attempt_count),
                                 &name,
-                                Some(format!("laps: {e}")),
                                 on_event,
                             );
                             done += 1;
@@ -1096,7 +1103,6 @@ where
                             "accepted attempt row missing",
                             Some(attempt_count),
                             &name,
-                            None,
                             on_event,
                         );
                         done += 1;
@@ -1138,7 +1144,6 @@ where
                         &err.to_string(),
                         Some(attempt_count),
                         &name,
-                        None,
                         on_event,
                     );
                 }
@@ -1183,17 +1188,16 @@ where
     Ok((processed, succeeded, failed, 0, 0))
 }
 
-/// Mark one result failed and emit its outcome (+ optional log line).
+/// Mark one result failed, emit its outcome, and always log the error detail.
 ///
 /// Single owner for every per-image `status='error'` write in both the
-/// sequential loop and the parallel workers, so the `error_type` vocabulary
-/// and the `ImageDone{ok:false}` event cannot diverge between the paths.
-/// (The bulk `worker_lost` safety net stays separate: one UPDATE with no
-/// per-image event. The worker image-lookup DB-error branch also stays:
-/// it emits without a DB write.)
+/// sequential loop and the parallel workers, so the `error_type` vocabulary,
+/// the `ImageDone{ok:false}` event, and the log line cannot diverge between
+/// the paths. (The bulk `worker_lost` safety net stays separate: one UPDATE
+/// with no per-image event. The worker image-lookup DB-error branch also
+/// stays: it emits without a DB write.)
 /// DB write failures are ignored here, like the majority of the previous
 /// call sites: failing to record a failure must not abort the run.
-#[allow(clippy::too_many_arguments)]
 fn fail_result(
     conn: &Connection,
     result_id: &str,
@@ -1201,7 +1205,6 @@ fn fail_result(
     message: &str,
     attempt_count: Option<i64>,
     image_name: &str,
-    log: Option<String>,
     emit: impl Fn(RunEvent),
 ) {
     if let Some(n) = attempt_count {
@@ -1220,9 +1223,9 @@ fn fail_result(
         ok: false,
         laps: 0,
     });
-    if let Some(line) = log {
-        emit(RunEvent::Log(line));
-    }
+    // Server messages can be long JSON blobs; the full text stays in the DB.
+    let short: String = message.chars().take(300).collect();
+    emit(RunEvent::Log(format!("{error_type}: {short}")));
 }
 
 /// Build the finalize stats from the accepted attempt. Pure constructor so
@@ -1523,7 +1526,6 @@ async fn worker_loop(
                     &e.to_string(),
                     None,
                     &name,
-                    None,
                     |event| {
                         let _ = event_tx.send(event);
                     },
@@ -1573,9 +1575,6 @@ async fn worker_loop(
                         "image row missing",
                         None,
                         &name,
-                        Some(format!(
-                            "image row missing for pre-allocated result {result_id}"
-                        )),
                         |event| {
                             let _ = event_tx.send(event);
                         },
@@ -1613,7 +1612,6 @@ async fn worker_loop(
                     &e.to_string(),
                     None,
                     &name,
-                    None,
                     |event| {
                         let _ = event_tx.send(event);
                     },
@@ -1624,9 +1622,13 @@ async fn worker_loop(
             }
         };
 
+        // Serialize the model HTTP calls across parallel workers (see
+        // INFERENCE_GATE); encode/persist/derive/finalize stay parallel.
+        let _infer = INFERENCE_GATE.lock().await;
         match backend.ensure_loaded(&desired).await {
             Ok(()) => {}
             Err(e) => {
+                drop(_infer);
                 fail_result(
                     &conn,
                     &result_id,
@@ -1634,7 +1636,6 @@ async fn worker_loop(
                     &e.to_string(),
                     None,
                     &name,
-                    Some(format!("ensure_loaded: {e}")),
                     |event| {
                         let _ = event_tx.send(event);
                     },
@@ -1675,6 +1676,9 @@ async fn worker_loop(
                 },
             )
             .await;
+        // Release the gate before local derive/finalize so parallel workers
+        // only serialize the model calls.
+        drop(_infer);
 
         match extract_result {
             Ok(result) => {
@@ -1698,7 +1702,6 @@ async fn worker_loop(
                             &e.to_string(),
                             Some(attempt_count),
                             &name,
-                            Some(format!("laps: {e}")),
                             |event| {
                                 let _ = event_tx.send(event);
                             },
@@ -1750,7 +1753,6 @@ async fn worker_loop(
                             &e,
                             Some(attempt_count),
                             &name,
-                            Some(format!("finalize {result_id}: {e}")),
                             |event| {
                                 let _ = event_tx.send(event);
                             },
@@ -1766,7 +1768,6 @@ async fn worker_loop(
                     &err.to_string(),
                     Some(attempt_count),
                     &name,
-                    None,
                     |event| {
                         let _ = event_tx.send(event);
                     },
