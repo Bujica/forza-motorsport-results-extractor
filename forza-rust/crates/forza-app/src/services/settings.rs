@@ -346,6 +346,16 @@ fn runtime_rows(cfg: &AppConfig) -> Vec<SettingRow> {
             )
         },
         SettingRow {
+            options: int_options(1, 16, 1),
+            ..row(
+                "llm.inference_concurrency",
+                "inference_concurrency",
+                cfg.inference_concurrency.to_string(),
+                "int",
+                GROUP_RUNTIME,
+            )
+        },
+        SettingRow {
             options: int_options(640, 4096, 64),
             ..row(
                 "image.max_width",
@@ -491,6 +501,7 @@ mod tests {
                 "llm.performance_reload_streak",
                 "user.gamertag",
                 "llm.workers",
+                "llm.inference_concurrency",
                 "image.max_width",
                 "image.encode_quality",
                 "image.grayscale",

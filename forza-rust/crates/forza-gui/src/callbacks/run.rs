@@ -56,12 +56,13 @@ pub(crate) fn wire_run(main: &MainWindow) {
                 w.set_run_percent(0.0);
             }
             let start_line = format!(
-                "[start] {} model={} force={} retry_errors={} workers={}",
+                "[start] {} model={} force={} retry_errors={} workers={} inference={}",
                 forza_app::APP_VERSION,
                 params.model,
                 params.force,
                 params.retry_errors,
                 params.workers,
+                params.inference_concurrency,
             );
             append_run_log(start_line.clone());
             forza_app::append_log_file(&params.log_file, &start_line);

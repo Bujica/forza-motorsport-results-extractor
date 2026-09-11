@@ -11,15 +11,12 @@ use std::time::Instant;
 use rusqlite::Connection;
 use rusqlite::OptionalExtension;
 
-/// Global inference gate for the parallel path: LM Studio fails concurrent
-/// vision requests (HTTP 500 `failed to process mtmd chunk`, observed
-/// 2026-09-10 with workers=2) while every other stage is concurrency-safe
-/// (per-worker connections + WAL, pre-allocated inputs, shared evidence
-/// helpers). Workers still parallelize encode, persistence, laps derivation
-/// and finalize; only the model HTTP calls serialize. The sequential path
-/// needs no gate (already serial).
-static INFERENCE_GATE: std::sync::LazyLock<tokio::sync::Mutex<()>> =
-    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
+/// Inference permits for one run: at most `concurrency` model calls in
+/// flight across all workers (never more than workers, at least one).
+/// Pure so the sizing rule is unit-testable.
+fn inference_permits(workers: u32, concurrency: u32) -> usize {
+    (workers.min(concurrency).max(1)) as usize
+}
 
 /// Owned image data for worker threads (avoids borrowing `plan` across threads).
 ///
@@ -103,6 +100,10 @@ pub struct RunParams {
     pub max_images: Option<usize>,
     /// Number of parallel extraction workers (1 = sequential).
     pub workers: u32,
+    /// Max concurrent model requests across workers. `1` serializes
+    /// inference (required by servers that fail concurrent vision calls);
+    /// raise for servers with parallel slots. Capped at `workers`.
+    pub inference_concurrency: u32,
     // LLM
     pub url: String,
     pub model: String,
@@ -147,6 +148,7 @@ impl RunParams {
             selected_image_file_ids: None,
             max_images: None,
             workers: cfg.workers as u32,
+            inference_concurrency: cfg.inference_concurrency.max(1) as u32,
             url: cfg.llm.url.clone(),
             model: cfg.llm.model.clone(),
             max_tokens: cfg.llm.max_completion_tokens,
@@ -653,6 +655,12 @@ where
         let workers = params.workers as usize;
         let (event_tx, event_rx) = channel();
         let control = Arc::new(control.clone());
+        // Run-shared inference semaphore: at most `inference_concurrency`
+        // model calls in flight (see `inference_permits`).
+        let inference = Arc::new(tokio::sync::Semaphore::new(inference_permits(
+            params.workers,
+            params.inference_concurrency,
+        )));
 
         // Pre-allocate ALL inputs/results/metadata on the main connection:
         // per-worker `done+1` counters are not unique per run, and concurrent
@@ -782,6 +790,7 @@ where
             let process_reason_clone = process_reason.to_string();
             let prompt_id_clone = prompt_snapshot_id.clone();
             let snapshot_id_clone = snapshot_id.clone();
+            let inference_clone = Arc::clone(&inference);
 
             handles.push(
                 std::thread::Builder::new()
@@ -803,6 +812,7 @@ where
                                 &process_reason_clone,
                                 &prompt_id_clone,
                                 &snapshot_id_clone,
+                                inference_clone,
                             )
                             .await
                         });
@@ -1473,6 +1483,8 @@ fn insert_attempt_full_checked(
 
 /// Single-worker loop: owns its own SQLite connection and LMStudioBackend,
 /// processes a batch of images sequentially, emits events on `event_tx`.
+/// Model calls take a permit from the run-shared `inference` semaphore
+/// (see `inference_permits`); everything else stays parallel.
 #[allow(clippy::too_many_arguments)]
 async fn worker_loop(
     _w_idx: usize,
@@ -1485,6 +1497,7 @@ async fn worker_loop(
     process_reason: &str,
     prompt_snapshot_id: &str,
     runtime_snapshot_id: &str,
+    inference: Arc<tokio::sync::Semaphore>,
 ) {
     let conn = match forza_db::open_connection(&conn_path) {
         Ok(c) => c,
@@ -1622,13 +1635,19 @@ async fn worker_loop(
             }
         };
 
-        // Serialize the model HTTP calls across parallel workers (see
-        // INFERENCE_GATE); encode/persist/derive/finalize stay parallel.
-        let _infer = INFERENCE_GATE.lock().await;
+        // Take an inference permit for the model HTTP calls below; local
+        // encode/persist/derive/finalize stay parallel. Permit count comes
+        // from the run config (`inference_concurrency`, capped at workers):
+        // local servers that fail concurrent vision calls run with 1.
+        // (Close is impossible here: the parent holds an Arc until join.)
+        let _permit = Arc::clone(&inference)
+            .acquire_owned()
+            .await
+            .unwrap_or_else(|_| panic!("inference semaphore closed"));
         match backend.ensure_loaded(&desired).await {
             Ok(()) => {}
             Err(e) => {
-                drop(_infer);
+                drop(_permit);
                 fail_result(
                     &conn,
                     &result_id,
@@ -1678,7 +1697,7 @@ async fn worker_loop(
             .await;
         // Release the gate before local derive/finalize so parallel workers
         // only serialize the model calls.
-        drop(_infer);
+        drop(_permit);
 
         match extract_result {
             Ok(result) => {
@@ -1777,5 +1796,19 @@ async fn worker_loop(
 
         done += 1;
         let _ = event_tx.send(RunEvent::Progress { done, total });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::inference_permits;
+
+    #[test]
+    fn permits_cap_at_workers_and_floor_at_one() {
+        assert_eq!(inference_permits(1, 1), 1);
+        assert_eq!(inference_permits(4, 1), 1);
+        assert_eq!(inference_permits(4, 2), 2);
+        assert_eq!(inference_permits(2, 8), 2);
+        assert_eq!(inference_permits(0, 0), 1);
     }
 }

@@ -153,6 +153,7 @@ fn apply_llm(cfg: &mut AppConfig, key: &str, value: &str) -> Result<(), String> 
     let llm = &mut cfg.llm;
     match key {
         "workers" => cfg.workers = parse_int(value)?,
+        "inference_concurrency" => cfg.inference_concurrency = parse_int(value)?,
         "max_completion_tokens" => llm.max_completion_tokens = parse_int(value)?,
         "timeout_connect" => llm.timeout_connect = parse_int(value)?,
         "timeout_read" => llm.timeout_read = parse_int(value)?,
@@ -296,6 +297,11 @@ fn write_candidate(config_path: &Path, cfg: &AppConfig) -> Result<(), String> {
     doc.set("user", "gamertag", &cfg.gamertag);
 
     doc.set("llm", "workers", &cfg.workers.to_string());
+    doc.set(
+        "llm",
+        "inference_concurrency",
+        &cfg.inference_concurrency.to_string(),
+    );
     for obsolete in ["backend", "max_workers", "worker_mode"] {
         doc.remove_key("llm", obsolete);
     }
@@ -604,6 +610,26 @@ mod tests {
             "unexpected backup name: {name}"
         );
         assert!(backup.exists());
+    }
+
+    #[test]
+    fn inference_concurrency_parses_validates_and_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_base(dir.path());
+        // Absent → default 1 (BASE_INI has no such key).
+        let (cfg, _) = load_config(&path, false).unwrap();
+        assert_eq!(cfg.inference_concurrency, 1);
+        // Valid values apply and persist.
+        let outcome = save_changes(&path, &map(&[("llm.inference_concurrency", "4")])).unwrap();
+        assert_eq!(outcome.config.inference_concurrency, 4);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("inference_concurrency = 4"));
+        // Below 1 fails validation like `workers`.
+        let err = validate_changes(&path, &map(&[("llm.inference_concurrency", "0")])).unwrap_err();
+        assert!(
+            err.contains("inference_concurrency=0 must be >= 1"),
+            "{err}"
+        );
     }
 
     fn apply_field_error(path: &Path, field: &str, value: &str) -> String {

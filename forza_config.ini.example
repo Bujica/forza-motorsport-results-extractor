@@ -12,6 +12,11 @@ gamertag = Player
 
 [llm]
 workers = 1
+# Max concurrent model requests across workers. 1 serializes inference
+# (required by local servers that fail concurrent vision calls, e.g. LM
+# Studio `mtmd` 500s); raise for servers with parallel slots (llama-server
+# --parallel, vLLM, cloud APIs). Capped at workers.
+inference_concurrency = 1
 
 [prompt]
 active = user_header_shaped_v1

@@ -182,6 +182,7 @@ fn validation_collects_all_failures() {
         database_file: "d".into(),
         gamertag: "g".into(),
         workers: 0,
+        inference_concurrency: 0,
         llm: forza_config::LlmConfig {
             url: String::new(),
             model: String::new(),
@@ -236,6 +237,7 @@ fn validation_collects_all_failures() {
         "max_width",
         "encode_quality",
         "temp_min_f",
+        "inference_concurrency",
     ] {
         assert!(
             errors.iter().any(|e| e.contains(fragment)),

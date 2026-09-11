@@ -97,6 +97,11 @@ pub struct AppConfig {
     pub database_file: PathBuf,
     pub gamertag: String,
     pub workers: i64,
+    /// Max concurrent model requests in multi-worker runs. `1` serializes
+    /// inference (safe for local servers that fail concurrent vision calls,
+    /// e.g. LM Studio `mtmd` 500s); raise for servers with parallel slots
+    /// (llama-server `--parallel`, vLLM, cloud APIs).
+    pub inference_concurrency: i64,
     pub llm: LlmConfig,
     pub image: ImageConfig,
     pub validation: ValidationConfig,
@@ -347,6 +352,7 @@ pub fn load_config(path: &Path, strict: bool) -> Result<(AppConfig, Warnings), C
     let performance_reload_streak = loader.int("lmstudio", "performance_reload_streak", 3);
 
     let workers = loader.int("llm", "workers", 1);
+    let inference_concurrency = loader.int("llm", "inference_concurrency", 1);
 
     let input_dir = loader.string("paths", "input_dir", "data/input");
     let pdf_file = loader.string("paths", "pdf_file", "output/reports/forza_bestlaps.pdf");
@@ -390,6 +396,7 @@ pub fn load_config(path: &Path, strict: bool) -> Result<(AppConfig, Warnings), C
         ("lmstudio", "performance_reload_elapsed_s"),
         ("lmstudio", "performance_reload_streak"),
         ("llm", "workers"),
+        ("llm", "inference_concurrency"),
         ("llm", "backend"),
         ("paths", "input_dir"),
         ("paths", "pdf_file"),
@@ -429,6 +436,7 @@ pub fn load_config(path: &Path, strict: bool) -> Result<(AppConfig, Warnings), C
         database_file: PathBuf::from(database_file),
         gamertag,
         workers,
+        inference_concurrency,
         llm: LlmConfig {
             url,
             model,
@@ -500,6 +508,12 @@ pub fn validate_config(cfg: &AppConfig) -> Result<(), Vec<String>> {
     }
     if cfg.workers < 1 {
         errors.push(format!("[llm] workers={} must be >= 1", cfg.workers));
+    }
+    if cfg.inference_concurrency < 1 {
+        errors.push(format!(
+            "[llm] inference_concurrency={} must be >= 1",
+            cfg.inference_concurrency
+        ));
     }
     // Identity / endpoint: empty strings used to sail through and fail
     // obscurely at run time (wrong DB, ungrouped laps, unreachable backend).
