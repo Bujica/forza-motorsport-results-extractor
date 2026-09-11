@@ -72,3 +72,4 @@ forza-rust/target/
 
 # ZCode tool session artifacts (plan files etc.)
 .zcode/
+/data
