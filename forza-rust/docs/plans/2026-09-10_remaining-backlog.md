@@ -1,10 +1,6 @@
 # Plano: pendências restantes (pós-review-refinement)
 
-**Data:** 2026-09-10
-**Premissa:** dev, sem compat com DBs antigos; DBs regeneram das imagens.
-Itens novos pedidos (A, B) primeiro; quick wins (C) depois; médios (D–F) por
-último. Nada aqui é bloqueante para o fluxo extrair → revisar → decidir,
-já validado de ponta a ponta.
+**Status: CONCLUÍDO 2026-09-10/11** — fases A–F implementadas, testadas e commitadas (gates verdes). Este documento permanece como registro do plano; comportamento atual vive nos topic docs e no código.
 
 ---
 

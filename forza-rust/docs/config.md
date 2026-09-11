@@ -17,11 +17,22 @@ strict aborts on the first invalid one. Loader/writer agree on edge values
 ## Validation (`validate_config`)
 
 Enforces non-empty endpoint/model/gamertag/paths, finite numbers, and the
-ranges the settings UI advertises (tokens, temperature 0–2, retries 0–10,
-timeouts, batch sizes, tps/elapsed windows, image/validation/UI bounds).
+ranges the settings UI advertises (tokens, temperature 0-2, retries 0-10,
+timeouts, batch sizes, tps/elapsed windows, image/validation/UI bounds,
+`workers >= 1`, `inference_concurrency >= 1`).
 `forza.exe config-check` fails on warnings **or** errors (no false OK);
 `run`/`rebuild`/`export` refuse to start on invalid config. `--strict` is a
 global CLI flag; `--debug` is display-only and never changes parsing.
+
+## Parallelism knobs (`[llm]`)
+
+- `workers` (default 1): parallel extraction workers; `> 1` parallelizes
+  encode/persist/derive/finalize with pre-allocated inputs per worker.
+- `inference_concurrency` (default 1): max concurrent model requests across
+  workers (capped at `workers`). Keep `1` for local servers that fail
+  concurrent vision calls (LM Studio `mtmd` HTTP 500s); raise for servers
+  with parallel slots (llama-server `--parallel`, vLLM, cloud APIs). Shown
+  on the run log `[start]` line alongside `workers`.
 
 ## Settings UI & save
 

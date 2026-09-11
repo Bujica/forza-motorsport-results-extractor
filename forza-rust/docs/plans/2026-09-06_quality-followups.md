@@ -1,14 +1,6 @@
 # Plano follow-up — pendências da auditoria de qualidade 2026-09-05
 
-**Data:** 2026-09-06
-**Origem:** itens previstos em `2026-09-05_quality-fixes.md` e não executados,
-mais medium/low da auditoria triados como futuros. Nada aqui é bloqueante:
-P0 + P1 + P2-dedups estão implementados (commits `324e6c3`→`1b5d83f`),
-com `fmt --check` + `clippy -D warnings` + `cargo test --workspace` verdes
-e hook pre-push instalado (`.githooks/pre-push`).
-
-Convenção: cada item traz **motivação**, **escopo concreto** e **gate**.
-Itens marcados ⛔ foram julgados improcedentes/paridade — NÃO fazer.
+**Status (atualizado 2026-09-11):** F1 (god-file `gui/lib.rs`), F2 (worker pool), F3 (cast `i32→usize`) e F5 (qualidade transversal relevante) consumidos pelos ciclos de 2026-09-10/11; F4 (perf fina) parcialmente (ganhos seguros aplicados, resto declinado por bench). Detalhes nos plans `2026-09-10_*` e no history.
 
 ---
 

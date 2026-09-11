@@ -7,11 +7,24 @@ Scope: `forza-lmstudio` — HTTP backend, models, load config, evidence.
 ## Flow (`backend.rs::extract`)
 
 Per image: build chat payload → POST (single-flight lock per
-`(api_base, model)`) → parse → validate → semantic check, with attempt kinds
+`(api_base, model)` for load management) → parse → validate → semantic
+check, with attempt kinds
 `initial / transport_retry / json_retry / semantic_retry` up to `max_retries`,
 backing off on transient statuses (429/5xx). Non-retryable 4xx end as
 `http_error`. A 2xx with an undecodable body still records a `parse_error`
 attempt (attempts are never silently lost).
+
+## Inference concurrency (multi-worker runs)
+
+The single-flight lock above covers model *management* only. Concurrent
+*inference* requests are gated per run by `inference_concurrency`
+(`forza-app` semaphore, capped at `workers`): local LM Studio fails
+concurrent vision calls (HTTP 500 `failed to process mtmd chunk`), so the
+default `1` serializes them while encode/persist/derive/finalize stay
+parallel. Raise only for servers with parallel slots (llama-server
+`--parallel`, vLLM, cloud APIs). Every image failure logs
+`error_type: message` and lands in `error_type`/`error_message` columns for
+`--retry-errors`.
 
 Payload: `model / system_prompt / input / temperature / max_output_tokens`
 (+ conditional `reasoning`); `max_tokens` config maps to `max_output_tokens`.

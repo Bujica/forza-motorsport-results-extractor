@@ -24,9 +24,11 @@ Scope: `forza-db` — schema, migration, repositories, doctor, maintenance.
 duplicate/… with evidence columns) → `extraction_results` (exactly one per
 process input) → `extraction_attempts` (accepted + history, raw evidence) →
 `lap_records` (`is_best_lap` frontier flag) → `review_cases` (open/resolved/
-ignored/auto_resolved) + `review_corrections` → `image_flags` (one active
+auto_resolved; outcome pending/confirmed/model_error — no `ignored` state
+anywhere, see `reviews.md`) + `review_corrections` → `image_flags` (one active
 system flag per open case) + `model_runtime_snapshots` (preflight) +
-`reference_tracks/cars` (seeded from compiled assets).
+`reference_tracks/cars` (seeded from compiled assets; confirmed-novel cars
+also append to the shipped `cars.txt`).
 
 ## Repositories (`forza-db/src/repositories/`)
 
@@ -36,7 +38,7 @@ preserving operator decisions), `corrections` (scoped apply), `flags`
 (flag sync), `best_laps` (transactional frontier recompute), `images`,
 `external_records` (atomic snapshot replace).
 
-## Doctor (`forza-db/src/doctor.rs`)
+## Doctor (`forza-db/src/doctor/`)
 
 `run_full_doctor` runs the ~70-check battery (integrity, run/input/result/
 attempt evidence chains, images, reviews + flags, best laps, artifacts,

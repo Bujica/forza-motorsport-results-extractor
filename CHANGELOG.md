@@ -8,6 +8,59 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- GUI creates the database from zero when none is found (`ensure_database`:
+  missing/empty schema is built via `upgrade()`, incompatible schemas refuse
+  with `db-reset` guidance instead of failing at startup).
+- `forza_config.ini [llm] inference_concurrency` (default 1): max concurrent
+  model requests across parallel workers, editable in Settings and validated
+  (`>= 1`). `1` serializes inference for local servers that fail concurrent
+  vision calls (LM Studio `mtmd` HTTP 500s); raise for servers with parallel
+  slots (llama-server `--parallel`, vLLM, cloud APIs). The run log records
+  `workers=` and `inference=` on `[start]`.
+- Operator-confirmed novel cars are appended to the shipped `cars.txt`
+  assets (sorted, deduplicated) in addition to the `reference_cars` catalog,
+  so regenerated databases stop redetecting them. Best-effort: never fails
+  the decision.
+- Review outcome filter understands `auto_resolved` (and `pending` now means
+  actionable `open` rows); the outcome column and detail panel show the
+  lifecycle truth for system-resolved cases.
+
+### Changed
+
+- Review system refined beyond Python parity: `ignore case` removed end to
+  end (write path, UI, filter bucket, CHECK vocabularies — `ImageFlagStatus`
+  untouched); `decide` classifies `confirmed` vs `model_error` with
+  `error_type` taxonomy and `decision:` notes (the `model_error_*` doctor
+  checks are live); returning conditions reopen `auto_resolved` cases;
+  auto-resolve stamps `resolved_at`/`resolution_note`.
+- Parallel extraction serializes only the model HTTP calls (per-run
+  semaphore, capped at workers); encode/persist/derive/finalize stay
+  parallel. Every image failure now logs `error_type: message` (was silent
+  for most error kinds).
+- GUI worker: fixed 4-thread pool sharing one r2d2 connection pool instead
+  of a thread + connection per request; poisoned locks recover instead of
+  wedging the UI.
+- `forza-db/src/doctor.rs` (2234 lines) split into `doctor/` submodules by
+  Python-parity boundary; `forza-gui/src/lib.rs` (2799 lines) split into
+  `ui_state` thread-locals, `handle_response` dispatcher, and `callbacks/`
+  page modules (`lib.rs` is now ~420 lines); `forza-cli/src/main.rs` split
+  into `commands/` modules (parse + dispatch only).
+- Discovery planning unified: CLI dry-run and the runner share
+  `build_discovery_plan` (re-hash failures skip loudly everywhere instead
+  of planning under a stale hash in one path).
+- Hot path: class colors are a plain `match`, frontier hoists
+  per-row lowercase, ordering binds the lowered key once (bench-gated;
+  `difflib` sharing measured ~0% and was reverted).
+
+### Fixed
+
+- Auto-resolved review rows showed a stale `pending` outcome; resolved rows
+  always recorded `confirmed` even for genuine corrections.
+- Negative selection/sort indexes guarded (`usize::try_from`); shared
+  pragma helper for single vs pooled SQLite connections.
+
 - The Rust workspace (`forza-rust/`) is now the current implementation:
   extraction runner (sequential + multi-worker), Slint GUI, review/flag
   lifecycle, CSV/PDF export, DB doctor, and maintenance CLI are ported and

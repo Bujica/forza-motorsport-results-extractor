@@ -4,6 +4,13 @@ Status: current
 Audience: developer, maintainer, LLM
 Scope: `forza-gui` — Slint pages, callbacks, worker channel, state rules.
 
+## Startup
+
+`run()` resolves the DB path (config → cwd/ini/exe candidates, workspace
+preference), then `ensure_database()`: missing/empty schema is built from
+zero via `upgrade()` (catalog seeded), incompatible schemas refuse with
+`db-reset` guidance. A `database created` line goes to stderr on first run.
+
 ## Pages (`forza-gui/ui/pages/*.slint`, wired in `ui/main.slint`)
 
 images (inventory + detail) · process (run controls, progress, log) · review
@@ -14,18 +21,30 @@ images (inventory + detail) · process (run controls, progress, log) · review
 ## Event model (no Qt signals — Slint callbacks + typed channel)
 
 - Slint `callback`s declared in `ui/main.slint` (e.g.
-  `start-run(bool,bool,bool,bool)`, `cancel-run`, `review-apply/ignore/
+  `start-run(bool,bool,bool,bool)`, `cancel-run`, `review-apply/
   reopen/selected`, `setting-edited`, `debug-result-selected`,
-  `open-repository-requested`), handled in `src/lib.rs`.
-- Background work goes through `src/worker.rs`: `Request` enum → one
-  short-lived job thread each → `Response` enum marshaled back via
-  `slint::invoke_from_event_loop`. A panicking job yields
-  `Response::Error`; coalescing flags (`*_IN_FLIGHT`) always reset on a
-  delivered response so the UI can't wedge on "loading…".
+  `open-repository-requested`), wired per page in `src/callbacks/`
+  (`inventory`, `review`, `bestlaps`, `maintenance`, `detail`, `settings`,
+  `debug`, `logs`, `about`, `run`) with the worker-response dispatcher in
+  `src/callbacks/responses.rs`. `src/lib.rs` keeps bootstrap/geometry only.
+- Background work goes through `src/worker.rs`: `Request` enum → fixed pool
+  of 4 threads sharing the queue (no thread-per-request) → pooled r2d2
+  connections via `WorkerContext::conn()` (no connection-per-request) →
+  `Response` enum marshaled back via `slint::invoke_from_event_loop`.
+  A panicking job yields `Response::Error`; poisoned locks recover via
+  `into_inner()` so coalescing flags (`*_IN_FLIGHT`) always reset on a
+  delivered response and the UI can't wedge on "loading…".
 - Live runs use `spawn_extraction` + `RunEvent`s (progress/log/finished),
   not the request channel.
 
-## State rules (`src/lib.rs`, `src/ui_state.rs`)
+## State rules (`src/ui_state.rs`)
+
+- All UI-thread locals live in `ui_state` (models, row caches, selection
+  anchors, sort/filter state, worker channel): `lib.rs` and `callbacks/`
+  never declare their own. `ROW_CACHE` backs inventory selection; review
+  queue has its own `REVIEW_CASES_CACHE` - never index one with positions
+  from the other. Selection/sort indexes arrive as `i32` and convert via
+  `usize::try_from` (negative `-1` returns early, never wraps).
 
 - `ROW_CACHE` backs inventory selection; review queue has its own
   `REVIEW_CASES_CACHE` — never index one with positions from the other.
