@@ -36,7 +36,8 @@ fn primary_screen_px() -> (i32, i32) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetSystemMetrics, SM_CXFULLSCREEN, SM_CYFULLSCREEN,
     };
-    // Trivial win32 query; no invariants to uphold.
+    // SAFETY: trivial side-effect-free win32 metric query; no pointers,
+    // no invariants to uphold beyond a valid constant.
     (unsafe { GetSystemMetrics(SM_CXFULLSCREEN) }, unsafe {
         GetSystemMetrics(SM_CYFULLSCREEN)
     })

@@ -21,6 +21,12 @@ fn inference_permits(workers: u32, concurrency: u32) -> usize {
 /// Runs `work` holding one inference permit. The unit under test for the
 /// wiring in `worker_loop`: with one permit, gated sections never overlap,
 /// no matter how many tasks race for the semaphore.
+///
+/// # Panics
+///
+/// Never in practice: `acquire_owned` only fails on a closed semaphore,
+/// which requires all `Arc`s dropped — the caller holds one across the
+/// call, so `unreachable!` documents an invariant, not an error path.
 async fn with_inference_permit<Fut, T>(inference: Arc<tokio::sync::Semaphore>, work: Fut) -> T
 where
     Fut: std::future::Future<Output = T>,

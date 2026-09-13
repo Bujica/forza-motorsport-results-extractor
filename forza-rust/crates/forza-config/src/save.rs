@@ -131,6 +131,12 @@ fn apply_field(cfg: &mut AppConfig, field: &str, value: &str) -> Result<(), Stri
     Err(format!("Field is not editable: {field}"))
 }
 
+/// Apply one `paths.*` edit.
+///
+/// # Panics
+///
+/// Never in practice: the `unreachable!` below only fires for keys outside
+/// `EDITABLE_PATHS`, which the `contains` guard above already rejected.
 fn apply_path(cfg: &mut AppConfig, key: &str, value: &str) -> Result<(), String> {
     if !EDITABLE_PATHS.contains(&key) {
         return Err(format!("Field is not editable: paths.{key}"));

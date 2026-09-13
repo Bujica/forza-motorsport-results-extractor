@@ -594,6 +594,12 @@ impl Renderer {
         }
     }
 
+    /// Current page, allocating one on first use.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: a page is pushed just above when missing; the
+    /// `unreachable!` only fires if `Vec::push` + `last_mut` disagreed.
     fn current(&mut self) -> &mut Page {
         if self.pages.is_empty() {
             self.pages.push(Page::default());

@@ -51,6 +51,12 @@ const CSV_FIELDS: &[&str] = &[
     "height_px",
 ];
 
+/// Render one cell of an export row by `CSV_FIELDS` name.
+///
+/// # Panics
+///
+/// Panics on unknown field names; callers must only pass `CSV_FIELDS`
+/// entries (the column list is built from the same constant).
 fn field_value(row: &ExportRow, field: &str) -> String {
     match field {
         "track" => row.track.clone(),

@@ -222,7 +222,7 @@ pub fn decide_case(
     if field == "car" && !value.trim().is_empty() {
         let inserted = forza_db::repositories::external_records::seed_reference_cars(
             conn,
-            &[value.to_string()],
+            std::iter::once(value),
         )
         .map_err(|e| e.to_string())?;
         // A genuinely novel confirmation also joins the shipped assets so a

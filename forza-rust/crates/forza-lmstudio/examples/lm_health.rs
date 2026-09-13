@@ -4,8 +4,16 @@
 use forza_lmstudio::client::RuntimeClient;
 use forza_lmstudio::load_config::{DesiredLoadConfig, NormalizedLoadConfig};
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    // Manual current-thread runtime like production code: no `macros`
+    // feature needed for a single-task smoke tool.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    rt.block_on(async_main())
+}
+
+async fn async_main() -> anyhow::Result<()> {
     let url = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "http://127.0.0.1:1234/api/v1/chat".into());

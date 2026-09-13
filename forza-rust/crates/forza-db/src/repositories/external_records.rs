@@ -172,10 +172,13 @@ pub fn list_reference_cars(conn: &Connection) -> Result<Vec<String>, DbError> {
 }
 
 /// Insert new reference cars (ignore duplicates), used after import discovers new cars.
-pub fn seed_reference_cars(conn: &Connection, cars: &[String]) -> Result<usize, DbError> {
+pub fn seed_reference_cars(
+    conn: &Connection,
+    cars: impl IntoIterator<Item = impl AsRef<str>>,
+) -> Result<usize, DbError> {
     let mut inserted = 0usize;
     for car in cars {
-        let clean = car.trim();
+        let clean = car.as_ref().trim();
         if clean.is_empty() {
             continue;
         }

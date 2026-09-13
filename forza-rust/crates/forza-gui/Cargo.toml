@@ -43,7 +43,9 @@ tempfile = "3"
 
 # Slint-generated code emits #[allow(unsafe_code)] and is full of unwraps,
 # which conflicts with the workspace-level policy. The GUI crate opts out of
-# the inherited table; hand-written code still avoids unwraps where practical.
+# the inherited table; hand-written code still avoids unwraps where practical,
+# and any hand-written `unsafe` needs a `// SAFETY:` comment justifying it
+# (currently a single trivial win32 metric query).
 [lints.rust]
 unsafe_code = "allow"
 
