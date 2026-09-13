@@ -8,7 +8,6 @@ use rusqlite::Connection;
 
 use forza_db::repositories::external_records::{
     ExternalLapRecord, list_reference_cars, list_reference_tracks, replace_active_snapshot,
-    seed_reference_cars,
 };
 use forza_domain::car_names::{canonicalize_car_name, car_canonical_map};
 
@@ -43,7 +42,7 @@ impl ExternalImportResult {
                 self.total_rows
             ),
             format!("Canonicalized cars: {}.", self.canonicalized_cars),
-            format!("New cars added: {}.", self.new_cars),
+            format!("New cars found (not added, see list): {}.", self.new_cars),
             format!("Unmapped tracks: {}.", self.unmapped_tracks),
             format!("Invalid laps: {}.", self.invalid_laps),
         ];
@@ -306,9 +305,10 @@ pub fn import_to_db(conn: &Connection, source_path: &Path) -> Result<ExternalImp
     let known_tracks = list_reference_tracks(conn).map_err(|e| e.to_string())?;
     let canonical_cars = list_reference_cars(conn).map_err(|e| e.to_string())?;
     let result = import_spreadsheet(source_path, &known_tracks, &canonical_cars, None)?;
-    if !result.new_car_names.is_empty() {
-        seed_reference_cars(conn, &result.new_car_names).map_err(|e| e.to_string())?;
-    }
+    // Deliberately no catalog seeding here: the cars.txt baseline is
+    // considered complete, and genuinely new cars surface through the review
+    // queue as they appear in images (decisions seed + sync assets). New
+    // spreadsheet names stay visible as `new_car` issues for manual curation.
     let hash = file_sha256(source_path);
     replace_active_snapshot(
         conn,

@@ -53,6 +53,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Hot path: class colors are a plain `match`, frontier hoists
   per-row lowercase, ordering binds the lowered key once (bench-gated;
   `difflib` sharing measured ~0% and was reverted).
+- Spreadsheet imports no longer seed the car catalog: `cars.txt` is
+  considered complete, and genuinely new cars surface through the review
+  queue as they appear in images. Detections stay visible as `new_car`
+  issues for manual curation.
 
 ### Fixed
 
