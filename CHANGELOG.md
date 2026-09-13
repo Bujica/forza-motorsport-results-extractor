@@ -60,6 +60,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   always recorded `confirmed` even for genuine corrections.
 - Negative selection/sort indexes guarded (`usize::try_from`); shared
   pragma helper for single vs pooled SQLite connections.
+- Review class-correction ComboBox stretched to match the track one
+  (was cramped at a fixed 110px).
 
 - The Rust workspace (`forza-rust/`) is now the current implementation:
   extraction runner (sequential + multi-worker), Slint GUI, review/flag

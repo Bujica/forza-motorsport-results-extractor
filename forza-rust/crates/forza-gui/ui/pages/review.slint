@@ -283,7 +283,7 @@ export component ReviewPage inherits Rectangle {
                         if root.selected-reason() == "race_class": HorizontalLayout {
                             spacing: 6px;
                             ComboBox {
-                                min-width: 110px;
+                                min-width: 170px; horizontal-stretch: 1;
                                 model: root.review-classes;
                                 current-index <=> root.review-class-index;
                             }
