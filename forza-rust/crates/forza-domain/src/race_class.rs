@@ -15,6 +15,10 @@ pub fn class_order(race_class: &str) -> u32 {
         "X" => 10,
         "Mixed" => 11,
         "Unknown" => 12,
+        // Appended after the Python-parity values (which must not move):
+        // spec divisions sort after the fallback buckets.
+        "GT2" => 13,
+        "GT3" => 14,
         _ => 99,
     }
 }
@@ -34,6 +38,8 @@ pub fn class_color(race_class: &str) -> &'static str {
         "P" => "#0C8540",
         "X" => "#006000",
         "Mixed" => "#555555",
+        "GT2" => "#DAA520",
+        "GT3" => "#FF6347",
         _ => "#000000",
     }
 }
@@ -53,6 +59,13 @@ mod tests {
     }
 
     #[test]
+    fn spec_divisions_sort_after_fallbacks() {
+        // Appended past the Python-parity values, which must not move.
+        assert_eq!(class_order("GT2"), 13);
+        assert_eq!(class_order("GT3"), 14);
+    }
+
+    #[test]
     fn class_colors_complete() {
         for (class, color) in [
             ("E", "#C7368E"),
@@ -67,6 +80,8 @@ mod tests {
             ("X", "#006000"),
             ("Mixed", "#555555"),
             ("Unknown", "#000000"),
+            ("GT2", "#DAA520"),
+            ("GT3", "#FF6347"),
         ] {
             assert_eq!(class_color(class), color, "wrong color for {class}");
         }

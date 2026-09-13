@@ -26,14 +26,14 @@ novel car seeds the catalog immediately and appends it to the shipped
 ### Multiclass sessions (`Mixed`)
 
 Session class comes from `detect_race_class` (`forza-domain/src/lap.rs`):
-a single PI letter wins; ≥30% TCR liveries → `TCR`; multiple letters →
-`Mixed`. `Mixed` is deliberately *not* a class: `VALID_CLASSES` excludes
-it, so every mixed-lobby image opens one `class_invalid` case asking the
-operator to pick the session class. There is no GT2/GT3 division modeling
-by design — a single-division field whose cars share one PI letter (e.g. an
-all-R GT3 lobby) resolves with no review at all; only the odd letter out
-(e.g. a PI 784 S car in an R field, observed 2026-09-12) forces the session
-to `Mixed`.
+a single PI letter wins; ≥30% TCR liveries → `TCR`; GT2/GT3 roster shares
+(same 30% bar, `GT2_CARS`/`GT3_CARS` in-car-name sets) → the division, or
+`Mixed` when two divisions share the grid; multiple letters → `Mixed`.
+`Mixed` is deliberately *not* a class: `VALID_CLASSES` excludes it, so
+every mixed-lobby image opens one `class_invalid` case asking the operator
+to pick the session class. Division membership is by car identity, not PI
+letters — a GT3 field with an odd letter out (e.g. a PI 784 S Lexus among
+R cars, observed 2026-09-12) still resolves to its division.
 
 ## Case lifecycle (`upsert_review_cases`)
 

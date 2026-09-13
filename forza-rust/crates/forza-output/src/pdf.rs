@@ -96,21 +96,10 @@ pub enum PdfRenderError {
     Io(String),
 }
 
+/// Single owner lives in `forza_domain::race_class` — this delegate keeps
+/// the PDF palette from drifting out of sync again.
 fn class_colors(class: &str) -> &'static str {
-    match class {
-        "E" => "#C7368E",
-        "D" => "#127F85",
-        "C" => "#BB7A00",
-        "B" => "#C54E00",
-        "A" => "#992800",
-        "TCR" => "#1E90FF",
-        "S" => "#613BBF",
-        "R" => "#105DAB",
-        "P" => "#0C8540",
-        "X" => "#006000",
-        "Mixed" => "#555555",
-        _ => "#000000",
-    }
+    forza_domain::race_class::class_color(class)
 }
 
 /// Build the deterministic document plan (the report's list content).

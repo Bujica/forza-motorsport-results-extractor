@@ -120,7 +120,9 @@ fn known_cars(conn: &Connection) -> HashSet<String> {
     set
 }
 
-const VALID_CLASSES: &[&str] = &["E", "D", "C", "B", "A", "TCR", "S", "R", "P", "X"];
+const VALID_CLASSES: &[&str] = &[
+    "E", "D", "C", "B", "A", "TCR", "GT2", "GT3", "S", "R", "P", "X",
+];
 
 /// Detect review candidates from persisted lap rows (global, not run-scoped).
 pub fn query_review_candidates(conn: &Connection) -> Result<Vec<ReviewCandidate>, crate::DbError> {

@@ -558,6 +558,12 @@ fn normalize_class(value: &str) -> String {
     if v.starts_with("TCR") {
         return "TCR".to_string();
     }
+    if v.starts_with("GT2") {
+        return "GT2".to_string();
+    }
+    if v.starts_with("GT3") {
+        return "GT3".to_string();
+    }
     v.chars()
         .next()
         .map(|c| c.to_string())
@@ -599,6 +605,8 @@ mod tests {
         assert_eq!(normalize_class("A"), "A");
         assert_eq!(normalize_class(""), "Unknown");
         assert_eq!(normalize_class("TCR something"), "TCR");
+        assert_eq!(normalize_class("gt3 field"), "GT3");
+        assert_eq!(normalize_class("GT2"), "GT2");
     }
 
     #[test]

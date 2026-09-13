@@ -28,6 +28,52 @@ pub const TCR_CARS: &[&str] = &[
 static TCR_CAR_SET: LazyLock<HashSet<&'static str>> =
     LazyLock::new(|| TCR_CARS.iter().copied().collect());
 
+/// GT2 division liveries (in-game names as read by the model; reference
+/// source uses longer official names, e.g. "BMW 1 BMW M Motorsport M8 GTE").
+/// Observed spec PIs: Vantage GTE 822, M8 838, M6 813, C7 804, C8 821,
+/// Viper 808, 488 835, Ford GT 820, 91 RSR 806, 92 RSR 811 (all R).
+pub const GT2_CARS: &[&str] = &[
+    "#97 Vantage GTE",
+    "BMW #1 M8",
+    "BMW #24 M6",
+    "Chev. #3 C7",
+    "Chev. #3 C8",
+    "Dodge #93 Viper",
+    "Ferrari #62 488",
+    "Ford #66 GT",
+    "Porsche #91 RSR",
+    "Porsche #92 RSR",
+];
+
+/// GT3 division liveries (in-game names; e.g. "BMW 96 Turner Motorsports
+/// M4 GT3" reference). Observed spec PIs: Vantage 833, AMG GT3 817,
+/// 911 GT3 R 820, RC F 784 (S!), M4 GT3 838, Bentley 819, R8 LMS 828,
+/// 720S 806, Mustang GT3 829, F458 805, NSX 819, ATS 824, 73 GT3 801.
+pub const GT3_CARS: &[&str] = &[
+    "AM #7 Vantage",
+    "M-AMG GT3",
+    "911 GT3 R '23",
+    "Lexus #14 RC F",
+    "#96 BMW M4 GT3",
+    "Bentley #17 C",
+    "Audi #44 R8 LMS",
+    "McLaren #03 720S",
+    "Ford Mustang GT3",
+    "#62 F458 GTC",
+    "Acura #36 NSX",
+    "Cadillac #3 ATS",
+    "Porsche #73 GT3",
+];
+
+static GT2_CAR_SET: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| GT2_CARS.iter().copied().collect());
+
+static GT3_CAR_SET: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| GT3_CARS.iter().copied().collect());
+
+/// Share of the grid that makes a division call (same bar as TCR).
+const DIVISION_SHARE: f64 = 0.30;
+
 /// Canonical label for unrecognized/missing weather. Shared with
 /// `frontier::condition_key` so grouping and correction agree (ordering keys
 /// intentionally keep `""` for missing weather — Python parity, pinned by
@@ -238,14 +284,24 @@ pub struct RawGridEntry {
 
 /// Determine race class for a grid of corrected-car entries.
 ///
-/// 1. >= 30% TCR liveries → `TCR`; 2. multiple letters → `Mixed`;
-/// 3. single letter → it; 4. otherwise `Unknown`.
+/// 1. `>= 30%` TCR liveries → `TCR`.
+/// 2. Division check: GT2/GT3 roster shares (same 30% bar) — a single
+///    division wins, two sharing the grid → `Mixed`.
+/// 3. Multiple PI letters → `Mixed`.
+/// 4. Single letter → it.
+/// 5. Otherwise `Unknown`.
+///
+/// The division check runs on car identity, not PI letters, so a GT3 field
+/// with an odd letter out (e.g. a PI 784 S car among R cars) still resolves
+/// to its division instead of `Mixed`.
 pub fn detect_race_class(raw_entries: &[RawGridEntry]) -> String {
     if raw_entries.is_empty() {
         return "Unknown".to_string();
     }
 
     let mut tcr_count: usize = 0;
+    let mut gt2_count: usize = 0;
+    let mut gt3_count: usize = 0;
     let mut letters: HashSet<String> = HashSet::new();
 
     for entry in raw_entries {
@@ -254,14 +310,29 @@ pub fn detect_race_class(raw_entries: &[RawGridEntry]) -> String {
         if TCR_CAR_SET.contains(car) {
             tcr_count += 1;
         }
+        if GT2_CAR_SET.contains(car) {
+            gt2_count += 1;
+        }
+        if GT3_CAR_SET.contains(car) {
+            gt3_count += 1;
+        }
         let letter = extract_class_letter(Some(cl));
         if letter != "Unknown" {
             letters.insert(letter);
         }
     }
 
-    if tcr_count as f64 / raw_entries.len() as f64 >= 0.30 {
+    let total = raw_entries.len() as f64;
+    if tcr_count as f64 / total >= DIVISION_SHARE {
         return "TCR".to_string();
+    }
+    let gt2 = gt2_count as f64 / total >= DIVISION_SHARE;
+    let gt3 = gt3_count as f64 / total >= DIVISION_SHARE;
+    match (gt2, gt3) {
+        (true, false) => return "GT2".to_string(),
+        (false, true) => return "GT3".to_string(),
+        (true, true) => return "Mixed".to_string(),
+        (false, false) => {}
     }
     if letters.len() > 1 {
         return "Mixed".to_string();
@@ -290,5 +361,63 @@ mod tests {
     fn unknown_weather_has_one_shared_spelling() {
         assert_eq!(normalize_weather(None), UNKNOWN_WEATHER);
         assert_eq!(normalize_weather(Some("storm")), UNKNOWN_WEATHER);
+    }
+
+    fn grid(rows: &[(&str, &str)]) -> Vec<RawGridEntry> {
+        rows.iter()
+            .map(|(ca, cl)| RawGridEntry {
+                ca: ca.to_string(),
+                cl: cl.to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn division_call_by_roster_share_like_tcr() {
+        // Pure GT3 field, all letters R: division wins over the letter.
+        let gt3 = grid(&[
+            ("M-AMG GT3", "PI 817 R"),
+            ("AM #7 Vantage", "PI 833 R"),
+            ("911 GT3 R '23", "PI 820 R"),
+        ]);
+        assert_eq!(detect_race_class(&gt3), "GT3");
+        // Pure GT2 field reading R is GT2, not R.
+        let gt2 = grid(&[
+            ("BMW #1 M8", "PI 838 R"),
+            ("Porsche #91 RSR", "PI 806 R"),
+            ("Ford #66 GT", "PI 820 R"),
+        ]);
+        assert_eq!(detect_race_class(&gt2), "GT2");
+        // GT3 field with an odd S letter out still resolves GT3, not Mixed.
+        let mut mixed_letters = gt3.clone();
+        mixed_letters.push(RawGridEntry {
+            ca: "Lexus #14 RC F".to_string(),
+            cl: "PI 784 S".to_string(),
+        });
+        assert_eq!(detect_race_class(&mixed_letters), "GT3");
+        // Two divisions sharing the grid stay Mixed.
+        let both = grid(&[
+            ("BMW #1 M8", "PI 838 R"),
+            ("Porsche #91 RSR", "PI 806 R"),
+            ("M-AMG GT3", "PI 817 R"),
+            ("AM #7 Vantage", "PI 833 R"),
+        ]);
+        assert_eq!(detect_race_class(&both), "Mixed");
+        // Below the share bar the letters decide again.
+        let lone = grid(&[
+            ("M-AMG GT3", "PI 817 R"),
+            ("Some Road Car", "PI 800 R"),
+            ("Other Road Car", "PI 810 R"),
+            ("Fourth Road Car", "PI 820 R"),
+            ("Fifth Road Car", "PI 830 R"),
+        ]);
+        assert_eq!(detect_race_class(&lone), "R");
+        // TCR keeps priority over divisions.
+        let tcr = grid(&[
+            ("Honda #73 Civic", "PI 400 D"),
+            ("M-AMG GT3", "PI 817 R"),
+            ("Some Road Car", "PI 800 R"),
+        ]);
+        assert_eq!(detect_race_class(&tcr), "TCR");
     }
 }

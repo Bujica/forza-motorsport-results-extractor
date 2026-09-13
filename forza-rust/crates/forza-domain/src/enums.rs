@@ -230,7 +230,7 @@ value_enum! {
 }
 
 value_enum! {
-    /// Race class letters plus the composite TCR/Mixed/Unknown values.
+    /// Race class letters plus the composite TCR/GT2/GT3/Mixed/Unknown values.
     pub enum RaceClass {
         E = "E",
         D = "D",
@@ -238,6 +238,8 @@ value_enum! {
         B = "B",
         A = "A",
         Tcr = "TCR",
+        Gt2 = "GT2",
+        Gt3 = "GT3",
         S = "S",
         R = "R",
         P = "P",
@@ -299,6 +301,8 @@ mod tests {
         );
         assert_eq!(RaceClass::from_value("TCR"), Some(RaceClass::Tcr));
         assert_eq!(RaceClass::Tcr.as_str(), "TCR");
+        assert_eq!(RaceClass::from_value("GT2"), Some(RaceClass::Gt2));
+        assert_eq!(RaceClass::from_value("GT3"), Some(RaceClass::Gt3));
         assert_eq!("Mixed".parse::<RaceClass>().unwrap(), RaceClass::Mixed);
     }
 }

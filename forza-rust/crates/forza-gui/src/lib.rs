@@ -386,7 +386,7 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
         tracks.sort_by_key(|t| t.to_lowercase());
         callbacks::set_review_track_model(&main, tracks);
         let classes: Vec<slint::SharedString> = [
-            "E", "D", "C", "B", "A", "TCR", "S", "R", "P", "X", "Mixed", "Unknown",
+            "E", "D", "C", "B", "A", "TCR", "GT2", "GT3", "S", "R", "P", "X", "Mixed", "Unknown",
         ]
         .iter()
         .map(|c| c.to_string().into())
