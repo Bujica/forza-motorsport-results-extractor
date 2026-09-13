@@ -75,9 +75,10 @@ export global Theme {
     out property <length> splitter-w: Math.max(5px, 6px * root.ui-scale);
     out property <length> statusbar-h: Math.max(20px, 22px * root.ui-scale);
 
-    // ── Class palette (F4) → Theme
+    // ── Class palette (F4) → Theme — keep in sync with
+    // `forza_domain::race_class::class_color` (Slint can't call it directly).
     public pure function class-color(c: string) -> color {
-        return c == "E" ? #C7368E : c == "D" ? #127F85 : c == "C" ? #BB7A00 : c == "B" ? #C54E00 : c == "A" ? #992800 : c == "TCR" ? #1E90FF : c == "S" ? #613BBF : c == "R" ? #105DAB : c == "P" ? #0C8540 : c == "X" ? #006000 : c == "Mixed" ? #555555 : #000000;
+        return c == "E" ? #C7368E : c == "D" ? #127F85 : c == "C" ? #BB7A00 : c == "B" ? #C54E00 : c == "A" ? #992800 : c == "TCR" ? #1E90FF : c == "S" ? #613BBF : c == "R" ? #105DAB : c == "P" ? #0C8540 : c == "X" ? #006000 : c == "GT2" ? #DAA520 : c == "GT3" ? #FF6347 : c == "Mixed" ? #555555 : #000000;
     }
     public pure function doctor-row-bg(result: string) -> color {
         return result == "FAIL" ? #fde8e7 : result == "WARN" ? #fdf3d7 : #e2f5e9;

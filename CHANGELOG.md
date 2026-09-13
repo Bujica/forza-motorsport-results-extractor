@@ -63,9 +63,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Review class-correction ComboBox stretched to match the track one
   (was cramped at a fixed 110px).
 - GT2/GT3 spec divisions recognized like TCR (roster + 30% share rule):
-  new `GT2`/`GT3` classes with order, colors, review vocabulary, GUI
-  options and import normalization; `Mixed` now only means genuinely
-  mixed grids or mixed PI letters.
+  new `GT2`/`GT3` classes with order, colors (incl. Slint theme palette),
+  review vocabulary, GUI options and import normalization; `Mixed` now
+  only means genuinely mixed grids or mixed PI letters.
+- Review queue follows grid order within each image (image-level cases
+  first, then `lap_index` top-to-bottom); images keep first-seen order
+  instead of interleaving.
 
 - The Rust workspace (`forza-rust/`) is now the current implementation:
   extraction runner (sequential + multi-worker), Slint GUI, review/flag

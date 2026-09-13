@@ -52,7 +52,9 @@ pub struct ReviewQueueFilter {
 }
 
 /// List review cases. `resolved` includes system-set `auto_resolved`
-/// (operator-equivalent). Open cases sort first, then by case number.
+/// (operator-equivalent). Open cases sort first; images keep first-seen
+/// order, and within an image the cases follow grid order (image-level
+/// first, then `lap_index`, i.e. screen top-to-bottom).
 pub fn list_review_cases(
     conn: &Connection,
     filter: &ReviewQueueFilter,
@@ -105,6 +107,11 @@ pub fn list_review_cases(
         args.push(Box::new(image.to_string()));
     }
 
+    // Grid order within each image: image-level cases (track/weather/class,
+    // no lap) first, then driver rows top-to-bottom as shown on screen
+    // (`lap_index` is the finishing position). Images keep first-seen order
+    // via the per-image minimum case number, so one image's cases never
+    // interleave another's.
     let sql = format!(
         "SELECT case_number, reason, COALESCE(\"trigger\",''), status,
                 COALESCE(outcome,''), COALESCE(driver,''), COALESCE(car,''), COALESCE(track,''),
@@ -115,7 +122,11 @@ pub fn list_review_cases(
                 lap_record_id
          FROM review_cases
          WHERE {}
-         ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, case_number",
+         ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END,
+                  MIN(case_number) OVER (PARTITION BY COALESCE(image_file_id, '')),
+                  CASE WHEN lap_index IS NULL THEN 0 ELSE 1 END,
+                  lap_index,
+                  case_number",
         clauses.join(" AND ")
     );
     let params_ref: Vec<&dyn rusqlite::types::ToSql> =
