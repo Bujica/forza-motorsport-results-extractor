@@ -23,6 +23,18 @@ assets (`forza-domain`) and the DB `reference_cars` catalog; confirming a
 novel car seeds the catalog immediately and appends it to the shipped
 `cars.txt` assets (best-effort) so regenerated databases stop redetecting it.
 
+### Multiclass sessions (`Mixed`)
+
+Session class comes from `detect_race_class` (`forza-domain/src/lap.rs`):
+a single PI letter wins; ≥30% TCR liveries → `TCR`; multiple letters →
+`Mixed`. `Mixed` is deliberately *not* a class: `VALID_CLASSES` excludes
+it, so every mixed-lobby image opens one `class_invalid` case asking the
+operator to pick the session class. There is no GT2/GT3 division modeling
+by design — a single-division field whose cars share one PI letter (e.g. an
+all-R GT3 lobby) resolves with no review at all; only the odd letter out
+(e.g. a PI 784 S car in an R field, observed 2026-09-12) forces the session
+to `Mixed`.
+
 ## Case lifecycle (`upsert_review_cases`)
 
 - New keys → `open` cases (numbered from `MAX(case_number)+1`).
