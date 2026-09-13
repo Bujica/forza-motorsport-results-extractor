@@ -266,7 +266,7 @@ fn log_duplicate_skips_returns_paths_in_plan_order() {
 #[test]
 fn semantic_naming_matches_python_examples() {
     assert_eq!(
-        semantic_filename("Fuji Speedway", "A", ".png"),
+        semantic_filename("Fuji Speedway", forza_domain::enums::RaceClass::A, ".png"),
         "Fuji Speedway - A.png"
     );
 }

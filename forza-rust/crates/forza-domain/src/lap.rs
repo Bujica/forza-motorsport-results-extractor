@@ -7,6 +7,7 @@ use regex::Regex;
 use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_normalization::UnicodeNormalization;
 
+use crate::enums::RaceClass;
 use crate::errors::DomainError;
 
 /// TCR livery names; a race where >= 30% of the grid drives one is TCR.
@@ -24,9 +25,6 @@ pub const TCR_CARS: &[&str] = &[
     "Ford #17Focus ST",
     "MB #33 A45",
 ];
-
-static TCR_CAR_SET: LazyLock<HashSet<&'static str>> =
-    LazyLock::new(|| TCR_CARS.iter().copied().collect());
 
 /// GT2 division liveries (in-game names as read by the model; reference
 /// source uses longer official names, e.g. "BMW 1 BMW M Motorsport M8 GTE").
@@ -65,11 +63,27 @@ pub const GT3_CARS: &[&str] = &[
     "Porsche #73 GT3",
 ];
 
-static GT2_CAR_SET: LazyLock<HashSet<&'static str>> =
-    LazyLock::new(|| GT2_CARS.iter().copied().collect());
+/// Division roster table: adding a future division (e.g. `GTA`) is one entry
+/// here plus the `RaceClass` arms — no new counter, set, or match arm in
+/// [`detect_race_class`].
+const DIVISIONS: &[(RaceClass, &[&str])] = &[
+    (RaceClass::Tcr, TCR_CARS),
+    (RaceClass::Gt2, GT2_CARS),
+    (RaceClass::Gt3, GT3_CARS),
+];
 
-static GT3_CAR_SET: LazyLock<HashSet<&'static str>> =
-    LazyLock::new(|| GT3_CARS.iter().copied().collect());
+/// Car livery → division class. First roster wins on overlap (rosters are
+/// asserted disjoint in tests, so this is a backstop, not a rule).
+static DIVISION_BY_CAR: LazyLock<std::collections::HashMap<&'static str, RaceClass>> =
+    LazyLock::new(|| {
+        let mut map = std::collections::HashMap::new();
+        for (class, roster) in DIVISIONS {
+            for car in *roster {
+                map.entry(*car).or_insert(*class);
+            }
+        }
+        map
+    });
 
 /// Share of the grid that makes a division call (same bar as TCR).
 const DIVISION_SHARE: f64 = 0.30;
@@ -255,11 +269,11 @@ pub fn fahrenheit_to_celsius_str(tf: Option<&str>, temp_min: f64, temp_max: f64)
 /// Extract the single class letter from the LLM's `cl` field.
 ///
 /// Handles `"692 A"`, `"692A"`, `"PI400D"` and bare letters; anything else is
-/// `"Unknown"`.
-pub fn extract_class_letter(cl_field: Option<&str>) -> String {
+/// [`RaceClass::Unknown`].
+pub fn extract_class_letter(cl_field: Option<&str>) -> RaceClass {
     let s = cl_field.unwrap_or("").trim().to_uppercase();
     if s.is_empty() {
-        return "Unknown".to_string();
+        return RaceClass::Unknown;
     }
 
     static BARE_LETTER: LazyLock<Regex> = lazy_regex!(r"^[A-Z]$");
@@ -267,12 +281,17 @@ pub fn extract_class_letter(cl_field: Option<&str>) -> String {
 
     let last = s.split_whitespace().next_back().unwrap_or_default();
     if BARE_LETTER.is_match(last) {
-        return last.to_string();
+        return RaceClass::from_value(last).unwrap_or(RaceClass::Unknown);
     }
     if CONCATENATED.is_match(last) {
-        return last.chars().last().unwrap_or('U').to_string();
+        let letter = last
+            .chars()
+            .last()
+            .map(|c| c.to_string())
+            .unwrap_or_default();
+        return RaceClass::from_value(&letter).unwrap_or(RaceClass::Unknown);
     }
-    "Unknown".to_string()
+    RaceClass::Unknown
 }
 
 /// One grid row as delivered by the model (`ca` = car, `cl` = class field).
@@ -294,53 +313,50 @@ pub struct RawGridEntry {
 /// The division check runs on car identity, not PI letters, so a GT3 field
 /// with an odd letter out (e.g. a PI 784 S car among R cars) still resolves
 /// to its division instead of `Mixed`.
-pub fn detect_race_class(raw_entries: &[RawGridEntry]) -> String {
+pub fn detect_race_class(raw_entries: &[RawGridEntry]) -> RaceClass {
     if raw_entries.is_empty() {
-        return "Unknown".to_string();
+        return RaceClass::Unknown;
     }
 
-    let mut tcr_count: usize = 0;
-    let mut gt2_count: usize = 0;
-    let mut gt3_count: usize = 0;
-    let mut letters: HashSet<String> = HashSet::new();
+    let mut division_counts: std::collections::HashMap<RaceClass, usize> =
+        std::collections::HashMap::new();
+    let mut letters: HashSet<RaceClass> = HashSet::new();
 
     for entry in raw_entries {
         let car = entry.ca.trim();
         let cl = entry.cl.trim();
-        if TCR_CAR_SET.contains(car) {
-            tcr_count += 1;
-        }
-        if GT2_CAR_SET.contains(car) {
-            gt2_count += 1;
-        }
-        if GT3_CAR_SET.contains(car) {
-            gt3_count += 1;
+        if let Some(class) = DIVISION_BY_CAR.get(car) {
+            *division_counts.entry(*class).or_default() += 1;
         }
         let letter = extract_class_letter(Some(cl));
-        if letter != "Unknown" {
+        if letter != RaceClass::Unknown {
             letters.insert(letter);
         }
     }
 
     let total = raw_entries.len() as f64;
-    if tcr_count as f64 / total >= DIVISION_SHARE {
-        return "TCR".to_string();
+    let share = |class: RaceClass| division_counts.get(&class).copied().unwrap_or(0) as f64 / total;
+    // TCR keeps priority over divisions (historical rule, preserved).
+    if share(RaceClass::Tcr) >= DIVISION_SHARE {
+        return RaceClass::Tcr;
     }
-    let gt2 = gt2_count as f64 / total >= DIVISION_SHARE;
-    let gt3 = gt3_count as f64 / total >= DIVISION_SHARE;
-    match (gt2, gt3) {
-        (true, false) => return "GT2".to_string(),
-        (false, true) => return "GT3".to_string(),
-        (true, true) => return "Mixed".to_string(),
-        (false, false) => {}
+    // Exactly one division over the bar wins; two or more sharing the grid
+    // stay Mixed. Generic over DIVISIONS so a future entry needs no new arm.
+    let mut winners: Vec<RaceClass> = DIVISIONS
+        .iter()
+        .map(|(class, _)| *class)
+        .filter(|class| *class != RaceClass::Tcr && share(*class) >= DIVISION_SHARE)
+        .collect();
+    winners.sort_by_key(|class| class.order());
+    match winners.as_slice() {
+        [single] => return *single,
+        [_, _, ..] => return RaceClass::Mixed,
+        [] => {}
     }
     if letters.len() > 1 {
-        return "Mixed".to_string();
+        return RaceClass::Mixed;
     }
-    letters
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| "Unknown".to_string())
+    letters.into_iter().next().unwrap_or(RaceClass::Unknown)
 }
 
 #[cfg(test)]
@@ -380,21 +396,21 @@ mod tests {
             ("AM #7 Vantage", "PI 833 R"),
             ("911 GT3 R '23", "PI 820 R"),
         ]);
-        assert_eq!(detect_race_class(&gt3), "GT3");
+        assert_eq!(detect_race_class(&gt3), RaceClass::Gt3);
         // Pure GT2 field reading R is GT2, not R.
         let gt2 = grid(&[
             ("BMW #1 M8", "PI 838 R"),
             ("Porsche #91 RSR", "PI 806 R"),
             ("Ford #66 GT", "PI 820 R"),
         ]);
-        assert_eq!(detect_race_class(&gt2), "GT2");
+        assert_eq!(detect_race_class(&gt2), RaceClass::Gt2);
         // GT3 field with an odd S letter out still resolves GT3, not Mixed.
         let mut mixed_letters = gt3.clone();
         mixed_letters.push(RawGridEntry {
             ca: "Lexus #14 RC F".to_string(),
             cl: "PI 784 S".to_string(),
         });
-        assert_eq!(detect_race_class(&mixed_letters), "GT3");
+        assert_eq!(detect_race_class(&mixed_letters), RaceClass::Gt3);
         // Two divisions sharing the grid stay Mixed.
         let both = grid(&[
             ("BMW #1 M8", "PI 838 R"),
@@ -402,7 +418,7 @@ mod tests {
             ("M-AMG GT3", "PI 817 R"),
             ("AM #7 Vantage", "PI 833 R"),
         ]);
-        assert_eq!(detect_race_class(&both), "Mixed");
+        assert_eq!(detect_race_class(&both), RaceClass::Mixed);
         // Below the share bar the letters decide again.
         let lone = grid(&[
             ("M-AMG GT3", "PI 817 R"),
@@ -411,13 +427,26 @@ mod tests {
             ("Fourth Road Car", "PI 820 R"),
             ("Fifth Road Car", "PI 830 R"),
         ]);
-        assert_eq!(detect_race_class(&lone), "R");
+        assert_eq!(detect_race_class(&lone), RaceClass::R);
         // TCR keeps priority over divisions.
         let tcr = grid(&[
             ("Honda #73 Civic", "PI 400 D"),
             ("M-AMG GT3", "PI 817 R"),
             ("Some Road Car", "PI 800 R"),
         ]);
-        assert_eq!(detect_race_class(&tcr), "TCR");
+        assert_eq!(detect_race_class(&tcr), RaceClass::Tcr);
+    }
+
+    #[test]
+    fn division_rosters_are_disjoint() {
+        // `DIVISION_BY_CAR` keeps the first roster on overlap; disjoint
+        // rosters make that a backstop. A shared livery across divisions
+        // must be resolved explicitly, not by map order.
+        let mut seen: HashSet<&str> = HashSet::new();
+        for (_, roster) in DIVISIONS {
+            for car in *roster {
+                assert!(seen.insert(car), "livery in two division rosters: {car}");
+            }
+        }
     }
 }

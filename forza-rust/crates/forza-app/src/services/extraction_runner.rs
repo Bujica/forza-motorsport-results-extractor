@@ -1466,14 +1466,17 @@ pub fn stamp_semantic_name(
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .ok();
-    let Some((track, race_class)) = row else {
+    let Some((track, race_class_raw)) = row else {
         return;
     };
+    let race_class: forza_domain::enums::RaceClass = race_class_raw
+        .parse()
+        .unwrap_or(forza_domain::enums::RaceClass::Unknown);
     let suffix = image_path
         .extension()
         .map(|e| format!(".{}", e.to_string_lossy()))
         .unwrap_or_default();
-    let name = forza_pipeline::semantic_filename(&track, &race_class, &suffix);
+    let name = forza_pipeline::semantic_filename(&track, race_class, &suffix);
     let _ = conn.execute(
         "UPDATE image_files SET semantic_name = ?2 WHERE id = ?1",
         rusqlite::params![image_file_id, name],

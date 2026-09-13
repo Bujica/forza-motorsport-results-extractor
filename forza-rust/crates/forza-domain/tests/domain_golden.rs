@@ -142,7 +142,7 @@ fn extract_class_letter_matches_python() {
     for pair in golden()["extract_class_letter"].as_array().unwrap() {
         let input = optional_str(&pair[0]);
         assert_eq!(
-            extract_class_letter(input),
+            extract_class_letter(input).as_str(),
             pair[1].as_str().unwrap(),
             "extract_class_letter({input:?})"
         );
@@ -162,7 +162,7 @@ fn detect_race_class_matches_python() {
             })
             .collect();
         assert_eq!(
-            detect_race_class(&entries),
+            detect_race_class(&entries).as_str(),
             pair[1].as_str().unwrap(),
             "grid {:?}",
             entries

@@ -380,7 +380,6 @@ Lamborghini Sesto Elemento
 Lamborghini Sián FKP 37
 Lamborghini Veneno
 Lancia Delta HF Integrale Evo
-Leaked Cars
 Lexus 14 VASSER SULLIVAN RC F GT3
 Lexus GS350 F Sport
 Lexus IS 350 F Sport
@@ -531,7 +530,6 @@ Nissan Skyline GTS-R
 Nissan Skyline H/T 2000GT-R
 Nissan Z
 Nissan Z NISMO
-Null Car
 Oldsmobile 75 Cutlass Supreme Trans AM
 Oldsmobile Hurst/Olds 442
 Opel Kadett C GT/E

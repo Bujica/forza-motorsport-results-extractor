@@ -10,6 +10,7 @@ use forza_db::repositories::external_records::{
     ExternalLapRecord, list_reference_cars, list_reference_tracks, replace_active_snapshot,
 };
 use forza_domain::car_names::{canonicalize_car_name, car_canonical_map};
+use forza_domain::enums::RaceClass;
 
 const REQUIRED_COLUMNS: &[&str] = &["Track", "Class", "Gamertag", "Vehicle", "Laptime"];
 const MAX_XLSX_ROWS: usize = 100_000;
@@ -142,7 +143,7 @@ pub fn import_spreadsheet(
             ("Laptime", raw_lap.as_str()),
         ]
         .iter()
-        .filter(|(_, v)| v.is_empty() || *v == "Unknown")
+        .filter(|(_, v)| v.is_empty() || *v == RaceClass::Unknown.as_str())
         .map(|(k, _)| *k)
         .collect();
         if !missing.is_empty() {
@@ -551,23 +552,7 @@ fn parse_aliases_value(
 }
 
 fn normalize_class(value: &str) -> String {
-    let v = value.trim().to_uppercase();
-    if v.is_empty() {
-        return "Unknown".to_string();
-    }
-    if v.starts_with("TCR") {
-        return "TCR".to_string();
-    }
-    if v.starts_with("GT2") {
-        return "GT2".to_string();
-    }
-    if v.starts_with("GT3") {
-        return "GT3".to_string();
-    }
-    v.chars()
-        .next()
-        .map(|c| c.to_string())
-        .unwrap_or_else(|| "Unknown".to_string())
+    RaceClass::from_csv_cell(value).as_str().to_string()
 }
 
 fn normalize_lap(raw: &str) -> Result<(String, i64), String> {

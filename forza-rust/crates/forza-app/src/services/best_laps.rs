@@ -5,9 +5,16 @@ use std::collections::{BTreeSet, HashSet};
 use rusqlite::Connection;
 
 use forza_db::repositories::external_records::ExternalLapRecord;
+use forza_domain::enums::RaceClass;
 use forza_domain::lap::strip_dirty_symbol;
 use forza_domain::ordering::{LapRowLike, ordered_lap_key, track_order_map};
 use forza_output::fmt_float;
+
+/// Parse a persisted class string; garbage becomes `Unknown` (review queue
+/// owns the `class_invalid` signal, Best Laps never panics on data).
+fn parse_race_class(value: &str) -> RaceClass {
+    value.parse::<RaceClass>().unwrap_or(RaceClass::Unknown)
+}
 
 /// One row in the Best Laps view (internal or external).
 #[derive(Debug, Clone, PartialEq)]
@@ -16,13 +23,13 @@ pub struct BestLapRow {
     pub image_file_id: Option<String>,
     pub run_id: Option<String>,
     pub track: String,
-    pub race_class: String,
+    pub race_class: RaceClass,
     pub weather: String,
     pub temp_f: Option<f64>,
     pub temp_c: Option<f64>,
     pub driver: String,
     pub car: String,
-    pub car_class: String,
+    pub car_class: RaceClass,
     pub best_lap: String,
     pub best_lap_ms: i64,
     pub dirty: bool,
@@ -38,7 +45,7 @@ impl LapRowLike for BestLapRow {
         &self.track
     }
     fn race_class(&self) -> &str {
-        &self.race_class
+        self.race_class.as_str()
     }
     fn weather(&self) -> Option<&str> {
         Some(&self.weather)
@@ -57,7 +64,7 @@ impl LapRowLike for BestLapRow {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BestLapFilter {
     pub track: Option<String>,
-    pub race_class: Option<String>,
+    pub race_class: Option<RaceClass>,
     pub weather: Option<String>,
     pub driver: Option<String>,
     pub car: Option<String>,
@@ -82,7 +89,7 @@ impl BestLapFilter {
     ) -> Self {
         Self {
             track: none_for_all(track),
-            race_class: none_for_all(race_class),
+            race_class: none_for_all(race_class).map(|s| parse_race_class(&s)),
             weather: none_for_all(weather),
             driver: none_for_all(driver),
             car: none_for_all(car),
@@ -112,7 +119,7 @@ fn none_for_all(value: &str) -> Option<String> {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BestLapFilterOptions {
     pub tracks: Vec<String>,
-    pub race_classes: Vec<String>,
+    pub race_classes: Vec<RaceClass>,
     pub weather: Vec<String>,
     pub drivers: Vec<String>,
     pub cars: Vec<String>,
@@ -133,14 +140,15 @@ fn row_from_export(row: forza_db::repositories::ExportFlatRow) -> BestLapRow {
     let best_lap = row.best_lap.clone().unwrap_or_default();
     let best_lap_ms = row.best_lap_ms.unwrap_or(i64::MAX);
     let source_file = row.source_file.clone().unwrap_or_default();
+    let race_class = parse_race_class(&row.race_class);
     BestLapRow {
         lap_id: None,
         // Origin screenshot id — feeds the Best Laps "Image details" button.
         image_file_id: row.image_file_id.clone(),
         run_id: None,
         track: row.track.clone(),
-        race_class: row.race_class.clone(),
-        car_class: row.race_class.clone(),
+        race_class,
+        car_class: race_class,
         weather: row.weather.unwrap_or_else(|| "unknown".to_string()),
         temp_f: row.temp_f,
         temp_c: row.temp_c,
@@ -158,13 +166,14 @@ fn row_from_export(row: forza_db::repositories::ExportFlatRow) -> BestLapRow {
 }
 
 fn row_from_external(rec: ExternalLapRecord) -> BestLapRow {
+    let race_class = parse_race_class(&rec.race_class);
     BestLapRow {
         lap_id: None,
         image_file_id: None,
         run_id: None,
         track: rec.track.clone(),
-        race_class: rec.race_class.clone(),
-        car_class: rec.race_class.clone(),
+        race_class,
+        car_class: race_class,
         weather: "dry".to_string(),
         temp_f: None,
         temp_c: None,
@@ -269,6 +278,19 @@ fn unique_sorted(values: impl Iterator<Item = String>) -> Vec<String> {
     set.into_iter().collect()
 }
 
+/// Distinct classes in canonical class order (not alphabetical): a new class
+/// appears in filter dropdowns ordered by [`RaceClass::order`].
+fn unique_classes(values: impl Iterator<Item = RaceClass>) -> Vec<RaceClass> {
+    let set: BTreeSet<u32> = values.map(|c| c.order()).collect();
+    let mut out: Vec<RaceClass> = RaceClass::ALL
+        .iter()
+        .copied()
+        .filter(|c| set.contains(&c.order()))
+        .collect();
+    out.sort_by_key(|c| c.order());
+    out
+}
+
 fn dirty_options(rows: &[BestLapRow]) -> Vec<String> {
     let mut states = HashSet::new();
     for r in rows {
@@ -312,7 +334,7 @@ pub fn filter_options(
                 .into_iter()
                 .map(|r| r.track),
         ),
-        race_classes: unique_sorted(
+        race_classes: unique_classes(
             apply_filters(all_rows, filter, gamertag_lower, Some("race_class"))
                 .into_iter()
                 .map(|r| r.race_class),
@@ -379,7 +401,10 @@ pub fn summary_text(summary: &BestLapSummary, only_mine: bool) -> String {
 pub fn csv_row(row: &BestLapRow) -> std::collections::BTreeMap<String, String> {
     let mut map = std::collections::BTreeMap::new();
     map.insert("track".to_string(), row.track.clone());
-    map.insert("race_class".to_string(), row.race_class.clone());
+    map.insert(
+        "race_class".to_string(),
+        row.race_class.as_str().to_string(),
+    );
     map.insert("weather".to_string(), row.weather.clone());
     map.insert(
         "temp_f".to_string(),
@@ -387,7 +412,7 @@ pub fn csv_row(row: &BestLapRow) -> std::collections::BTreeMap<String, String> {
     );
     map.insert("driver".to_string(), row.driver.clone());
     map.insert("car".to_string(), row.car.clone());
-    map.insert("car_class".to_string(), row.car_class.clone());
+    map.insert("car_class".to_string(), row.car_class.as_str().to_string());
     map.insert("best_lap".to_string(), strip_dirty_symbol(&row.best_lap));
     map.insert("best_lap_ms".to_string(), row.best_lap_ms.to_string());
     map.insert("dirty".to_string(), row.dirty.to_string());
@@ -415,7 +440,7 @@ pub fn to_export_rows(rows: &[BestLapRow]) -> Vec<forza_output::csv::ExportRow> 
     rows.iter()
         .map(|r| forza_output::csv::ExportRow {
             track: r.track.clone(),
-            race_class: r.race_class.clone(),
+            race_class: r.race_class.as_str().to_string(),
             weather: Some(r.weather.clone()),
             temp_f: r.temp_f,
             temp_c: r.temp_c,
@@ -442,7 +467,7 @@ pub fn to_external_pdf_records(rows: &[BestLapRow]) -> Vec<forza_output::pdf::Pd
         .filter(|r| r.is_external)
         .map(|r| forza_output::pdf::PdfExternalRecord {
             track: r.track.clone(),
-            race_class: r.race_class.clone(),
+            race_class: r.race_class.as_str().to_string(),
             driver: r.driver.clone(),
             car: r.car.clone(),
             best_lap: strip_dirty_symbol(&r.best_lap),
@@ -464,18 +489,19 @@ mod tests {
         dirty: bool,
         external: bool,
     ) -> BestLapRow {
+        let race_class = parse_race_class(class);
         BestLapRow {
             lap_id: None,
             image_file_id: None,
             run_id: None,
             track: track.to_string(),
-            race_class: class.to_string(),
+            race_class,
             weather: "dry".to_string(),
             temp_f: Some(80.0),
             temp_c: Some(26.7),
             driver: driver.to_string(),
             car: car.to_string(),
-            car_class: class.to_string(),
+            car_class: race_class,
             best_lap: format!("1:{:02}.000", ms / 1000 % 60),
             best_lap_ms: ms,
             dirty,
@@ -572,5 +598,42 @@ mod tests {
             forza_domain::ordering::ordered_lap_key(&fast, &map)
                 < forza_domain::ordering::ordered_lap_key(&slow, &map)
         );
+    }
+
+    #[test]
+    fn filter_round_trips_every_known_class() {
+        // Single owner: every persisted class string must survive the
+        // Slint `from_strings` boundary as a typed filter, while "all"/""
+        // stay unset. A new class that fails here is missing from the enum.
+        for class in RaceClass::ALL {
+            let f = BestLapFilter::from_strings(
+                "all",
+                class.as_str(),
+                "all",
+                "all",
+                "all",
+                "all",
+                "all",
+                false,
+            );
+            assert_eq!(f.race_class, Some(*class), "class {}", class.as_str());
+        }
+        let unset =
+            BestLapFilter::from_strings("all", "all", "all", "all", "all", "all", "all", false);
+        assert_eq!(unset.race_class, None);
+    }
+
+    #[test]
+    fn garbage_db_class_never_panics_and_sorts_last() {
+        // Orange-path: a stored garbage string degrades to Unknown (black,
+        // order 12) instead of panicking or silently ranking as 99.
+        assert_eq!(parse_race_class("Whatever"), RaceClass::Unknown);
+        assert_eq!(parse_race_class(""), RaceClass::Unknown);
+        let rows = [
+            row("T", "Whatever", "D", "C", 80_000, false, false),
+            row("T", "A", "D", "C", 90_000, false, false),
+        ];
+        assert_eq!(rows[0].race_class, RaceClass::Unknown);
+        assert_eq!(rows[0].race_class.color(), "#000000");
     }
 }

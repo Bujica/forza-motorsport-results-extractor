@@ -225,6 +225,7 @@ pub fn derive_and_insert_laps(
         })
         .collect();
     let race_class = detect_race_class(&corrected_grid);
+    let race_class_str = race_class.as_str().to_string();
     let mut lap_rows = 0usize;
     for (index, item) in valid_entries.iter().enumerate() {
         let (entry, car, _, best_lap_str, best_lap_ms) = item;
@@ -254,7 +255,7 @@ pub fn derive_and_insert_laps(
                 driver.to_lowercase(),
                 car,
                 car.to_lowercase(),
-                &race_class,
+                &race_class_str,
                 &track_fixed,
                 track_fixed.to_lowercase(),
                 weather,

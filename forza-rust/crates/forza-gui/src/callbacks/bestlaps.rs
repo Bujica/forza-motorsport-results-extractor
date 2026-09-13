@@ -51,11 +51,11 @@ pub(super) fn apply_bestlaps_filters(ui: &MainWindow) {
     ui.set_best_laps_sort_ascending(sort.1);
     // Filter option models (cascade: exclude self)
     let options = forza_app::filter_options(&all_rows, &filter, &gamertag_lower);
-    let to_model = |values: Vec<String>| -> ModelRc<slint::SharedString> {
-        let mut with_all = vec!["all".into()];
-        with_all.extend(values.into_iter().map(|v| v.into()));
+    fn to_model(values: Vec<impl AsRef<str>>) -> ModelRc<slint::SharedString> {
+        let mut with_all: Vec<slint::SharedString> = vec!["all".into()];
+        with_all.extend(values.into_iter().map(|v| v.as_ref().into()));
         ModelRc::from(Rc::new(VecModel::from(with_all)))
-    };
+    }
     ui.set_best_laps_tracks(to_model(options.tracks));
     ui.set_best_laps_classes(to_model(options.race_classes));
     ui.set_best_laps_weathers(to_model(options.weather));
@@ -84,18 +84,18 @@ pub(super) fn apply_bestlaps_filters(ui: &MainWindow) {
         std::collections::HashMap::new();
     for r in &filtered {
         *counts
-            .entry((r.track.clone(), r.race_class.clone()))
+            .entry((r.track.clone(), r.race_class.as_str().to_string()))
             .or_insert(0) += 1;
     }
     let mut items: Vec<BestLapItem> = Vec::new();
     let mut current_key: Option<(String, String)> = None;
     for r in &filtered {
-        let key = (r.track.clone(), r.race_class.clone());
+        let key = (r.track.clone(), r.race_class.as_str().to_string());
         if current_key.as_ref() != Some(&key) {
             let cnt = *counts.get(&key).unwrap_or(&0) as i32;
             items.push(BestLapItem {
                 track: r.track.clone().into(),
-                class: r.race_class.clone().into(),
+                class: r.race_class.as_str().into(),
                 driver: "".into(),
                 car: "".into(),
                 time: "".into(),
@@ -114,7 +114,7 @@ pub(super) fn apply_bestlaps_filters(ui: &MainWindow) {
         let is_mine = !gamertag_lower.is_empty() && r.driver.to_lowercase() == gamertag_lower;
         items.push(BestLapItem {
             track: r.track.clone().into(),
-            class: r.race_class.clone().into(),
+            class: r.race_class.as_str().into(),
             driver: r.driver.clone().into(),
             car: r.car.clone().into(),
             time: r.best_lap.clone().into(),
@@ -262,7 +262,7 @@ pub(crate) fn wire_bestlaps(main: &MainWindow) {
                 .iter()
                 .map(|r| forza_output::PdfExternalRecord {
                     track: r.track.clone(),
-                    race_class: r.race_class.clone(),
+                    race_class: r.race_class.as_str().to_string(),
                     driver: r.driver.clone(),
                     car: r.car.clone(),
                     best_lap: forza_domain::lap::strip_dirty_symbol(&r.best_lap),

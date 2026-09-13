@@ -385,12 +385,10 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             refs.tracks.iter().cloned().map(Into::into).collect();
         tracks.sort_by_key(|t| t.to_lowercase());
         callbacks::set_review_track_model(&main, tracks);
-        let classes: Vec<slint::SharedString> = [
-            "E", "D", "C", "B", "A", "TCR", "GT2", "GT3", "S", "R", "P", "X", "Mixed", "Unknown",
-        ]
-        .iter()
-        .map(|c| c.to_string().into())
-        .collect();
+        let classes: Vec<slint::SharedString> = forza_domain::enums::RaceClass::ALL
+            .iter()
+            .map(|c| slint::SharedString::from(c.as_str()))
+            .collect();
         callbacks::set_review_class_model(&main, classes);
     }
 

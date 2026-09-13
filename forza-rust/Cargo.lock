@@ -1917,6 +1917,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "chrono",
+ "forza-domain",
  "image",
  "serde_json",
  "sha2",

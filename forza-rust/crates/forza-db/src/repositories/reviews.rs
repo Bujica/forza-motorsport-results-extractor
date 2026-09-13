@@ -7,6 +7,7 @@ use std::collections::HashSet;
 
 use rusqlite::{Connection, params};
 
+use forza_domain::enums::RaceClass;
 use forza_domain::reference_data::embedded_reference_data;
 use forza_domain::review_rules::driver_name_review_trigger;
 
@@ -120,9 +121,7 @@ fn known_cars(conn: &Connection) -> HashSet<String> {
     set
 }
 
-const VALID_CLASSES: &[&str] = &[
-    "E", "D", "C", "B", "A", "TCR", "GT2", "GT3", "S", "R", "P", "X",
-];
+const VALID_CLASSES: &[&str] = RaceClass::COMPETITION_VALUES;
 
 /// Detect review candidates from persisted lap rows (global, not run-scoped).
 pub fn query_review_candidates(conn: &Connection) -> Result<Vec<ReviewCandidate>, crate::DbError> {
@@ -194,7 +193,12 @@ pub fn query_review_candidates(conn: &Connection) -> Result<Vec<ReviewCandidate>
                 row,
             );
         }
-        if row.race_class == "Unknown" {
+        if row
+            .race_class
+            .parse::<RaceClass>()
+            .unwrap_or(RaceClass::Unknown)
+            == RaceClass::Unknown
+        {
             push(
                 "race_class",
                 "class_unknown",

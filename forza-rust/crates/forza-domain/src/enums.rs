@@ -249,6 +249,14 @@ value_enum! {
     }
 }
 
+impl RaceClass {
+    /// Real competition classes (no `Mixed`/`Unknown` buckets). Single owner
+    /// for review validation, GUI models, and DB vocab checks.
+    pub const COMPETITION_VALUES: &'static [&'static str] = &[
+        "E", "D", "C", "B", "A", "TCR", "GT2", "GT3", "S", "R", "P", "X",
+    ];
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
