@@ -6,9 +6,33 @@ use std::path::Path;
 use rusqlite::Connection;
 
 use crate::error::DbError;
+use forza_domain::lap::DEFAULT_DIRTY_SYMBOLS;
 
 use super::helpers::{check_sql, check_sql_groups, scalar, sha256_file};
 use super::types::{DoctorCheck, DoctorSeverity};
+
+/// `OR`-ed `LIKE` match for any dirty marker in `column`, derived from the
+/// same [`DEFAULT_DIRTY_SYMBOLS`] set the parser strips — a newly added
+/// symbol is covered here automatically. `LIKE` metacharacters (`%`, `_`,
+/// `\`) are escaped so a future symbol cannot widen the match.
+///
+/// Contains-semantics (not trailing-only) is deliberate: persisted
+/// `best_lap` values are already stripped, so *any* remnant anywhere
+/// signals a pipeline bug.
+#[must_use]
+fn dirty_marker_like(column: &str) -> String {
+    DEFAULT_DIRTY_SYMBOLS
+        .chars()
+        .map(|c| {
+            let escaped = match c {
+                '%' | '_' | '\\' => format!("\\{c}"),
+                _ => c.to_string(),
+            };
+            format!("{column} LIKE '%{escaped}%' ESCAPE '\\'")
+        })
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
 
 /// `{sha256_hex}_{size}` — matches `pipeline.image.file_hash`.
 fn image_file_hash(path: &Path) -> std::io::Result<String> {
@@ -127,22 +151,23 @@ pub(super) fn best_lap_value_checks(conn: &Connection) -> Result<Vec<DoctorCheck
         "#,
     )?;
 
-    let dirty_marker = check_sql(
-        conn,
-        "clean_lap_contains_dirty_marker",
-        DoctorSeverity::Error,
-        "Clean canonical lap times must not retain dirty-lap markers.",
-        r#"
+    let dirty_marker = {
+        let like = dirty_marker_like("best_lap");
+        check_sql(
+            conn,
+            "clean_lap_contains_dirty_marker",
+            DoctorSeverity::Error,
+            "Clean canonical lap times must not retain dirty-lap markers.",
+            &format!(
+                "
             SELECT COUNT(*)
             FROM lap_records
             WHERE dirty = 0
-              AND (
-                  best_lap LIKE '%▲%'
-                  OR best_lap LIKE '%⚠%'
-                  OR best_lap LIKE '%†%'
-              )
-        "#,
-    )?;
+              AND ({like})
+        "
+            ),
+        )?
+    };
 
     Ok(vec![non_positive, dirty_marker])
 }
@@ -227,4 +252,27 @@ pub(super) fn best_lap_status_checks(conn: &Connection) -> Result<Vec<DoctorChec
     )?;
 
     Ok(vec![divergent_check, stale_pending])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dirty_marker_like;
+    use forza_domain::lap::DEFAULT_DIRTY_SYMBOLS;
+
+    #[test]
+    fn dirty_like_covers_every_parse_symbol() {
+        // One LIKE per parse symbol — adding a symbol to the const extends
+        // the doctor automatically (previously `!`/`△` were silently absent).
+        let like = dirty_marker_like("best_lap");
+        assert_eq!(
+            like.matches("LIKE").count(),
+            DEFAULT_DIRTY_SYMBOLS.chars().count()
+        );
+        for symbol in DEFAULT_DIRTY_SYMBOLS.chars() {
+            assert!(
+                like.contains(&format!("best_lap LIKE '%{symbol}%'")),
+                "missing LIKE for {symbol}"
+            );
+        }
+    }
 }

@@ -94,7 +94,27 @@ const DIVISION_SHARE: f64 = 0.30;
 /// `ordering_keys_match_python`).
 pub const UNKNOWN_WEATHER: &str = "unknown";
 
-static DIRTY_TRAILING: LazyLock<Regex> = lazy_regex!(r"\s*[▲⚠!△†]+\s*$");
+/// Canonical dirty-mark set (Python parity). Single owner: the trailing
+/// matcher below, [`strip_dirty_symbol`], and the doctor `LIKE` pattern in
+/// `forza-db/src/doctor/images.rs` all derive from this — never retype the
+/// set. This is the *parse* vocabulary (what the model emits); the PDF
+/// *render* symbol (`cfg.pdf.dirty_lap_symbol`, default `†`) is independent
+/// and lives in `forza-config`.
+pub const DEFAULT_DIRTY_SYMBOLS: &str = "▲⚠!△†";
+
+fn dirty_trailing_pattern() -> String {
+    let class: String = DEFAULT_DIRTY_SYMBOLS
+        .chars()
+        .map(|c| regex::escape(&c.to_string()))
+        .collect();
+    format!(r"\s*[{class}]+\s*$")
+}
+
+static DIRTY_TRAILING: LazyLock<Regex> =
+    LazyLock::new(|| match Regex::new(&dirty_trailing_pattern()) {
+        Ok(re) => re,
+        Err(err) => panic!("invalid built-in regex: {err}"),
+    });
 
 static VARIATION_SELECTORS: LazyLock<Regex> = lazy_regex!("[\u{FE00}-\u{FE0F}]");
 
@@ -104,7 +124,8 @@ fn remove_variation_selectors(value: &str) -> String {
 }
 
 /// Remove trailing dirty-lap symbol(s) and preceding whitespace. Symbols in
-/// the middle or beginning are preserved.
+/// the middle or beginning are preserved. Strips [`DEFAULT_DIRTY_SYMBOLS`];
+/// the PDF render symbol is configured separately (see the const docs).
 #[must_use]
 pub fn strip_dirty_symbol(value: &str) -> String {
     let s = value.trim();
@@ -178,8 +199,8 @@ pub fn format_lap_time_ms(value: i64, dirty: bool) -> Result<String, DomainError
     Ok(format!("{minutes}:{seconds:02}.{ms:03}{suffix}"))
 }
 
-/// True when the lap-time string ends with a dirty-lap symbol, optionally
-/// preceded by whitespace.
+/// True when the lap-time string ends with a dirty-lap symbol
+/// ([`DEFAULT_DIRTY_SYMBOLS`]), optionally preceded by whitespace.
 pub fn is_dirty_lap(value: Option<&str>) -> bool {
     let s = remove_variation_selectors(value.unwrap_or("").trim());
     DIRTY_TRAILING.is_match(&s)
@@ -382,6 +403,25 @@ mod tests {
         assert!(is_dirty_lap(Some("1:32.500 †")));
         assert_eq!(strip_dirty_symbol("1:32.500 †"), "1:32.500");
         assert_eq!(parse_lap_time_ms(Some("1:32.500 †")), Some(92_500));
+    }
+
+    #[test]
+    fn every_dirty_symbol_is_detected_stripped_and_parsed() {
+        // Single-owner set: a symbol added to DEFAULT_DIRTY_SYMBOLS is
+        // covered by detection, stripping, and parsing with no other change.
+        // The config render default (†) must stay a member (see
+        // `config_dirty_default_is_parseable` in forza-app).
+        assert!(DEFAULT_DIRTY_SYMBOLS.contains('†'));
+        for symbol in DEFAULT_DIRTY_SYMBOLS.chars() {
+            let text = format!("1:32.500 {symbol}");
+            assert!(is_dirty_lap(Some(&text)), "detect {symbol}");
+            assert_eq!(strip_dirty_symbol(&text), "1:32.500", "strip {symbol}");
+            assert_eq!(
+                parse_lap_time_ms(Some(&text)),
+                Some(92_500),
+                "parse {symbol}"
+            );
+        }
     }
 
     #[test]

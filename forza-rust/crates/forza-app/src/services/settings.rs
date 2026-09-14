@@ -573,4 +573,19 @@ mod tests {
         assert_eq!(input.status, "missing");
         assert_eq!(pdf.status, "missing");
     }
+
+    #[test]
+    fn config_dirty_default_is_parseable() {
+        // The render default must stay inside the parse set: otherwise the
+        // PDF writes a mark the parser (and the doctor) cannot see.
+        // `forza-domain` cannot depend on `forza-config` (leaf direction),
+        // so the cross-check lives here where both are visible.
+        let cfg = default_cfg();
+        for symbol in cfg.pdf.dirty_lap_symbol.chars() {
+            assert!(
+                forza_domain::lap::DEFAULT_DIRTY_SYMBOLS.contains(symbol),
+                "render default {symbol:?} not in parse set"
+            );
+        }
+    }
 }
