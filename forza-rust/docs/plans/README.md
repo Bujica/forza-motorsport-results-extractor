@@ -14,6 +14,7 @@ to `../history/` as records.
 | Open plan | Covers |
 | --- | --- |
 | `2026-09-14_maintenance-hardening_plan.md` | Single sources of truth: dirty symbol, request hash, temperature conversion, vocabulary enums, SHA-256 helpers, config keys. |
+| `2026-09-14_dead-code-and-duplication_plan.md` | Dead-code removal and duplication unification: CLI surface, service wrappers, GUI variant, `int_or_none`, placeholders, lap-row projection, ordering/SQL, accepted debt. |
 
 Known deferred scope from the migration lives in
 `../history/2026-09-04_rust_migration_completion.md`.
