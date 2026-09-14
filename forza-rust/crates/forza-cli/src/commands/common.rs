@@ -28,7 +28,7 @@ pub(crate) fn short_hash(hash: &str) -> &str {
 }
 
 /// conflate corruption with "empty" — callers print ERR instead of 0).
-pub(crate) fn table_count(conn: &Connection, name: &str) -> Option<i64> {
+pub(crate) fn table_row_count(conn: &Connection, name: &str) -> Option<i64> {
     conn.query_row(&format!("SELECT COUNT(*) FROM \"{name}\""), [], |r| {
         r.get(0)
     })

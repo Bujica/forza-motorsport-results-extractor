@@ -5,7 +5,8 @@ use std::collections::HashMap;
 
 use rusqlite::{Connection, params};
 
-use forza_domain::frontier::{FrontierLap, clean_frontier_rows, simple_best_rows};
+use forza_domain::frontier::{clean_frontier_rows, simple_best_rows};
+use forza_domain::ordering::LapRow;
 
 #[derive(Debug, Clone)]
 pub struct LapExportRow {
@@ -51,40 +52,7 @@ impl LapExportRow {
     }
 }
 
-impl FrontierLap for &LapExportRow {
-    fn id(&self) -> &str {
-        &self.id
-    }
-    fn image_file_id(&self) -> &str {
-        &self.image_file_id
-    }
-    fn track(&self) -> &str {
-        &self.track
-    }
-    fn race_class(&self) -> &str {
-        &self.race_class
-    }
-    fn weather(&self) -> Option<&str> {
-        self.weather.as_deref()
-    }
-    fn temp_f(&self) -> Option<f64> {
-        self.temp_f
-    }
-    fn driver(&self) -> &str {
-        &self.driver
-    }
-    fn car(&self) -> &str {
-        &self.car
-    }
-    fn best_lap_ms(&self) -> i64 {
-        self.best_lap_ms.unwrap_or(i64::MAX)
-    }
-    fn dirty(&self) -> bool {
-        self.dirty
-    }
-}
-
-impl FrontierLap for LapExportRow {
+impl LapRow for LapExportRow {
     fn id(&self) -> &str {
         &self.id
     }
@@ -155,7 +123,7 @@ pub fn mark_best_laps(
         // Batch clear: one UPDATE per id-chunk instead of one per row.
         let clear_ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
         for chunk in crate::id_chunks(&clear_ids) {
-            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let placeholders = crate::placeholders(chunk.len());
             let sql = format!("UPDATE lap_records SET is_best_lap=0 WHERE id IN ({placeholders})");
             let mut stmt = conn.prepare(&sql)?;
             stmt.execute(rusqlite::params_from_iter(chunk.iter()))?;
@@ -176,7 +144,7 @@ pub fn mark_best_laps(
         let mut winner_image_ids: Vec<&str> = Vec::new();
         let winner_ids: Vec<&str> = winners.iter().map(|w| w.id.as_str()).collect();
         for chunk in crate::id_chunks(&winner_ids) {
-            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let placeholders = crate::placeholders(chunk.len());
             let sql = format!("UPDATE lap_records SET is_best_lap=1 WHERE id IN ({placeholders})");
             let mut stmt = conn.prepare(&sql)?;
             stmt.execute(rusqlite::params_from_iter(chunk.iter()))?;

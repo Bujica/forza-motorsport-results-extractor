@@ -22,7 +22,7 @@ timeouts, batch sizes, tps/elapsed windows, image/validation/UI bounds,
 `workers >= 1`, `inference_concurrency >= 1`).
 `forza.exe config-check` fails on warnings **or** errors (no false OK);
 `run`/`rebuild`/`export` refuse to start on invalid config. `--strict` is a
-global CLI flag; `--debug` is display-only and never changes parsing.
+global CLI flag.
 
 ## Parallelism knobs (`[llm]`)
 

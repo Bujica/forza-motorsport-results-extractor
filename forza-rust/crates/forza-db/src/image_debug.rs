@@ -10,7 +10,7 @@
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::DbError;
-use crate::gui_queries::PROCESSING_PROJECTION;
+use crate::gui_queries::{LAP_LIST_PROJECTION, LATEST_RESULT_ORDER, PROCESSING_PROJECTION};
 
 // ── Public projections ──────────────────────────────────────────────────
 
@@ -152,7 +152,7 @@ fn count_by_image(
         if chunk.is_empty() {
             continue;
         }
-        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let placeholders = crate::placeholders(chunk.len());
         let sql = format!(
             "SELECT {column}, COUNT(*) FROM {table} WHERE {column} IN ({placeholders}) GROUP BY {column}"
         );
@@ -215,9 +215,9 @@ pub fn list_image_debug_cases(
 
     // Batch subqueries (mirror Python _cases_for_images).
     let processing = {
-        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let placeholders = crate::placeholders(ids.len());
         let sql = format!(
-            "SELECT i.id, {PROCESSING_PROJECTION}\n             FROM image_files i\n             LEFT JOIN (SELECT image_file_id, status, ROW_NUMBER() OVER (PARTITION BY image_file_id ORDER BY created_at DESC, id DESC) AS rk FROM extraction_results) lr ON lr.image_file_id = i.id AND lr.rk = 1\n             LEFT JOIN (SELECT ri.image_file_id FROM run_inputs ri JOIN (SELECT image_file_id, MAX(id) AS latest FROM run_inputs WHERE image_file_id IS NOT NULL GROUP BY image_file_id) l ON ri.id = l.latest WHERE ri.decision <> 'process') li ON li.image_file_id = i.id\n             WHERE i.id IN ({placeholders})"
+            "SELECT i.id, {PROCESSING_PROJECTION}\n             FROM image_files i\n             LEFT JOIN (SELECT image_file_id, status, ROW_NUMBER() OVER (PARTITION BY image_file_id ORDER BY {LATEST_RESULT_ORDER}) AS rk FROM extraction_results) lr ON lr.image_file_id = i.id AND lr.rk = 1\n             LEFT JOIN (SELECT ri.image_file_id FROM run_inputs ri JOIN (SELECT image_file_id, MAX(id) AS latest FROM run_inputs WHERE image_file_id IS NOT NULL GROUP BY image_file_id) l ON ri.id = l.latest WHERE ri.decision <> 'process') li ON li.image_file_id = i.id\n             WHERE i.id IN ({placeholders})"
         );
         let mut stmt = conn.prepare(&sql)?;
         let params: Vec<&dyn rusqlite::types::ToSql> = ids
@@ -236,7 +236,10 @@ pub fn list_image_debug_cases(
     };
 
     let results_by_image = {
-        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let placeholders = crate::placeholders(ids.len());
+        // Same tiebreak as LATEST_RESULT_ORDER, table-qualified: the JOIN
+        // brings two `created_at` columns into scope, so the shared const
+        // cannot be interpolated verbatim here. Keep in sync on any change.
         let sql = format!(
             "SELECT image_file_id, id, run_id, status, model, attempt_count, error_type, error_message, request_image_format, backend, prompt_name, CAST(created_at AS TEXT)\n             FROM (SELECT r.image_file_id, r.id, r.run_id, r.status, r.model, r.attempt_count, r.error_type, r.error_message, r.request_image_format, run.backend, run.prompt_name, r.created_at, ROW_NUMBER() OVER (PARTITION BY r.image_file_id ORDER BY r.created_at DESC, r.id DESC) AS rk FROM extraction_results r LEFT JOIN extraction_runs run ON run.id = r.run_id WHERE r.image_file_id IN ({placeholders})) WHERE rk = 1"
         );
@@ -420,7 +423,8 @@ pub fn get_image_debug_detail(
         .or(semantic_name.clone())
         .unwrap_or_else(|| id.clone());
 
-    // All results for this image (newest first).
+    // All results for this image (newest first — same tiebreak as
+    // LATEST_RESULT_ORDER, qualified for the JOIN as above).
     let mut stmt = conn.prepare(
         "SELECT r.id, r.run_id, r.status, r.model, r.attempt_count, r.error_type, r.error_message, r.request_image_format, COALESCE(run.backend, ''), COALESCE(run.prompt_name, ''), CAST(r.created_at AS TEXT), r.accepted_attempt_id, r.input_tokens, r.output_tokens, r.total_tokens, r.duration_ms\n         FROM extraction_results r LEFT JOIN extraction_runs run ON run.id = r.run_id WHERE r.image_file_id = ?1 ORDER BY r.created_at DESC, r.id DESC",
     )?;
@@ -487,10 +491,11 @@ pub fn get_image_debug_detail(
         Vec::new()
     };
 
-    // Laps for this image (all runs).
-    let mut stmt = conn.prepare(
-        "SELECT id, extraction_result_id, run_id, lap_index, track, race_class, driver, car, best_lap, dirty, is_best_lap FROM lap_records WHERE image_file_id = ?1 ORDER BY lap_index ASC",
-    )?;
+    // Laps for this image (all runs); shared union projection with the
+    // detail view (each mapper reads its own indices).
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {LAP_LIST_PROJECTION} FROM lap_records WHERE image_file_id = ?1 ORDER BY lap_index ASC"
+    ))?;
     let laps: Vec<DebugLap> = stmt
         .query_map([image_file_id], |row| {
             Ok(DebugLap {
@@ -500,11 +505,11 @@ pub fn get_image_debug_detail(
                 lap_index: row.get(3)?,
                 track: row.get(4)?,
                 race_class: row.get(5)?,
-                driver: row.get(6)?,
-                car: row.get(7)?,
-                best_lap: row.get(8)?,
-                dirty: row.get::<_, i64>(9)? != 0,
-                is_best_lap: row.get::<_, i64>(10)? != 0,
+                driver: row.get(8)?,
+                car: row.get(9)?,
+                best_lap: row.get(10)?,
+                dirty: row.get::<_, i64>(12)? != 0,
+                is_best_lap: row.get::<_, i64>(13)? != 0,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;

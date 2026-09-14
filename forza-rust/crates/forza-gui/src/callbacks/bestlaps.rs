@@ -258,17 +258,7 @@ pub(crate) fn wire_bestlaps(main: &MainWindow) {
                 .cloned()
                 .collect::<Vec<_>>();
             let internal_export = forza_app::to_export_rows(&internal);
-            let external_records = external
-                .iter()
-                .map(|r| forza_output::PdfExternalRecord {
-                    track: r.track.clone(),
-                    race_class: r.race_class.as_str().to_string(),
-                    driver: r.driver.clone(),
-                    car: r.car.clone(),
-                    best_lap: forza_domain::lap::strip_dirty_symbol(&r.best_lap),
-                    best_lap_ms: r.best_lap_ms,
-                })
-                .collect::<Vec<_>>();
+            let external_records = forza_app::to_external_pdf_records(&external);
             let options = forza_output::PdfRenderOptions {
                 show_dirty_symbol: cfg.pdf.show_dirty_lap_symbol,
                 dirty_symbol: cfg.pdf.dirty_lap_symbol.clone(),

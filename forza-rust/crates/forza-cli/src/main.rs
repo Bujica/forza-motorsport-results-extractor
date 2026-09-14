@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use forza_db::migration::upgrade;
 
 /// Build identity shared with the GUI and stamped into every run row.
-pub const APP_VERSION: &str = forza_app::APP_VERSION;
+const APP_VERSION: &str = forza_app::APP_VERSION;
 
 mod commands;
 
@@ -20,10 +20,6 @@ struct Cli {
     /// Path to the configuration file.
     #[arg(long, default_value = "forza_config.ini")]
     config: PathBuf,
-
-    /// Enable verbose debug output (display only; never changes parsing).
-    #[arg(long)]
-    debug: bool,
 
     /// Strict config parsing: abort on the first invalid value instead of
     /// falling back to defaults with a warning.
@@ -138,9 +134,7 @@ enum MaintenanceCommand {
 /// `./data/forza.sqlite3` instead of `/other/dir/data/forza.sqlite3`.
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let debug = cli.debug;
     let strict = cli.strict;
-    let _ = debug;
     match cli.command {
         Command::Gui => forza_gui::run(&cli.config),
         Command::Rebuild => commands::rebuild::cmd_rebuild(&cli.config, strict),

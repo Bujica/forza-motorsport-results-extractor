@@ -276,10 +276,10 @@ fn reviews_and_bestlaps_round_trip_through_worker_thread() {
     assert!(saw_reviews && saw_rebuild);
 
     req_tx.send(Request::ListBestLaps).unwrap();
-    req_tx.send(Request::RunDoctor).unwrap();
+    req_tx.send(Request::RunFullDoctor).unwrap();
     drop(req_tx);
     let mut saw_best_laps = false;
-    let mut saw_doctor_ok = false;
+    let mut saw_doctor = false;
     for _ in 0..2 {
         match res_rx
             .recv_timeout(std::time::Duration::from_secs(10))
@@ -297,14 +297,17 @@ fn reviews_and_bestlaps_round_trip_through_worker_thread() {
                 assert_eq!(drivers, vec!["Player One", "Rival Driver"]);
                 saw_best_laps = true;
             }
-            Response::Doctor(result) => {
-                assert!(result.unwrap().ok);
-                saw_doctor_ok = true;
+            Response::Doctor(_) => {
+                // Round-trip arrival only: the seeded demo graph is
+                // basic-doctor-clean by design, not full-doctor-clean, so
+                // report.ok is not asserted here (see doctor_basic vs
+                // doctor_full suites for each battery).
+                saw_doctor = true;
             }
             other => panic!("unexpected phase-2 response: {other:?}"),
         }
     }
-    assert!(saw_best_laps && saw_doctor_ok);
+    assert!(saw_best_laps && saw_doctor);
     handle.join().ok();
 }
 

@@ -63,6 +63,22 @@ pub(crate) const PROCESSING_PROJECTION: &str = "
     )
 ";
 
+/// Newest-first tiebreak shared by every latest-result window
+/// (`ROW_NUMBER() OVER (PARTITION BY image_file_id ORDER BY …)`).
+/// Single owner so a tiebreak fix lands everywhere: retry selection,
+/// inventory, detail, and debug must agree on which row is "latest".
+pub(crate) const LATEST_RESULT_ORDER: &str = "created_at DESC, id DESC";
+
+/// Lap-list projection shared by the image detail and debug views.
+/// Union column list in fixed order; each mapper reads the indices it
+/// needs, so adding a column can never shift a sibling view's indices
+/// silently — the other mapper's tests notice.
+pub(crate) const LAP_LIST_PROJECTION: &str = "
+    id, extraction_result_id, run_id, lap_index, track, race_class,
+    weather, temp_f, driver, car, best_lap, best_lap_ms, dirty,
+    is_best_lap, source_file
+";
+
 fn row_to_inventory(row: &Row<'_>) -> rusqlite::Result<ImageInventoryRow> {
     let duplicate_of: Option<String> = row.get(10)?;
     let is_canonical: i64 = row.get(11)?;
@@ -124,7 +140,7 @@ pub fn image_inventory(
         if chunk.is_empty() {
             continue;
         }
-        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let placeholders = crate::placeholders(chunk.len());
         let sql = format!(
             "SELECT i.id, i.current_name, i.file_status, i.best_lap_status,
                     '' AS processing_status, i.size_bytes,
@@ -247,12 +263,12 @@ fn processing_status_filter_clause(status: &str) -> (String, Vec<Box<dyn rusqlit
             if statuses.is_empty() {
                 return ("0".to_string(), Vec::new());
             }
-            let placeholders = statuses.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let placeholders = crate::placeholders(statuses.len());
             let clause = format!(
                 "i.id IN (
                     SELECT image_file_id FROM (
                         SELECT image_file_id, status,
-                               ROW_NUMBER() OVER (PARTITION BY image_file_id ORDER BY created_at DESC, id DESC) AS rn
+                               ROW_NUMBER() OVER (PARTITION BY image_file_id ORDER BY {LATEST_RESULT_ORDER}) AS rn
                         FROM extraction_results WHERE image_file_id IS NOT NULL
                     ) WHERE rn = 1 AND status IN ({placeholders})
                 )"
@@ -278,11 +294,11 @@ fn processing_status_map(
         if chunk.is_empty() {
             continue;
         }
-        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let placeholders = crate::placeholders(chunk.len());
         let sql = format!(
             "SELECT image_file_id, status FROM (
                 SELECT image_file_id, status,
-                       ROW_NUMBER() OVER (PARTITION BY image_file_id ORDER BY created_at DESC, id DESC) AS rn
+                       ROW_NUMBER() OVER (PARTITION BY image_file_id ORDER BY {LATEST_RESULT_ORDER}) AS rn
                 FROM extraction_results
                 WHERE image_file_id IN ({placeholders})
             ) WHERE rn = 1"
@@ -316,7 +332,7 @@ fn processing_status_map(
         if chunk.is_empty() {
             continue;
         }
-        let placeholders2 = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let placeholders2 = crate::placeholders(chunk.len());
         let sql2 = format!(
             "SELECT ri.image_file_id FROM run_inputs ri
              JOIN (SELECT image_file_id, MAX(id) AS latest_input_id FROM run_inputs WHERE image_file_id IS NOT NULL GROUP BY image_file_id) l
@@ -347,7 +363,9 @@ pub fn image_inventory_options(conn: &Connection) -> Result<(Vec<String>, Vec<St
         .query_map([], |row| row.get(0))?
         .collect::<Result<Vec<String>, _>>()?;
     let runs = conn
-        .prepare("SELECT id FROM extraction_runs ORDER BY created_at DESC, id DESC")?
+        .prepare(&format!(
+            "SELECT id FROM extraction_runs ORDER BY {LATEST_RESULT_ORDER}"
+        ))?
         .query_map([], |row| row.get(0))?
         .collect::<Result<Vec<String>, _>>()?;
     Ok((tracks, runs))

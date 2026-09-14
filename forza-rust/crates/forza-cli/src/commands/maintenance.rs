@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
-use super::common::table_count;
+use super::common::table_row_count;
 use crate::APP_VERSION;
 use forza_db::doctor;
 use forza_db::migration::{SchemaStatus, schema_status};
@@ -30,19 +30,19 @@ pub(crate) fn cmd_db_status(db_path: &Path) -> anyhow::Result<()> {
 
     let conn = forza_db::open_connection(db_path)?;
 
-    let image_files = table_count(&conn, "image_files");
-    let extraction_runs = table_count(&conn, "extraction_runs");
-    let extraction_results = table_count(&conn, "extraction_results");
-    let extraction_attempts = table_count(&conn, "extraction_attempts");
-    let lap_records = table_count(&conn, "lap_records");
-    let review_cases = table_count(&conn, "review_cases");
-    let review_corrections = table_count(&conn, "review_corrections");
-    let image_flags = table_count(&conn, "image_flags");
-    let export_artifacts = table_count(&conn, "export_artifacts");
-    let reference_tracks = table_count(&conn, "reference_tracks");
-    let reference_cars = table_count(&conn, "reference_cars");
-    let external_record_imports = table_count(&conn, "external_record_imports");
-    let external_lap_records = table_count(&conn, "external_lap_records");
+    let image_files = table_row_count(&conn, "image_files");
+    let extraction_runs = table_row_count(&conn, "extraction_runs");
+    let extraction_results = table_row_count(&conn, "extraction_results");
+    let extraction_attempts = table_row_count(&conn, "extraction_attempts");
+    let lap_records = table_row_count(&conn, "lap_records");
+    let review_cases = table_row_count(&conn, "review_cases");
+    let review_corrections = table_row_count(&conn, "review_corrections");
+    let image_flags = table_row_count(&conn, "image_flags");
+    let export_artifacts = table_row_count(&conn, "export_artifacts");
+    let reference_tracks = table_row_count(&conn, "reference_tracks");
+    let reference_cars = table_row_count(&conn, "reference_cars");
+    let external_record_imports = table_row_count(&conn, "external_record_imports");
+    let external_lap_records = table_row_count(&conn, "external_lap_records");
 
     fn show(count: Option<i64>) -> String {
         count

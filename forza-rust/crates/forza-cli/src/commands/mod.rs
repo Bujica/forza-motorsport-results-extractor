@@ -1,4 +1,7 @@
 //! CLI operational commands; `main` only parses and dispatches.
+//!
+//! Kept `pub` (not `mod`): `main.rs` reaches grandchild items
+//! (`commands::run::cmd_run`), which requires each level to be visible.
 
 pub mod common;
 pub mod config;

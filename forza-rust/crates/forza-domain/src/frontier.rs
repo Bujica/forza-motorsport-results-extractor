@@ -6,20 +6,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::lap::UNKNOWN_WEATHER;
-
-/// Minimal row projection required by the frontier.
-pub trait FrontierLap {
-    fn id(&self) -> &str;
-    fn image_file_id(&self) -> &str;
-    fn track(&self) -> &str;
-    fn race_class(&self) -> &str;
-    fn weather(&self) -> Option<&str>;
-    fn temp_f(&self) -> Option<f64>;
-    fn driver(&self) -> &str;
-    fn car(&self) -> &str;
-    fn best_lap_ms(&self) -> i64;
-    fn dirty(&self) -> bool;
-}
+use crate::ordering::LapRow;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrontierWinner {
@@ -35,7 +22,7 @@ pub struct FrontierWinner {
 /// Python+Rust change, or the two frontiers diverge.
 pub fn simple_best_rows<L>(rows: &[L]) -> Vec<&L>
 where
-    L: FrontierLap,
+    L: LapRow,
 {
     let mut clean: Vec<&L> = rows.iter().filter(|row| !row.dirty()).collect();
     clean.sort_by_key(|row| row.best_lap_ms());
@@ -55,11 +42,11 @@ where
     out
 }
 
-fn condition_key(row: &impl FrontierLap) -> String {
+fn condition_key(row: &impl LapRow) -> String {
     row.weather().unwrap_or(UNKNOWN_WEATHER).to_string()
 }
 
-fn temp_key(row: &impl FrontierLap) -> Option<f64> {
+fn temp_key(row: &impl LapRow) -> Option<f64> {
     row.temp_f().map(|t| (t * 10.0).round() / 10.0)
 }
 
@@ -73,7 +60,7 @@ type OverallGroups = HashMap<(String, String, String), Vec<(i64, Option<f64>, us
 
 pub fn clean_frontier_rows<L>(rows: &[L], gamertag: &str) -> Vec<FrontierWinner>
 where
-    L: FrontierLap,
+    L: LapRow,
 {
     if rows.is_empty() {
         return Vec::new();
@@ -254,7 +241,7 @@ mod tests {
         dirty: bool,
     }
 
-    impl FrontierLap for Row {
+    impl LapRow for Row {
         fn id(&self) -> &str {
             &self.id
         }

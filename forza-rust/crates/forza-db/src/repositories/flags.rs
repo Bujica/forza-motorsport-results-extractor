@@ -243,7 +243,7 @@ pub fn sync_review_flags(conn: &Connection) -> Result<(usize, usize), DbError> {
             [],
         )?
     } else {
-        let placeholders = desired.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let placeholders = crate::placeholders(desired.len());
         let sql = format!(
             "UPDATE image_flags SET status = 'resolved', resolved_at = datetime('now')
              WHERE status = 'active' AND created_by = 'system'

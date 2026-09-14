@@ -196,7 +196,10 @@ pub fn build_pdf_plan_ext(
     }
 
     // Sort every bucket: fastest first, player before others on tie
-    // (Python key: (time_sec, not mine)).
+    // (Python key: (time_sec, not mine)). Deliberately narrower than the
+    // canonical ordered_lap_key: buckets already share track+class, and the
+    // display rule is "my rows first on time ties", not the full
+    // weather/driver/car tiebreak. Pinned by pdf_tiebreak_prefers_mine.
     for classes in data_map.values_mut() {
         for bucket in classes.values_mut() {
             bucket.sort_by(|a, b| a.time_ms.cmp(&b.time_ms).then_with(|| b.mine.cmp(&a.mine)));

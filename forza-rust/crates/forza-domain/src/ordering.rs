@@ -4,14 +4,56 @@ use std::collections::HashMap;
 
 use crate::race_class::class_order;
 
-/// Minimal row projection required for lap ordering.
-pub trait LapRowLike {
+/// Minimal lap-row projection shared by ordering and frontier calculation.
+///
+/// One trait (not one per consumer): every lap row — [`BestLapRow`](crate::),
+/// repository exports, test rows — implements this, and both
+/// [`ordered_lap_key`] and the frontier functions take `&impl LapRow`.
+/// SQLite/CSV/Slint edges keep their own `String` DTOs and convert once.
+pub trait LapRow {
+    fn id(&self) -> &str;
+    fn image_file_id(&self) -> &str;
     fn track(&self) -> &str;
     fn race_class(&self) -> &str;
     fn weather(&self) -> Option<&str>;
-    fn best_lap_ms(&self) -> i64;
+    fn temp_f(&self) -> Option<f64>;
     fn driver(&self) -> &str;
     fn car(&self) -> &str;
+    fn best_lap_ms(&self) -> i64;
+    fn dirty(&self) -> bool;
+}
+
+impl<T: LapRow + ?Sized> LapRow for &T {
+    fn id(&self) -> &str {
+        (**self).id()
+    }
+    fn image_file_id(&self) -> &str {
+        (**self).image_file_id()
+    }
+    fn track(&self) -> &str {
+        (**self).track()
+    }
+    fn race_class(&self) -> &str {
+        (**self).race_class()
+    }
+    fn weather(&self) -> Option<&str> {
+        (**self).weather()
+    }
+    fn temp_f(&self) -> Option<f64> {
+        (**self).temp_f()
+    }
+    fn driver(&self) -> &str {
+        (**self).driver()
+    }
+    fn car(&self) -> &str {
+        (**self).car()
+    }
+    fn best_lap_ms(&self) -> i64 {
+        (**self).best_lap_ms()
+    }
+    fn dirty(&self) -> bool {
+        (**self).dirty()
+    }
 }
 
 /// Case-insensitive order map based on the canonical track file.
@@ -44,8 +86,13 @@ pub fn class_order_key(race_class: &str) -> (u32, String) {
 /// Shared best-lap ordering: track, class, weather, integer milliseconds,
 /// driver, car. Integer milliseconds are the domain contract; float seconds
 /// are not suitable for equality/frontier rules.
+///
+/// Ordering rule: SQL pre-sorts cheaply (existing indexes), Rust decides.
+/// Consumers must sort with this key as the final authority — SQL `ORDER BY`
+/// spellings across repositories exist only to bound result sets, never to
+/// define display order.
 pub fn ordered_lap_key(
-    row: &impl LapRowLike,
+    row: &impl LapRow,
     order_map: &HashMap<String, usize>,
 ) -> (usize, String, u32, String, String, i64, String, String) {
     let (t_rank, t_name) = track_order_key(row.track(), order_map);
@@ -75,7 +122,13 @@ mod tests {
         car: &'static str,
     }
 
-    impl LapRowLike for Row {
+    impl LapRow for Row {
+        fn id(&self) -> &str {
+            ""
+        }
+        fn image_file_id(&self) -> &str {
+            ""
+        }
         fn track(&self) -> &str {
             self.track
         }
@@ -85,6 +138,9 @@ mod tests {
         fn weather(&self) -> Option<&str> {
             self.weather
         }
+        fn temp_f(&self) -> Option<f64> {
+            None
+        }
         fn best_lap_ms(&self) -> i64 {
             self.ms
         }
@@ -93,6 +149,9 @@ mod tests {
         }
         fn car(&self) -> &str {
             self.car
+        }
+        fn dirty(&self) -> bool {
+            false
         }
     }
 

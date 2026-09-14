@@ -29,6 +29,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Dead code removed: the `--debug` CLI flag (parsed and discarded),
+  `run_doctor`/`fast_db_report` wrappers, the `RunDoctor` worker request
+  (production uses `RunFullDoctor`), and test/example dummies.
+- Duplication unified, no behavior change (goldens byte-identical):
+  single `int_or_none` (huge `u64` saturates, padded strings parse), one
+  `placeholders(n)` SQL helper, one `LapRow` projection trait with a
+  blanket `&T` impl, one export-row constructor per direction, and shared
+  latest-row tiebreak/lap-list/current-path SQL fragments.
 - Image Detail laps table matches Best Laps: dirty signal is time-red-only,
   no red row band.
 - Image Detail and Image Debug keep the selected tab when switching images

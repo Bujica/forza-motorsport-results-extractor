@@ -137,11 +137,9 @@ fn selected_image_paths(
     image_ids: &[String],
 ) -> Result<HashSet<String>, String> {
     let mut paths = HashSet::new();
-    let mut stmt = conn
-        .prepare("SELECT current_path FROM image_files WHERE id=?1")
-        .map_err(|e| e.to_string())?;
     for image_id in image_ids {
-        if let Ok(path) = stmt.query_row(rusqlite::params![image_id], |row| row.get::<_, String>(0))
+        if let Ok(Some(path)) =
+            forza_db::repositories::image_current_path(conn, image_id).map_err(|e| e.to_string())
         {
             paths.insert(path_key(Path::new(&path)));
         }

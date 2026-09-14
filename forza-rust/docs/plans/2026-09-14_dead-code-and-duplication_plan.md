@@ -325,3 +325,14 @@ record created when Phases 1–7 land (do not create new permanent docs).
 - `mockall`/`loom`/`criterion`, `rayon`, SIMD/PGO (no evidence of need).
 - Any Python-tree change (frozen legacy).
 - GUI visual redesign beyond the dirty-signal change already shipped.
+
+## Implementation status
+
+All seven phases implemented; each landed only with `cargo fmt --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test
+--workspace` green plus byte-identical goldens. Two corrections during
+implementation: Phase 1 kept `pub mod commands` (main.rs reaches
+grandchild items, so the level must stay visible); Phase 3 switched the
+round-trip test to `RunFullDoctor` with arrival-only assertion because
+the seeded demo graph is basic-doctor-clean by design, never
+full-doctor-clean (see `doctor_basic` vs `doctor_full` suites).

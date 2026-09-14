@@ -44,6 +44,14 @@ pub fn id_chunks<T>(ids: &[T]) -> impl Iterator<Item = &[T]> {
     ids.chunks(BIND_CHUNK_SIZE)
 }
 
+/// Render `n` `?` placeholders (`"?,?,?"`) for a chunked `IN (...)` list.
+/// Single owner: eleven copies of this one-liner used to drift across
+/// `gui_queries`, `image_debug`, repositories, and `image_rename`.
+#[must_use]
+pub fn placeholders(n: usize) -> String {
+    std::iter::repeat_n("?", n).collect::<Vec<_>>().join(",")
+}
+
 /// Utilities for building reproducible test databases. Not intended for
 /// production paths.
 pub mod test_support {

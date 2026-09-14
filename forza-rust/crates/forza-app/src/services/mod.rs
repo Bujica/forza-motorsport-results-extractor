@@ -162,13 +162,6 @@ impl DoctorSummary {
     }
 }
 
-/// Run the DB doctor battery for GUI consumers.
-pub fn run_doctor(database_file: &std::path::Path) -> Result<DoctorSummary, String> {
-    forza_db::doctor::doctor_on_path(database_file)
-        .map(DoctorSummary::from_report)
-        .map_err(|e| e.to_string())
-}
-
 pub fn run_full_doctor_on_path(database_file: &std::path::Path) -> Result<DoctorSummary, String> {
     let status = forza_db::migration::schema_status(database_file)
         .map_err(|e| format!("schema status {}: {e}", database_file.display()))?;
@@ -283,29 +276,6 @@ pub fn fast_db_report_from_conn(conn: &rusqlite::Connection) -> FastDbReport {
         ok: errors == 0,
         errors,
         warnings: 0,
-    }
-}
-
-pub fn fast_db_report(database_file: &std::path::Path) -> FastDbReport {
-    match forza_db::open_connection(database_file) {
-        Ok(conn) => fast_db_report_from_conn(&conn),
-        Err(_) => {
-            let schema_state = forza_db::migration::schema_status(database_file)
-                .map(|s| match s {
-                    forza_db::migration::SchemaStatus::Empty => "empty".to_string(),
-                    forza_db::migration::SchemaStatus::Current => "current".to_string(),
-                    forza_db::migration::SchemaStatus::Incompatible { found } => {
-                        format!("incompatible({found})")
-                    }
-                })
-                .unwrap_or_else(|_| "error".to_string());
-            FastDbReport {
-                schema_state,
-                ok: false,
-                errors: 1,
-                warnings: 0,
-            }
-        }
     }
 }
 

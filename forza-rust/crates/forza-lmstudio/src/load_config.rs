@@ -44,9 +44,15 @@ fn value<'a>(config: &'a Value, key: &str) -> Option<&'a Value> {
     None
 }
 
-fn int_or_none(value: Option<&Value>) -> Option<i64> {
+/// Lenient JSON integer: `i64`, saturated `u64`, or trimmed integer string.
+/// Single owner (also used by `client.rs`): the two former copies disagreed
+/// on huge `u64` (wrap vs `None`) and padded strings (trim vs reject).
+#[must_use]
+pub(crate) fn int_or_none(value: Option<&Value>) -> Option<i64> {
     match value? {
-        Value::Number(n) => n.as_i64().or_else(|| n.as_u64().map(|u| u as i64)),
+        Value::Number(n) => n
+            .as_i64()
+            .or_else(|| n.as_u64().map(|u| i64::try_from(u).unwrap_or(i64::MAX))),
         Value::String(s) => s.trim().parse::<i64>().ok(),
         _ => None,
     }
@@ -126,4 +132,26 @@ pub fn load_config_compatible(existing: &Value, desired: &DesiredLoadConfig) -> 
         desired.offload_kv_cache_to_gpu,
         normalized.offload_kv_cache_to_gpu,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn int_or_none_union_semantics() {
+        assert_eq!(int_or_none(None), None);
+        assert_eq!(int_or_none(Some(&json!(42))), Some(42));
+        // Huge u64 saturates instead of wrapping (was: wrap in one copy,
+        // None in the other).
+        assert_eq!(
+            int_or_none(Some(&json!(18446744073709551615u64))),
+            Some(i64::MAX)
+        );
+        // Padded strings parse (was: trim in one copy, reject in the other).
+        assert_eq!(int_or_none(Some(&json!("  7  "))), Some(7));
+        assert_eq!(int_or_none(Some(&json!("nope"))), None);
+        assert_eq!(int_or_none(Some(&json!(true))), None);
+    }
 }

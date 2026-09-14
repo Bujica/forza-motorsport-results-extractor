@@ -5,7 +5,8 @@ use serde_json::Value;
 
 use crate::error::LlmError;
 use crate::load_config::{
-    DesiredLoadConfig, NormalizedLoadConfig, load_config_compatible, normalized_load_config,
+    DesiredLoadConfig, NormalizedLoadConfig, int_or_none, load_config_compatible,
+    normalized_load_config,
 };
 use crate::url::api_base;
 
@@ -89,10 +90,6 @@ fn str_field(row: &Value, keys: &[&str]) -> String {
         }
     }
     String::new()
-}
-
-fn int_or_none(value: Option<&Value>) -> Option<i64> {
-    value.and_then(|v| v.as_i64().or_else(|| v.as_str()?.parse().ok()))
 }
 
 pub struct RuntimeClient {

@@ -66,7 +66,7 @@ fn load_images(conn: &Connection, ids: &[String]) -> Result<Vec<ImageRow>, Strin
         if chunk.is_empty() {
             continue;
         }
-        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let placeholders = forza_db::placeholders(chunk.len());
         let sql = format!(
             "SELECT id, current_path, current_name, semantic_name, race_datetime
              FROM image_files WHERE id IN ({placeholders})"

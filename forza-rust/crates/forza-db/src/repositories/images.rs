@@ -3,7 +3,27 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::error::DbError;
+use crate::gui_queries::LATEST_RESULT_ORDER;
 use rusqlite::{Connection, params};
+
+/// Current path of one image row, if present. Single owner for the
+/// `SELECT current_path … WHERE id` lookup repeated across worker,
+/// discovery, and detail flows.
+///
+/// # Errors
+///
+/// Returns [`DbError`] on SQLite failures (a missing row is `Ok(None)`,
+/// never an error).
+pub fn image_current_path(conn: &Connection, image_id: &str) -> Result<Option<String>, DbError> {
+    use rusqlite::OptionalExtension as _;
+    conn.query_row(
+        "SELECT current_path FROM image_files WHERE id = ?1",
+        [image_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(DbError::from)
+}
 
 /// path -> stored hash for available files (drives existing/duplicate planning).
 pub fn known_path_hashes(conn: &Connection) -> Result<HashMap<String, String>, DbError> {
@@ -48,12 +68,12 @@ pub fn known_hashes(conn: &Connection) -> Result<HashSet<String>, DbError> {
 /// the retry-errors selection (`list_failed_images_for_retry`).
 /// Ordering: newest result first, first occurrence per image wins.
 pub fn list_failed_images_for_retry(conn: &Connection) -> Result<Vec<(String, String)>, DbError> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare(&format!(
         "WITH latest AS (
              SELECT image_file_id, status,
                     ROW_NUMBER() OVER (
                         PARTITION BY image_file_id
-                        ORDER BY created_at DESC, id DESC
+                        ORDER BY {LATEST_RESULT_ORDER}
                     ) AS result_rank
              FROM extraction_results
          )
@@ -62,7 +82,7 @@ pub fn list_failed_images_for_retry(conn: &Connection) -> Result<Vec<(String, St
          JOIN latest l ON l.image_file_id = i.id AND l.result_rank = 1
          WHERE i.file_status = 'available' AND l.status = 'error'
          ORDER BY i.current_name, i.id",
-    )?;
+    ))?;
     let rows = stmt.query_map([], |row| {
         Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
     })?;

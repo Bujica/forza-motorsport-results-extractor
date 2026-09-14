@@ -15,8 +15,8 @@ pub use best_laps::mark_best_laps;
 pub use corrections::{apply_all, apply_manual_correction};
 pub use flags::sync_review_flags;
 pub use images::{
-    ImageFileEntity, ImageFileInsert, UpsertParams, insert_image_file, known_hashes,
-    known_path_hashes, list_failed_images_for_retry, upsert_image_file,
+    ImageFileEntity, ImageFileInsert, UpsertParams, image_current_path, insert_image_file,
+    known_hashes, known_path_hashes, list_failed_images_for_retry, upsert_image_file,
 };
 pub use laps::{
     ExportFlatRow, ExtractionResultEntity, LapRecordEntity, LapRecordInsert,

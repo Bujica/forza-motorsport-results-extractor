@@ -4,6 +4,9 @@ use unicode_canonical_combining_class::{CanonicalCombiningClass, get_canonical_c
 use unicode_normalization::UnicodeNormalization;
 
 /// Collapse whitespace runs to single spaces, trim, and lowercase.
+///
+/// Test-only: production paths use [`normalize_ascii_compare`].
+#[cfg(test)]
 pub fn normalize_whitespace_lower(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let mut in_space = false;

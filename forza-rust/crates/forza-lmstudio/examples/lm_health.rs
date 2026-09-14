@@ -2,7 +2,7 @@
 //!   cargo run -p forza-lmstudio --example lm_health -- http://127.0.0.1:1234/api/v1/chat [model]
 
 use forza_lmstudio::client::RuntimeClient;
-use forza_lmstudio::load_config::{DesiredLoadConfig, NormalizedLoadConfig};
+use forza_lmstudio::load_config::DesiredLoadConfig;
 
 fn main() -> anyhow::Result<()> {
     // Manual current-thread runtime like production code: no `macros`
@@ -36,6 +36,5 @@ async fn async_main() -> anyhow::Result<()> {
     for warning in &diag.warnings {
         println!("warn   : {warning}");
     }
-    let _ = NormalizedLoadConfig::default();
     Ok(())
 }

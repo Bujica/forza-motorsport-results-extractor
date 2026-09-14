@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use forza_db::repositories::external_records::ExternalLapRecord;
 use forza_domain::enums::{RaceClass, WeatherType};
 use forza_domain::lap::strip_dirty_symbol;
-use forza_domain::ordering::{LapRowLike, ordered_lap_key, track_order_map};
+use forza_domain::ordering::{LapRow, ordered_lap_key, track_order_map};
 use forza_output::fmt_float;
 
 /// Parse a persisted class string; garbage becomes `Unknown` (review queue
@@ -40,7 +40,13 @@ pub struct BestLapRow {
     pub mine: bool,
 }
 
-impl LapRowLike for BestLapRow {
+impl LapRow for BestLapRow {
+    fn id(&self) -> &str {
+        self.lap_id.as_deref().unwrap_or("")
+    }
+    fn image_file_id(&self) -> &str {
+        self.image_file_id.as_deref().unwrap_or("")
+    }
     fn track(&self) -> &str {
         &self.track
     }
@@ -50,6 +56,9 @@ impl LapRowLike for BestLapRow {
     fn weather(&self) -> Option<&str> {
         Some(&self.weather)
     }
+    fn temp_f(&self) -> Option<f64> {
+        self.temp_f
+    }
     fn best_lap_ms(&self) -> i64 {
         self.best_lap_ms
     }
@@ -58,6 +67,9 @@ impl LapRowLike for BestLapRow {
     }
     fn car(&self) -> &str {
         &self.car
+    }
+    fn dirty(&self) -> bool {
+        self.dirty
     }
 }
 
@@ -440,6 +452,38 @@ pub fn csv_row(row: &BestLapRow) -> std::collections::BTreeMap<String, String> {
     map.insert("lap_id".to_string(), row.lap_id.clone().unwrap_or_default());
     map.insert("run_id".to_string(), row.run_id.clone().unwrap_or_default());
     map
+}
+
+/// Build `ExportRow`s straight from flat DB rows (raw mapping, no dirty
+/// stripping, direct `source_file`).
+///
+/// This is intentionally separate from [`to_export_rows`]: the CLI dump
+/// preserves stored values verbatim (Python parity, pinned by
+/// `csv_bytes_are_identical_to_python_writer`), while the presentation
+/// path strips dirty symbols and prefers display labels. Unifying the two
+/// mappings would change CLI export bytes.
+pub fn flat_to_export_rows(
+    rows: &[forza_db::repositories::ExportFlatRow],
+) -> Vec<forza_output::csv::ExportRow> {
+    rows.iter()
+        .map(|r| forza_output::csv::ExportRow {
+            track: r.track.clone(),
+            race_class: r.race_class.clone(),
+            weather: r.weather.clone(),
+            temp_f: r.temp_f,
+            temp_c: r.temp_c,
+            driver: r.driver.clone(),
+            car: r.car.clone(),
+            best_lap: r.best_lap.clone(),
+            best_lap_ms: r.best_lap_ms,
+            dirty: r.dirty,
+            source_file: r.source_file.clone(),
+            race_date: r.race_date.clone(),
+            image_format: r.image_format.clone(),
+            width_px: r.width_px,
+            height_px: r.height_px,
+        })
+        .collect()
 }
 
 /// Build ExportRow slices for CSV/PDF consumers.

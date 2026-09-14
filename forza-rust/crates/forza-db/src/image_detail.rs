@@ -7,7 +7,7 @@
 //! to Image Debug, per the GUI contract's list/detail policy.
 
 use crate::error::DbError;
-use crate::gui_queries::PROCESSING_PROJECTION;
+use crate::gui_queries::{LAP_LIST_PROJECTION, LATEST_RESULT_ORDER, PROCESSING_PROJECTION};
 use rusqlite::{Connection, Row};
 
 /// Metadata projection for one image file (plus derived processing status).
@@ -122,11 +122,11 @@ pub fn image_detail_meta(
                 CAST(i.race_date AS TEXT), i.race_datetime_source
          FROM image_files i
          LEFT JOIN (
-             SELECT image_file_id, status,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY image_file_id
-                        ORDER BY created_at DESC, id DESC
-                    ) AS result_rank
+              SELECT image_file_id, status,
+                     ROW_NUMBER() OVER (
+                         PARTITION BY image_file_id
+                         ORDER BY {LATEST_RESULT_ORDER}
+                     ) AS result_rank
              FROM extraction_results
              WHERE image_file_id IS NOT NULL
          ) lr ON lr.image_file_id = i.id AND lr.result_rank = 1
@@ -156,30 +156,29 @@ pub fn laps_for_image(
     conn: &Connection,
     image_file_id: &str,
 ) -> Result<Vec<DetailLapRow>, DbError> {
-    let sql = "
-        SELECT id, lap_index, track, race_class, weather, temp_f,
-               driver, car, best_lap, best_lap_ms, dirty, is_best_lap,
-               source_file
+    let sql = format!(
+        "SELECT {LAP_LIST_PROJECTION}
         FROM lap_records
         WHERE image_file_id = ?1
-        ORDER BY lap_index";
-    let mut stmt = conn.prepare(sql)?;
+        ORDER BY lap_index"
+    );
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt
         .query_map([image_file_id], |row| {
             Ok(DetailLapRow {
                 id: row.get(0)?,
-                lap_index: row.get(1)?,
-                track: row.get(2)?,
-                race_class: row.get(3)?,
-                weather: row.get(4)?,
-                temp_f: row.get(5)?,
-                driver: row.get(6)?,
-                car: row.get(7)?,
-                best_lap: row.get(8)?,
-                best_lap_ms: row.get(9)?,
-                dirty: row.get::<_, i64>(10)? != 0,
-                is_best_lap: row.get::<_, i64>(11)? != 0,
-                source_file: row.get(12)?,
+                lap_index: row.get(3)?,
+                track: row.get(4)?,
+                race_class: row.get(5)?,
+                weather: row.get(6)?,
+                temp_f: row.get(7)?,
+                driver: row.get(8)?,
+                car: row.get(9)?,
+                best_lap: row.get(10)?,
+                best_lap_ms: row.get(11)?,
+                dirty: row.get::<_, i64>(12)? != 0,
+                is_best_lap: row.get::<_, i64>(13)? != 0,
+                source_file: row.get(14)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;

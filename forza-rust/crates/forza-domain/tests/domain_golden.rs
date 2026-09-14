@@ -265,7 +265,13 @@ struct GoldenRow<'a> {
     row: &'a serde_json::Value,
 }
 
-impl<'a> forza_domain::ordering::LapRowLike for GoldenRow<'a> {
+impl<'a> forza_domain::ordering::LapRow for GoldenRow<'a> {
+    fn id(&self) -> &str {
+        ""
+    }
+    fn image_file_id(&self) -> &str {
+        ""
+    }
     fn track(&self) -> &str {
         self.row["track"].as_str().unwrap()
     }
@@ -275,6 +281,9 @@ impl<'a> forza_domain::ordering::LapRowLike for GoldenRow<'a> {
     fn weather(&self) -> Option<&str> {
         self.row["weather"].as_str()
     }
+    fn temp_f(&self) -> Option<f64> {
+        None
+    }
     fn best_lap_ms(&self) -> i64 {
         self.row["best_lap_ms"].as_i64().unwrap()
     }
@@ -283,6 +292,9 @@ impl<'a> forza_domain::ordering::LapRowLike for GoldenRow<'a> {
     }
     fn car(&self) -> &str {
         self.row["car"].as_str().unwrap()
+    }
+    fn dirty(&self) -> bool {
+        false
     }
 }
 

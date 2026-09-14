@@ -4,8 +4,6 @@
 //! Full PDF renderer: cover page, TOC with link destination, styled track
 //! sections, footer page numbers, archiving, and used-files bookkeeping.
 
-use std::path::Path;
-
 use forza_output::csv::ExportRow;
 use forza_output::{
     PdfExternalRecord, PdfRenderOptions, build_pdf_plan, build_pdf_plan_ext, render_pdf,
@@ -58,6 +56,39 @@ fn synthetic_rows() -> Vec<ExportRow> {
 fn pdf_text(bytes: &[u8]) -> String {
     // Content streams are latin-1 encoded; decode lossily for assertions.
     bytes.iter().map(|&b| b as char).collect()
+}
+
+#[test]
+fn pdf_tiebreak_prefers_mine() {
+    // Same track/class/ms: the player's row sorts first (display rule),
+    // regardless of weather — deliberately narrower than ordered_lap_key.
+    let rows = vec![
+        ExportRow {
+            track: "T".into(),
+            race_class: "A".into(),
+            weather: Some("rain".into()),
+            driver: "Other".into(),
+            car: "Car".into(),
+            best_lap: Some("1:30.000".into()),
+            best_lap_ms: Some(90_000),
+            ..Default::default()
+        },
+        ExportRow {
+            track: "T".into(),
+            race_class: "A".into(),
+            weather: Some("dry".into()),
+            driver: "Me".into(),
+            car: "Car".into(),
+            best_lap: Some("1:30.000".into()),
+            best_lap_ms: Some(90_000),
+            ..Default::default()
+        },
+    ];
+    let plan = build_pdf_plan(&rows, "me", &[]);
+    let table = &plan.sections[0].tables[0];
+    assert_eq!(table.rows.len(), 2);
+    assert!(table.rows[0].mine, "mine first on time tie");
+    assert!(!table.rows[1].mine);
 }
 
 #[test]
@@ -259,5 +290,4 @@ fn empty_plan_writes_nothing_like_python() {
     let used = render_pdf(&plan, &path).unwrap();
     assert!(used.is_empty());
     assert!(!path.exists());
-    let _ = Path::new("unused");
 }

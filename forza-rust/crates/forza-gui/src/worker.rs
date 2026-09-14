@@ -102,7 +102,6 @@ pub enum Request {
         value: String,
     },
     ListBestLaps,
-    RunDoctor,
     RunFullDoctor,
     RunRebuild,
     /// Dry-run planning through the worker (live runs use the dedicated
@@ -367,13 +366,8 @@ pub fn handle_request(
         Request::LoadPreview { image_file_id } => {
             let result = (|| -> Result<Option<String>, String> {
                 let conn = ctx.conn().map_err(|e| e.to_string())?;
-                conn.query_row(
-                    "SELECT current_path FROM image_files WHERE id = ?1",
-                    [image_file_id],
-                    |r| r.get(0),
-                )
-                .optional()
-                .map_err(|e| e.to_string())
+                forza_db::repositories::image_current_path(&conn, image_file_id)
+                    .map_err(|e| e.to_string())
             })();
             Response::Preview(result)
         }
@@ -395,11 +389,6 @@ pub fn handle_request(
             let conn = ctx.conn().map_err(|e| e.to_string())?;
             forza_app::list_best_laps(&conn, &gamertag.to_lowercase())
         })()),
-        Request::RunDoctor => Response::Doctor(
-            forza_db::doctor::doctor_on_path(&ctx.database_file)
-                .map(forza_app::DoctorSummary::from_report)
-                .map_err(|e| e.to_string()),
-        ),
         Request::RunFullDoctor => Response::Doctor(
             forza_app::run_full_doctor_on_path(&ctx.database_file).map_err(|e| e.to_string()),
         ),
@@ -739,14 +728,8 @@ fn rescan_images(ctx: &WorkerContext, image_ids: &[String]) -> Result<(usize, us
     let mut available = 0usize;
     let mut missing = 0usize;
     for id in image_ids {
-        let path: Option<String> = conn
-            .query_row(
-                "SELECT current_path FROM image_files WHERE id = ?1",
-                [id],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(|e| e.to_string())?;
+        let path: Option<String> =
+            forza_db::repositories::image_current_path(&conn, id).map_err(|e| e.to_string())?;
         let Some(path) = path else { continue };
         let exists = std::path::Path::new(&path).is_file();
         let changed = conn

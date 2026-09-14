@@ -20,26 +20,7 @@ pub(crate) fn cmd_export(
         println!("export: no best-lap rows to export");
         return Ok(());
     }
-    let export_rows: Vec<forza_output::csv::ExportRow> = rows
-        .iter()
-        .map(|r| forza_output::csv::ExportRow {
-            track: r.track.clone(),
-            race_class: r.race_class.clone(),
-            weather: r.weather.clone(),
-            temp_f: r.temp_f,
-            temp_c: r.temp_c,
-            driver: r.driver.clone(),
-            car: r.car.clone(),
-            best_lap: r.best_lap.clone(),
-            best_lap_ms: r.best_lap_ms,
-            dirty: r.dirty,
-            source_file: r.source_file.clone(),
-            race_date: r.race_date.clone(),
-            image_format: r.image_format.clone(),
-            width_px: r.width_px,
-            height_px: r.height_px,
-        })
-        .collect();
+    let export_rows = forza_app::flat_to_export_rows(&rows);
     if pdf {
         let dest = out.unwrap_or_else(|| cfg.pdf_file.clone());
         let plan = forza_output::build_pdf_plan_ext(
