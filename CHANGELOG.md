@@ -17,6 +17,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   `migrate()` path (currently v2 → v3: drop the removed `performance_*`
   columns) plus timestamped `backup_database()`; unknown versions still
   refuse with `db-reset` guidance.
+- `ExtractionStatus` now models the full result lifecycle
+  (`pending`/`running`/`ok`/`error`/`cancelled`, matching
+  `ck_extraction_results_status_vocab`, tripwired by test), and
+  `insert_input_and_result` takes the enum instead of free text; the live
+  `protocol::AttemptStatus` gains the missing `Cancelled` variant.
 
 - GUI creates the database from zero when none is found (`ensure_database`:
   missing/empty schema is built via `upgrade()`, incompatible schemas refuse
@@ -46,8 +51,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Duplication unified, no behavior change (goldens byte-identical):
   single `int_or_none` (huge `u64` saturates, padded strings parse), one
   `placeholders(n)` SQL helper, one `LapRow` projection trait with a
-  blanket `&T` impl, one export-row constructor per direction, and shared
-  latest-row tiebreak/lap-list/current-path SQL fragments.
+  blanket `&T` impl, one export-row constructor per direction, shared
+  latest-row tiebreak/lap-list/current-path SQL fragments, one
+  `{sha256}_{size}` file-hash formatter (writer and doctor verifier),
+  one chat-retry backoff helper (the 5000ms ceiling documented as
+  unreachable: the shift cap bounds the series at 3200ms), and one
+  Windows filename sanitizer with explicit per-caller options (inventory
+  parts vs. on-disk renames keep their caps/behavior).
+- Dead code removed: uncalled `PerformanceTracker::take_reload_before_next`
+  path (see below), the never-wired `best_laps::csv_row` Python-port
+  leftover (real export lives in `forza-output::csv`).
 - Image Detail laps table matches Best Laps: dirty signal is time-red-only,
   no red row band.
 - Image Detail and Image Debug keep the selected tab when switching images

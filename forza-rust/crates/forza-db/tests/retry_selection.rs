@@ -7,6 +7,7 @@
 use forza_db::ids::{ImageFileId, RunId};
 use forza_db::repositories::images::list_failed_images_for_retry;
 use forza_db::repositories::runs::{RunInsert, insert_input_and_result, insert_run};
+use forza_domain::enums::ExtractionStatus;
 
 fn setup() -> (tempfile::TempDir, rusqlite::Connection) {
     let dir = tempfile::tempdir().unwrap();
@@ -54,7 +55,7 @@ fn only_latest_error_results_are_selected() {
         &RunId::new(&run_id),
         &ImageFileId::new("img-ok"),
         "process",
-        "ok",
+        ExtractionStatus::Ok,
         1,
     )
     .unwrap();
@@ -64,7 +65,7 @@ fn only_latest_error_results_are_selected() {
         &RunId::new(&run_id),
         &ImageFileId::new("img-err"),
         "process",
-        "error",
+        ExtractionStatus::Error,
         2,
     )
     .unwrap();
@@ -74,7 +75,7 @@ fn only_latest_error_results_are_selected() {
         &RunId::new(&run_id),
         &ImageFileId::new("img-missing"),
         "process",
-        "error",
+        ExtractionStatus::Error,
         3,
     )
     .unwrap();
@@ -98,7 +99,7 @@ fn older_ok_result_does_not_shadow_newer_error() {
         &RunId::new(&run_a),
         &ImageFileId::new("img-x"),
         "process",
-        "ok",
+        ExtractionStatus::Ok,
         1,
     )
     .unwrap();
@@ -108,7 +109,7 @@ fn older_ok_result_does_not_shadow_newer_error() {
         &RunId::new(&run_b),
         &ImageFileId::new("img-x"),
         "process",
-        "error",
+        ExtractionStatus::Error,
         1,
     )
     .unwrap();
@@ -129,7 +130,7 @@ fn newer_ok_result_shadows_older_error() {
         &RunId::new(&run_a),
         &ImageFileId::new("img-y"),
         "process",
-        "error",
+        ExtractionStatus::Error,
         1,
     )
     .unwrap();
@@ -139,7 +140,7 @@ fn newer_ok_result_shadows_older_error() {
         &RunId::new(&run_b),
         &ImageFileId::new("img-y"),
         "process",
-        "ok",
+        ExtractionStatus::Ok,
         1,
     )
     .unwrap();

@@ -14,6 +14,7 @@ use forza_db::repositories::{
     upsert_review_cases,
 };
 use forza_db::upgrade;
+use forza_domain::enums::ExtractionStatus;
 
 fn raw_response(track: &str, driver: &str, car: &str, class: &str, bl: &str) -> String {
     format!(
@@ -73,7 +74,7 @@ fn replay(conn: &mut Connection, image: &str, seq: i64, body: &str) {
         &forza_db::ids::RunId::new(run_id),
         &forza_db::ids::ImageFileId::new(image),
         "process",
-        "running",
+        ExtractionStatus::Running,
         seq,
     )
     .unwrap();

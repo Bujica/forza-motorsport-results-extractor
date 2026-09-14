@@ -8,7 +8,6 @@ use forza_db::repositories::external_records::ExternalLapRecord;
 use forza_domain::enums::{RaceClass, WeatherType};
 use forza_domain::lap::strip_dirty_symbol;
 use forza_domain::ordering::{LapRow, ordered_lap_key, track_order_map};
-use forza_output::fmt_float;
 
 /// Parse a persisted class string; garbage becomes `Unknown` (review queue
 /// owns the `class_invalid` signal, Best Laps never panics on data).
@@ -414,44 +413,6 @@ pub fn summary_text(summary: &BestLapSummary, only_mine: bool) -> String {
         "Tracks: {} · Clean: {} · Dirty: {} · Screenshots: {} · External: {}{}",
         summary.tracks, summary.clean, summary.dirty, summary.screenshots, summary.external, player
     )
-}
-
-/// CSV row mapping mirrors `best_laps_controller.py:_csv_row`.
-pub fn csv_row(row: &BestLapRow) -> std::collections::BTreeMap<String, String> {
-    let mut map = std::collections::BTreeMap::new();
-    map.insert("track".to_string(), row.track.clone());
-    map.insert(
-        "race_class".to_string(),
-        row.race_class.as_str().to_string(),
-    );
-    map.insert("weather".to_string(), row.weather.clone());
-    map.insert(
-        "temp_f".to_string(),
-        row.temp_f.map(fmt_float).unwrap_or_default(),
-    );
-    map.insert("driver".to_string(), row.driver.clone());
-    map.insert("car".to_string(), row.car.clone());
-    map.insert("car_class".to_string(), row.car_class.as_str().to_string());
-    map.insert("best_lap".to_string(), strip_dirty_symbol(&row.best_lap));
-    map.insert("best_lap_ms".to_string(), row.best_lap_ms.to_string());
-    map.insert("dirty".to_string(), row.dirty.to_string());
-    map.insert(
-        "source".to_string(),
-        if row.source_label.is_empty() {
-            row.source_file.clone()
-        } else {
-            row.source_label.clone()
-        },
-    );
-    map.insert("source_type".to_string(), row.source_type.clone());
-    map.insert("source_file".to_string(), row.source_file.clone());
-    map.insert(
-        "image_file_id".to_string(),
-        row.image_file_id.clone().unwrap_or_default(),
-    );
-    map.insert("lap_id".to_string(), row.lap_id.clone().unwrap_or_default());
-    map.insert("run_id".to_string(), row.run_id.clone().unwrap_or_default());
-    map
 }
 
 /// Build `ExportRow`s straight from flat DB rows (raw mapping, no dirty

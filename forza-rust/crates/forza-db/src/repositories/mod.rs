@@ -85,7 +85,7 @@ pub fn seed_demo_database(conn: &mut Connection) -> Result<(), DbError> {
         &RunId::new(&run_id),
         &ImageFileId::new(img_a),
         "process",
-        "ok",
+        forza_domain::enums::ExtractionStatus::Ok,
         1,
     )?;
     let _result_b = runs::insert_input_and_result(
@@ -93,7 +93,7 @@ pub fn seed_demo_database(conn: &mut Connection) -> Result<(), DbError> {
         &RunId::new(&run_id),
         &ImageFileId::new(img_b),
         "process",
-        "ok",
+        forza_domain::enums::ExtractionStatus::Ok,
         2,
     )?;
     let attempt_a = runs::insert_accepted_attempt(

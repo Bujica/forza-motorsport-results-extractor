@@ -28,6 +28,15 @@ pub fn hash_file_hex(path: &Path) -> std::io::Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+/// Render the canonical `{sha256_hex}_{size_bytes}` file identity.
+/// Single owner for the format: [`file_hash`] and the doctor's corruption
+/// check both go through here, so a format change cannot silently desync the
+/// writer from the verifier.
+#[must_use]
+pub fn format_file_hash(sha256_hex: &str, size_bytes: u64) -> String {
+    format!("{sha256_hex}_{size_bytes}")
+}
+
 /// Hash a file with SHA-256 and return `(hex, size_bytes, format)`.
 ///
 /// # Errors
@@ -45,5 +54,5 @@ pub fn file_hash(path: &Path) -> Result<String, PipelineError> {
             detail: e.to_string(),
         })?
         .len();
-    Ok(format!("{hex}_{size}"))
+    Ok(format_file_hash(&hex, size))
 }

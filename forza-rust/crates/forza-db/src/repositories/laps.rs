@@ -35,6 +35,9 @@ pub fn list_clean_flat(
     conn: &Connection,
     gamertag_lower: &str,
 ) -> Result<Vec<ExportFlatRow>, DbError> {
+    // Pre-sort only: consumers re-sort with
+    // `forza_domain::ordering::ordered_lap_key` as the final authority, so
+    // this spelling must never be relied on for pagination or output order.
     let mut stmt = conn.prepare(
         "SELECT l.track, l.race_class, COALESCE(l.weather,'unknown'),
                 l.temp_f, l.temp_c, l.driver, l.car, l.best_lap, l.best_lap_ms, l.dirty,
@@ -422,6 +425,8 @@ pub fn append_rain_time_review_candidates(
     conn: &Connection,
     candidates: &mut Vec<ReviewCase>,
 ) -> Result<(), DbError> {
+    // Order is irrelevant here (bucket minima decide); kept as a cheap
+    // pre-sort only, never as output order.
     let mut stmt = conn.prepare(
         "SELECT id, track, race_class, weather, best_lap_ms, image_file_id, lap_index,
                 driver, best_lap, car

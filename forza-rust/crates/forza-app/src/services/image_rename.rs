@@ -17,12 +17,6 @@ use rusqlite::{Connection, params};
 
 use super::path_key;
 
-const WIN_FORBIDDEN: &[char] = &['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
-const WIN_RESERVED: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-];
-
 /// One planned rename: pure decision, no side effects.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenamePlan {
@@ -112,7 +106,9 @@ fn preferred_name(image: &ImageRow) -> String {
 }
 
 /// Windows-safe filename, keeping the source suffix (Python parity incl. the
-/// full COM/LPT reserved list).
+/// full COM/LPT reserved list). Sanitizing goes through the pipeline-owned
+/// [`forza_pipeline::naming::sanitize_filename_stem`] — the forbidden list,
+/// whitespace collapsing, and reserved-name guard live there, not here.
 fn safe_filename(name: &str, fallback_suffix: &str) -> String {
     let suffix = Path::new(name)
         .extension()
@@ -123,24 +119,14 @@ fn safe_filename(name: &str, fallback_suffix: &str) -> String {
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(name);
-    let mut clean: String = stem
-        .chars()
-        .filter(|c| !WIN_FORBIDDEN.contains(c) && !c.is_control())
-        .collect();
-    clean = clean
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .trim_end_matches('.')
-        .to_string();
+    let mut clean = forza_pipeline::naming::sanitize_filename_stem(
+        stem,
+        &forza_pipeline::naming::FILE_NAME_OPTS,
+    );
     if clean.is_empty() {
         clean = "image".into();
     }
-    if WIN_RESERVED.contains(&clean.to_uppercase().as_str()) {
-        clean.push('_');
-    }
-    format!("{}{}", clean.chars().take(200).collect::<String>(), suffix)
+    format!("{clean}{suffix}")
 }
 
 /// Case-insensitive path identity (Windows filesystem parity).

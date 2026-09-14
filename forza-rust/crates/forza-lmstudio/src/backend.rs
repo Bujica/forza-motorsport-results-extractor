@@ -383,8 +383,7 @@ impl LMStudioBackend {
                     detail = Some(message);
                     // Backoff like the 5xx path: without this a down DNS /
                     // refused connection becomes a tight request loop.
-                    let backoff_ms = (200u64 << (attempt_no - 1).min(4)).min(5_000);
-                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                    sleep_chat_backoff(attempt_no).await;
                     continue;
                 }
                 break;
@@ -437,8 +436,7 @@ impl LMStudioBackend {
                 if retryable && attempt_no < self.cfg.max_retries {
                     kind = RequestKind::TransportRetry;
                     // Backoff so 500s aren't hammered in a tight loop.
-                    let backoff_ms = (200u64 << (attempt_no - 1).min(4)).min(5_000);
-                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                    sleep_chat_backoff(attempt_no).await;
                     continue;
                 }
                 break;
@@ -812,9 +810,44 @@ fn output_text(data: &Value) -> String {
     serde_json::to_string(data).unwrap_or_default()
 }
 
+/// Chat-completions retry backoff: 200ms doubling per attempt.
+/// Single owner for both retry branches above (transport-error and 429/5xx):
+/// retuning one must retune the other.
+/// Kept distinct from [`runtime_backoff`] on purpose: model-management
+/// endpoints (`/models/load`) use a slower base (500ms) and lower cap (4s).
+/// Note the shift cap bounds the series at 3200ms, below the 5000ms ceiling
+/// (kept as a guard, not a reachable value).
+fn chat_backoff_ms(attempt_no: u32) -> u64 {
+    (200u64 << attempt_no.saturating_sub(1).min(4)).min(5_000)
+}
+
+async fn sleep_chat_backoff(attempt_no: u32) {
+    tokio::time::sleep(std::time::Duration::from_millis(chat_backoff_ms(
+        attempt_no,
+    )))
+    .await;
+}
+
 /// Exponential backoff for runtime endpoints: min(0.5 * 2^(n-1), 4s).
 async fn runtime_backoff(attempt: usize) {
     let shift = i32::try_from(attempt).unwrap_or(i32::MAX) - 1;
     let total = (0.5 * 2f64.powi(shift)).min(4.0);
     tokio::time::sleep(Duration::from_secs_f64(total)).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::chat_backoff_ms;
+
+    #[test]
+    fn chat_backoff_doubles_to_cap() {
+        assert_eq!(chat_backoff_ms(1), 200);
+        assert_eq!(chat_backoff_ms(2), 400);
+        assert_eq!(chat_backoff_ms(3), 800);
+        assert_eq!(chat_backoff_ms(4), 1_600);
+        assert_eq!(chat_backoff_ms(5), 3_200);
+        assert_eq!(chat_backoff_ms(6), 3_200);
+        assert_eq!(chat_backoff_ms(100), 3_200);
+        assert_eq!(chat_backoff_ms(0), 200);
+    }
 }

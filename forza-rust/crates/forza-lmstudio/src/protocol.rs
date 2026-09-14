@@ -10,6 +10,7 @@ pub enum AttemptStatus {
     #[default]
     Ok,
     Error,
+    Cancelled,
 }
 
 /// Why this attempt exists: initial request or one of the retry reasons.

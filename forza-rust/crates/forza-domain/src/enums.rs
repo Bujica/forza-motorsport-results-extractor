@@ -69,8 +69,13 @@ value_enum! {
 }
 
 value_enum! {
-    /// Status of a single image extraction result.
+    /// Status of a single image extraction result: `pending`/`running` are
+    /// transient (row created, work not finished), `ok`/`error`/`cancelled`
+    /// are terminal. Mirrors `ck_extraction_results_status_vocab` — keep both
+    /// in sync (see `extraction_status_matches_db_vocab`).
     pub enum ExtractionStatus {
+        Pending = "pending",
+        Running = "running",
         Ok = "ok",
         Error = "error",
         Cancelled = "cancelled",
@@ -260,7 +265,6 @@ impl RaceClass {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn persisted_values_match_python_contract() {
         assert_eq!(WeatherType::VALUES, ["dry", "rain", "unknown"]);
@@ -323,5 +327,20 @@ mod tests {
             assert_eq!(class.as_str().parse::<WeatherType>(), Ok(*class));
         }
         assert_eq!(WeatherType::VALUES, ["dry", "rain", "unknown"]);
+    }
+
+    #[test]
+    fn extraction_status_matches_db_vocab() {
+        // Pinned copy of `ck_extraction_results_status_vocab` in
+        // `forza-db/src/schema_ddl.rs` (this crate cannot depend on
+        // `forza-db`, so parse-level sharing is impossible — this test is
+        // the drift tripwire).
+        assert_eq!(
+            ExtractionStatus::VALUES,
+            ["pending", "running", "ok", "error", "cancelled"]
+        );
+        for status in ExtractionStatus::ALL {
+            assert_eq!(ExtractionStatus::from_value(status.as_str()), Some(*status));
+        }
     }
 }

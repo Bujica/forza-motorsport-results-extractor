@@ -26,6 +26,9 @@ pub struct LapExportRow {
 
 impl LapExportRow {
     fn load_all(conn: &Connection) -> Result<Vec<LapExportRow>, crate::DbError> {
+        // Pre-sort only: display order is decided by
+        // `forza_domain::ordering::ordered_lap_key` downstream, so this
+        // spelling must never be relied on for pagination or output order.
         let mut stmt = conn.prepare(
             "SELECT id, image_file_id, run_id, track, race_class, weather, temp_f,
                     driver, car, best_lap_ms, dirty, lap_index

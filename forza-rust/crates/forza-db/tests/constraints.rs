@@ -8,6 +8,7 @@ use forza_db::ids::{ImageFileId, RunId};
 use forza_db::repositories::{RunInsert, RunMetadata, insert_run, laps, runs, update_run_metadata};
 use forza_db::repositories::{insert_image_file, insert_review_case};
 use forza_db::test_support::seed_demo_database;
+use forza_domain::enums::ExtractionStatus;
 use rusqlite::{Connection, params};
 
 fn fresh_db() -> (tempfile::TempDir, std::path::PathBuf, Connection) {
@@ -34,7 +35,7 @@ fn one_accepted_attempt_per_result_is_enforced() {
         &RunId::new(&run_id),
         &ImageFileId::new("img-x"),
         "process",
-        "ok",
+        ExtractionStatus::Ok,
         1,
     )
     .unwrap();
@@ -329,7 +330,7 @@ fn vocabulary_checks_reject_invalid_values() {
         &RunId::new(&run_id),
         &ImageFileId::new("img-v"),
         "process",
-        "ok",
+        ExtractionStatus::Ok,
         1,
     )
     .unwrap();
@@ -406,7 +407,7 @@ fn lap_row_uniqueness_per_result_and_index() {
         &RunId::new(&run_id),
         &ImageFileId::new("img-l"),
         "process",
-        "ok",
+        ExtractionStatus::Ok,
         1,
     )
     .unwrap();
@@ -456,7 +457,7 @@ fn lap_insert_derives_temp_c_with_plausibility_window() {
             &RunId::new(&run_id),
             &ImageFileId::new(image),
             "process",
-            "ok",
+            ExtractionStatus::Ok,
             lap_index,
         )
         .unwrap();

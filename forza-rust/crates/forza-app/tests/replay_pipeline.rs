@@ -7,6 +7,7 @@
 use forza_app::services::extraction_replay::{
     ReplayOutcome, derive_and_insert_laps, replay_recorded_response,
 };
+use forza_domain::enums::ExtractionStatus;
 
 /// Load the first recorded-response fixture with the given prefix, or `None`
 /// when the personal fixture directory is absent.
@@ -90,7 +91,7 @@ fn accepted_fixture_flows_through_parse_validate_and_persistence() {
         &forza_db::ids::RunId::new(&run_id),
         &forza_db::ids::ImageFileId::new("img-replay"),
         "process",
-        "running",
+        ExtractionStatus::Running,
         1,
     )
     .unwrap();
@@ -168,7 +169,7 @@ fn lap_projection_matches_python_filtering_and_session_class() {
         &forza_db::ids::RunId::new(&run_id),
         &forza_db::ids::ImageFileId::new("img-projection"),
         "process",
-        "running",
+        ExtractionStatus::Running,
         1,
     )
     .unwrap();
@@ -259,7 +260,7 @@ fn malformed_fixture_also_replays_cleanly_under_current_rules() {
         &forza_db::ids::RunId::new(&run_id),
         &forza_db::ids::ImageFileId::new("img-rm"),
         "process",
-        "running",
+        ExtractionStatus::Running,
         1,
     )
     .unwrap();
@@ -310,7 +311,7 @@ fn temp_db_with_result(
         &forza_db::ids::RunId::new(&run_id),
         &forza_db::ids::ImageFileId::new("img-temp"),
         "process",
-        "running",
+        ExtractionStatus::Running,
         1,
     )
     .unwrap();

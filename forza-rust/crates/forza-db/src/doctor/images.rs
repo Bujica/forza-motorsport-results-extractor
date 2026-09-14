@@ -34,11 +34,12 @@ fn dirty_marker_like(column: &str) -> String {
         .join(" OR ")
 }
 
-/// `{sha256_hex}_{size}` — matches `pipeline.image.file_hash`.
+/// `{sha256_hex}_{size}` via the pipeline-owned formatter — never retyped
+/// here, so writer and verifier cannot desync.
 fn image_file_hash(path: &Path) -> std::io::Result<String> {
     let hex = sha256_file(path)?;
     let size = std::fs::metadata(path)?.len();
-    Ok(format!("{hex}_{size}"))
+    Ok(forza_pipeline::format_file_hash(&hex, size))
 }
 
 fn size_from_file_hash(value: &str) -> Option<i64> {
@@ -258,6 +259,21 @@ pub(super) fn best_lap_status_checks(conn: &Connection) -> Result<Vec<DoctorChec
 mod tests {
     use super::dirty_marker_like;
     use forza_domain::lap::DEFAULT_DIRTY_SYMBOLS;
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn image_file_hash_matches_pipeline_format() {
+        // Writer/verifier parity: the doctor must reproduce exactly what
+        // `pipeline::file_hash` persists, or every image false-flags.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shot.png");
+        std::fs::write(&path, b"pixels").unwrap();
+        assert_eq!(
+            super::image_file_hash(&path).unwrap(),
+            forza_pipeline::file_hash(&path).unwrap()
+        );
+        assert_eq!(forza_pipeline::format_file_hash("ab", 3), "ab_3");
+    }
 
     #[test]
     fn dirty_like_covers_every_parse_symbol() {

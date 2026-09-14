@@ -7,6 +7,7 @@
 
 use crate::error::DbError;
 use crate::ids::{AttemptId, ExtractionResultId, ImageFileId, RunId, RunInputId};
+use forza_domain::enums::ExtractionStatus;
 use rusqlite::{Connection, params};
 
 pub struct RunInsert {
@@ -207,6 +208,10 @@ pub fn update_run_metadata(
 /// Insert a run_input plus its matching extraction_result, returning the
 /// generated result id.
 ///
+/// `result_status` is the typed [`ExtractionStatus`] (not free text): an
+/// out-of-vocabulary status must fail to compile here, not at the SQLite
+/// CHECK at runtime.
+///
 /// Both rows are written in one `BEGIN IMMEDIATE` transaction: a crash between
 /// them used to leave an input `process` row without any result, which the
 /// doctor reports as `run_inputs_process_without_one_result`.
@@ -215,7 +220,7 @@ pub fn insert_input_and_result(
     run_id: &RunId,
     image_file_id: &ImageFileId,
     decision: &str,
-    result_status: &str,
+    result_status: ExtractionStatus,
     input_order: i64,
 ) -> Result<ExtractionResultId, DbError> {
     if !conn.is_autocommit() {
@@ -240,7 +245,7 @@ pub fn insert_input_and_result(
             "INSERT INTO extraction_results
                 (id, run_id, run_input_id, image_file_id, status, attempt_count, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, 0, datetime('now'), datetime('now'))",
-            params![result_id, run_id, input_id, image_file_id, result_status],
+            params![result_id, run_id, input_id, image_file_id, result_status.as_str()],
         )?;
         Ok(ExtractionResultId::new(result_id))
     })();
@@ -316,8 +321,14 @@ pub fn insert_processed_input_full(
         conn.execute(
             "INSERT INTO extraction_results
                 (id, run_id, run_input_id, image_file_id, status, attempt_count, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, 'running', 0, datetime('now'), datetime('now'))",
-            params![result_id, run_id, input_id, image_file_id],
+              VALUES (?1, ?2, ?3, ?4, ?5, 0, datetime('now'), datetime('now'))",
+            params![
+                result_id,
+                run_id,
+                input_id,
+                image_file_id,
+                ExtractionStatus::Running.as_str()
+            ],
         )?;
         Ok((
             ExtractionResultId::new(result_id),

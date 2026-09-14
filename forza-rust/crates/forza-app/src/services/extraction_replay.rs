@@ -30,6 +30,7 @@ pub fn to_attempt_insert<'a>(
         status: match record.status {
             forza_lmstudio::protocol::AttemptStatus::Ok => "ok",
             forza_lmstudio::protocol::AttemptStatus::Error => "error",
+            forza_lmstudio::protocol::AttemptStatus::Cancelled => "cancelled",
         },
         accepted: record.accepted,
         rejected_reason: record.rejected_reason.as_deref(),
