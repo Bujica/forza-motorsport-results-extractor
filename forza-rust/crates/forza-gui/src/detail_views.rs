@@ -194,7 +194,9 @@ pub(crate) fn apply_image_detail(ui: &slint::Weak<MainWindow>, data: forza_app::
         w.set_detail_path(meta.current_path.clone().unwrap_or_default().into());
         w.set_detail_preview(preview.unwrap_or_default());
         w.set_detail_has_preview(has_preview);
-        w.set_detail_tab("metadata".into());
+        // NOTE: do not reset detail-tab here — the Slint default ("metadata")
+        // covers first load; resetting would yank the operator back to the
+        // first tab on every image switch.
         w.set_detail_loaded(true);
         set_status(&w, "image detail loaded");
     }
@@ -555,7 +557,9 @@ pub(crate) fn apply_debug_detail(
             .and_then(|wanted| detail.results.iter().position(|r| r.id == wanted))
             .unwrap_or(0);
         w.set_debug_result_index(selected_pos as i32);
-        w.set_debug_tab("overview".into());
+        // NOTE: do not reset debug-tab here — the Slint default ("overview")
+        // covers first load; resetting would yank the operator back to the
+        // first tab on every image switch.
         w.set_debug_overview_text(overview.into());
         w.set_debug_metadata_text(metadata.into());
         w.set_debug_results_text(results_text.into());

@@ -29,6 +29,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Image Detail laps table matches Best Laps: dirty signal is time-red-only,
+  no red row band.
+- Image Detail and Image Debug keep the selected tab when switching images
+  (metadata/overview defaults apply to first load only).
 - Best Laps table: dirty rows no longer paint the whole row red; only the
   lap time stays red (row keeps the normal zebra/mine/external band).
 - Maintenance hardening, no behavior change (goldens byte-identical):

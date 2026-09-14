@@ -13,7 +13,7 @@ export component ImageDetailPage inherits Rectangle {
     in property <string> detail-path;
     in property <string> detail-image-id;
     in property <string> detail-meta;
-    in property <string> detail-tab;
+    in property <string> detail-tab: "metadata";
     in property <bool> detail-loaded;
     in property <image> detail-preview;
     in property <bool> detail-has-preview;
@@ -139,7 +139,7 @@ export component ImageDetailPage inherits Rectangle {
                             for lap[index] in root.detail-laps: Rectangle {
                                 height: 28px;
                                 width: dl.width;
-                                background: lap.best ? Theme.row-mine : (lap.dirty ? Theme.row-dirty : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent));
+                                background: lap.best ? Theme.row-mine : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent);
                                 HorizontalLayout {
                                     TableCell { text: lap.index; width-pref: 36px; }
                                     TableCell { text: lap.track; width-pref: 180px; }
