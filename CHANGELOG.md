@@ -29,6 +29,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Best Laps table: dirty rows no longer paint the whole row red; only the
+  lap time stays red (row keeps the normal zebra/mine/external band).
 - Maintenance hardening, no behavior change (goldens byte-identical):
   single dirty-symbol set shared by parser and doctor (the doctor now
   also covers `!`/`△`); dead backend request-hash implementation removed

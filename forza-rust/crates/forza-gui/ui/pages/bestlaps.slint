@@ -154,7 +154,7 @@ export component BestLapsPage inherits Rectangle {
                             for lap[index] in root.best-laps: Rectangle {
                                 height: lap.is-group ? 22px : Theme.row-h;
                                 horizontal-stretch: 1;
-                                background: root.selected-best-index == index ? Theme.selection-bg : (lap.is-group ? Theme.class-color(lap.class) : (lap.mine ? Theme.row-mine : (lap.external ? Theme.row-external : (lap.dirty ? Theme.row-dirty : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent)))));
+                                background: root.selected-best-index == index ? Theme.selection-bg : (lap.is-group ? Theme.class-color(lap.class) : (lap.mine ? Theme.row-mine : (lap.external ? Theme.row-external : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent))));
                                 TouchArea {
                                     width: parent.width;
                                     height: parent.height;
