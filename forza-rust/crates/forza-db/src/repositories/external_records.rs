@@ -1,7 +1,6 @@
 //! External/community best-lap records: active snapshot read + replacement.
 
 use rusqlite::{Connection, params};
-use sha2::{Digest, Sha256};
 
 use crate::error::DbError;
 
@@ -122,16 +121,15 @@ pub fn replace_active_snapshot(
             // truncated to 16 hex chars (64-bit namespace like before, but
             // stable across toolchains — DefaultHasher/SipHash is explicitly
             // unstable and caused duplicate imports after toolchain upgrades).
-            let mut hasher = Sha256::new();
-            hasher.update(rec.driver.as_bytes());
-            hasher.update([0]);
-            hasher.update(rec.car.as_bytes());
-            hasher.update([0]);
-            hasher.update(rec.track.as_bytes());
-            hasher.update([0]);
-            hasher.update(rec.race_class.as_bytes());
-            let digest = hasher.finalize();
-            let hex = format!("{digest:x}");
+            // Chained updates equal one hash over NUL-joined fields; hash via
+            // the shared helper so the primitive lives in exactly one place.
+            let hex = forza_pipeline::hash_bytes_hex(
+                format!(
+                    "{}\0{}\0{}\0{}",
+                    rec.driver, rec.car, rec.track, rec.race_class
+                )
+                .as_bytes(),
+            );
             let lap_id = format!("{lap_id}-{}", &hex[..16]);
             conn.execute(
                 "INSERT INTO external_lap_records

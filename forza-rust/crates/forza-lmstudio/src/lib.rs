@@ -33,9 +33,7 @@ pub mod prompts {
     }
 
     pub fn content_hash(text: &str) -> String {
-        use sha2::{Digest, Sha256};
-        let digest = Sha256::digest(text.as_bytes());
-        format!("{:x}", digest)
+        forza_pipeline::hash_bytes_hex(text.as_bytes())
     }
 
     /// Hash the same canonical prompt payload used by Python's lifecycle

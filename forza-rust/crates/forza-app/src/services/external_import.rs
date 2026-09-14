@@ -579,12 +579,7 @@ fn normalize_lap(raw: &str) -> Result<(String, i64), String> {
 }
 
 fn file_sha256(path: &Path) -> Option<String> {
-    let data = std::fs::read(path).ok()?;
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(&data);
-    let result = hasher.finalize();
-    Some(format!("{result:x}"))
+    forza_pipeline::hash_file_hex(path).ok()
 }
 
 #[cfg(test)]

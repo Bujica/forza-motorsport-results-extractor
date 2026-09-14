@@ -29,6 +29,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Maintenance hardening, no behavior change (goldens byte-identical):
+  single dirty-symbol set shared by parser and doctor (the doctor now
+  also covers `!`/`△`); dead backend request-hash implementation removed
+  (canonical evidence hash is the only one); single °F→°C formula with
+  one default window; `normalize_weather` returns `WeatherType`; one
+  SHA-256 helper pair; dotted config keys centralized with a snapshot
+  key-set test.
 - Race classes unified on the `RaceClass` enum (order, color, CSV parsing
   as exhaustive methods — a new class is a compile error, not a silent
   black fallback); division rosters collapsed into one table;

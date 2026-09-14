@@ -95,6 +95,14 @@ pub struct LapRecordInsert<'a> {
 
 pub fn insert_lap_record(conn: &Connection, row: &LapRecordInsert<'_>) -> Result<(), DbError> {
     let id = format!("lap-{}-{}", row.image_file_id, row.lap_index);
+    // temp_c is derived in Rust (single formula + plausibility window), never
+    // in SQL: the sibling bulk path does the same, and an inline SQL
+    // expression would silently bypass the out-of-window NULL rule.
+    let temp_c = forza_domain::lap::fahrenheit_to_celsius(
+        row.temp_f,
+        forza_domain::lap::DEFAULT_TEMP_RANGE_F.0,
+        forza_domain::lap::DEFAULT_TEMP_RANGE_F.1,
+    );
     conn.execute(
         "INSERT INTO lap_records
             (id, run_id, image_file_id, extraction_result_id, lap_index,
@@ -102,7 +110,7 @@ pub fn insert_lap_record(conn: &Connection, row: &LapRecordInsert<'_>) -> Result
              race_class, track, track_normalized, weather, temp_f, temp_c,
              best_lap, best_lap_ms, dirty, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7, ?7, ?8, ?9, ?9, ?10, ?11,
-                 ROUND((?11 - 32.0) * 5.0 / 9.0, 1), ?12, ?13, ?14, datetime('now'))",
+                 ?15, ?12, ?13, ?14, datetime('now'))",
         params![
             id,
             row.run_id,
@@ -118,6 +126,7 @@ pub fn insert_lap_record(conn: &Connection, row: &LapRecordInsert<'_>) -> Result
             row.best_lap,
             row.best_lap_ms,
             row.dirty,
+            temp_c,
         ],
     )?;
     Ok(())
@@ -335,7 +344,11 @@ fn add_result_inner(
         let driver_normalized = entry.driver.trim().to_lowercase();
         let car_normalized = entry.car.trim().to_lowercase();
         let track_normalized = entry.track.trim().to_lowercase();
-        let temp_c = forza_domain::lap::fahrenheit_to_celsius(entry.temp_f, 40.0, 140.0);
+        let temp_c = forza_domain::lap::fahrenheit_to_celsius(
+            entry.temp_f,
+            forza_domain::lap::DEFAULT_TEMP_RANGE_F.0,
+            forza_domain::lap::DEFAULT_TEMP_RANGE_F.1,
+        );
 
         conn.execute(
             "INSERT INTO lap_records
@@ -471,15 +484,22 @@ pub fn append_rain_time_review_candidates(
     }
 
     for row in &laps {
-        if !row.weather.eq_ignore_ascii_case("rain") {
+        if !row
+            .weather
+            .eq_ignore_ascii_case(forza_domain::enums::WeatherType::Rain.as_str())
+        {
             continue;
         }
         let rain_key = (
             row.track.clone(),
             row.race_class.clone(),
-            "rain".to_string(),
+            forza_domain::enums::WeatherType::Rain.as_str().to_string(),
         );
-        let dry_key = (row.track.clone(), row.race_class.clone(), "dry".to_string());
+        let dry_key = (
+            row.track.clone(),
+            row.race_class.clone(),
+            forza_domain::enums::WeatherType::Dry.as_str().to_string(),
+        );
         let best_rain = best_by_key.get(&rain_key);
         let best_dry = best_by_key.get(&dry_key);
         if let (Some(&best_rain), Some(&best_dry)) = (best_rain, best_dry)

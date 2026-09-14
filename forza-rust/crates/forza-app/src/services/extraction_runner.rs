@@ -1113,7 +1113,6 @@ where
                         &encoded.data_b64,
                         &encoded.mime_type,
                         &name,
-                        Some(&image.file_hash),
                         &mut |record: &ModelAttemptRecord| {
                             attempt_count += 1;
                             if let Some(row_id) = persist_attempt_with_evidence(
@@ -1718,7 +1717,6 @@ async fn worker_loop(
                     &encoded.data_b64,
                     &encoded.mime_type,
                     &name,
-                    Some(&image.file_hash),
                     &mut |record: &ModelAttemptRecord| {
                         attempt_count += 1;
                         if let Some(row_id) = persist_attempt_with_evidence(

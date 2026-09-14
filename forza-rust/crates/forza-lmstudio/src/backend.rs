@@ -6,7 +6,6 @@
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 
 use crate::client::RuntimeClient;
 use crate::error::LlmError;
@@ -353,50 +352,6 @@ impl LMStudioBackend {
         Value::Array(items)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn request_hash(
-        &self,
-        messages_redacted: &Value,
-        request_config: &Value,
-        source_file_hash: Option<&str>,
-        image_mime: &str,
-        image_b64_len: usize,
-    ) -> String {
-        // Evidence hash bound to model + image identity, not just user text:
-        // with fixed Nulls every image sharing a prompt hashed identically,
-        // making the hash useless for dedup/cache. `prompt_snapshot_id` stays
-        // Null here (the DB layer stamps the canonical hash with the run's
-        // real snapshot id at persistence); model falls back to configured
-        // when no instance has reported yet.
-        let model = self
-            .instance_id
-            .clone()
-            .unwrap_or_else(|| self.cfg.model.clone());
-        let image_bytes = i64::try_from(image_b64_len).unwrap_or(i64::MAX);
-        // Fixed key order = Python sort_keys order; serde_json::Map iteration
-        // is only sorted for the default BTreeMap backend.
-        let field = |v: &Value| serde_json::to_string(v).unwrap_or_else(|_| "null".into());
-        let opt = |v: Option<&str>| match v {
-            Some(s) => serde_json::to_string(&s).unwrap_or_else(|_| "null".into()),
-            None => "null".into(),
-        };
-        let canonical = format!(
-            "{{\"model\":{},\"prompt_snapshot_id\":null,\"request_config_json\":{},\
-             \"request_image_bytes\":{},\"request_image_format\":null,\
-             \"request_image_height\":null,\"request_image_mime_type\":{},\
-             \"request_image_width\":null,\"request_messages_json\":{},\
-             \"source_file_hash\":{}}}",
-            opt(Some(&model)),
-            field(request_config),
-            image_bytes,
-            opt(Some(image_mime)),
-            field(messages_redacted),
-            opt(source_file_hash),
-        );
-        let digest = Sha256::digest(canonical.as_bytes());
-        format!("{:x}", digest)
-    }
-
     /// Full extraction loop. `on_attempt` receives every attempt as it is
     /// recorded (persistence hook for Fase 8).
     ///
@@ -410,7 +365,6 @@ impl LMStudioBackend {
         image_b64: &str,
         mime: &str,
         _semantic_name: &str,
-        file_hash: Option<&str>,
         on_attempt: &mut F,
     ) -> Result<ModelExtractionResult, LlmError>
     where
@@ -480,13 +434,10 @@ impl LMStudioBackend {
                     retry_instruction_text: Some(user_text.clone()),
                     request_config_json: Some(Self::request_config(&payload).to_string()),
                     request_messages_json: Some(Self::redacted_messages(&payload).to_string()),
-                    request_hash: Some(self.request_hash(
-                        &Self::redacted_messages(&payload),
-                        &Self::request_config(&payload),
-                        file_hash,
-                        mime,
-                        image_b64.len(),
-                    )),
+                    // Stamped with the canonical DB hash at persistence
+                    // (`evidence::canonical_request_hash`); the backend must
+                    // not fork the value with a second implementation.
+                    request_hash: None,
                     ..Default::default()
                 };
                 on_attempt(&record);
@@ -539,13 +490,10 @@ impl LMStudioBackend {
                     retry_instruction_text: Some(user_text.clone()),
                     request_config_json: Some(Self::request_config(&payload).to_string()),
                     request_messages_json: Some(Self::redacted_messages(&payload).to_string()),
-                    request_hash: Some(self.request_hash(
-                        &Self::redacted_messages(&payload),
-                        &Self::request_config(&payload),
-                        file_hash,
-                        mime,
-                        image_b64.len(),
-                    )),
+                    // Stamped with the canonical DB hash at persistence
+                    // (`evidence::canonical_request_hash`); the backend must
+                    // not fork the value with a second implementation.
+                    request_hash: None,
                     ..Default::default()
                 };
                 on_attempt(&record);
@@ -578,13 +526,10 @@ impl LMStudioBackend {
                     retry_instruction_text: Some(user_text.clone()),
                     request_config_json: Some(Self::request_config(&payload).to_string()),
                     request_messages_json: Some(Self::redacted_messages(&payload).to_string()),
-                    request_hash: Some(self.request_hash(
-                        &Self::redacted_messages(&payload),
-                        &Self::request_config(&payload),
-                        file_hash,
-                        mime,
-                        image_b64.len(),
-                    )),
+                    // Stamped with the canonical DB hash at persistence
+                    // (`evidence::canonical_request_hash`); the backend must
+                    // not fork the value with a second implementation.
+                    request_hash: None,
                     parse_error: Some(message.clone()),
                     response_stats_json: Some(stats.to_string()),
                     ..Default::default()
@@ -637,13 +582,10 @@ impl LMStudioBackend {
                         retry_instruction_text: Some(user_text.clone()),
                         request_config_json: Some(Self::request_config(&payload).to_string()),
                         request_messages_json: Some(Self::redacted_messages(&payload).to_string()),
-                        request_hash: Some(self.request_hash(
-                            &Self::redacted_messages(&payload),
-                            &Self::request_config(&payload),
-                            file_hash,
-                            mime,
-                            image_b64.len(),
-                        )),
+                        // Stamped with the canonical DB hash at persistence
+                        // (`evidence::canonical_request_hash`); the backend must
+                        // not fork the value with a second implementation.
+                        request_hash: None,
                         raw_response: Some(content.clone()),
                         parse_error: Some(parse_error.clone()),
                         response_stats_json: Some(stats.to_string()),
@@ -675,13 +617,10 @@ impl LMStudioBackend {
                     retry_instruction_text: Some(user_text.clone()),
                     request_config_json: Some(Self::request_config(&payload).to_string()),
                     request_messages_json: Some(Self::redacted_messages(&payload).to_string()),
-                    request_hash: Some(self.request_hash(
-                        &Self::redacted_messages(&payload),
-                        &Self::request_config(&payload),
-                        file_hash,
-                        mime,
-                        image_b64.len(),
-                    )),
+                    // Stamped with the canonical DB hash at persistence
+                    // (`evidence::canonical_request_hash`); the backend must
+                    // not fork the value with a second implementation.
+                    request_hash: None,
                     raw_response: Some(content.clone()),
                     parsed_json: Some(parsed.to_string()),
                     validation_status: Some("retry".into()),
@@ -723,13 +662,10 @@ impl LMStudioBackend {
                 retry_instruction_text: Some(user_text.clone()),
                 request_config_json: Some(request_config.to_string()),
                 request_messages_json: Some(messages_redacted.to_string()),
-                request_hash: Some(self.request_hash(
-                    &messages_redacted,
-                    &request_config,
-                    file_hash,
-                    mime,
-                    image_b64.len(),
-                )),
+                // Stamped with the canonical DB hash at persistence
+                // (`evidence::canonical_request_hash`); the backend must
+                // not fork the value with a second implementation.
+                request_hash: None,
                 raw_response: Some(content.clone()),
                 parsed_json: Some(parsed.to_string()),
                 validation_status: Some(

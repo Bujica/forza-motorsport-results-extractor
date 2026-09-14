@@ -3,7 +3,6 @@
 use std::path::Path;
 
 use rusqlite::Connection;
-use sha2::{Digest, Sha256};
 
 use crate::error::DbError;
 
@@ -49,15 +48,11 @@ pub(super) fn check_sql_groups(
 }
 
 pub(super) fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    format!("{digest:x}")
+    forza_pipeline::hash_bytes_hex(bytes)
 }
 
 pub(super) fn sha256_file(path: &Path) -> std::io::Result<String> {
-    let mut file = std::fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    std::io::copy(&mut file, &mut hasher)?;
-    Ok(format!("{:x}", hasher.finalize()))
+    forza_pipeline::hash_file_hex(path)
 }
 
 pub(super) fn file_matches_size_and_sha256(

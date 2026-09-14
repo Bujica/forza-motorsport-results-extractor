@@ -178,7 +178,7 @@ pub(crate) fn cmd_db_heal(config_path: &Path, db_path: &Path) -> anyhow::Result<
     //    and Python enforce).
     let (temp_min, temp_max) = match forza_config::load_config(config_path, false) {
         Ok((cfg, _)) => (cfg.validation.temp_min_f, cfg.validation.temp_max_f),
-        Err(_) => (40.0, 140.0),
+        Err(_) => forza_domain::lap::DEFAULT_TEMP_RANGE_F,
     };
     let temps_healed = heal_out_of_window_temps(&conn, temp_min, temp_max)?;
 

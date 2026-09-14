@@ -9,6 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::ini::IniDocument;
+use crate::keys;
 use crate::{AppConfig, load_config, validate_config};
 
 /// Result of a successful save.
@@ -77,7 +78,7 @@ pub fn save_changes(
             None => "Configuration saved.".to_string(),
         },
         backup_path,
-        gamertag_changed: changes.contains_key("user.gamertag")
+        gamertag_changed: changes.contains_key(keys::USER_GAMERTAG)
             && previous.gamertag != config.gamertag,
         config,
     })
@@ -102,29 +103,29 @@ pub fn format_validation_errors(errors: &[String]) -> String {
 }
 
 fn apply_field(cfg: &mut AppConfig, field: &str, value: &str) -> Result<(), String> {
-    if let Some(key) = field.strip_prefix("paths.") {
+    if let Some(key) = field.strip_prefix(keys::PREFIX_PATHS) {
         return apply_path(cfg, key, value);
     }
-    if let Some(key) = field.strip_prefix("llm.") {
+    if let Some(key) = field.strip_prefix(keys::PREFIX_LLM) {
         return apply_llm(cfg, key, value);
     }
-    if let Some(key) = field.strip_prefix("image.") {
+    if let Some(key) = field.strip_prefix(keys::PREFIX_IMAGE) {
         return apply_image(cfg, key, value);
     }
-    if let Some(key) = field.strip_prefix("validation.") {
+    if let Some(key) = field.strip_prefix(keys::PREFIX_VALIDATION) {
         return apply_validation(cfg, key, value);
     }
-    if let Some(key) = field.strip_prefix("pdf.") {
+    if let Some(key) = field.strip_prefix(keys::PREFIX_PDF) {
         return apply_pdf(cfg, key, value);
     }
-    if let Some(key) = field.strip_prefix("ui.") {
+    if let Some(key) = field.strip_prefix(keys::PREFIX_UI) {
         return apply_ui(cfg, key, value);
     }
-    if field == "prompt.active" {
+    if field == keys::PROMPT_ACTIVE {
         cfg.prompt.active = value.to_string();
         return Ok(());
     }
-    if field == "user.gamertag" {
+    if field == keys::USER_GAMERTAG {
         cfg.gamertag = value.to_string();
         return Ok(());
     }
@@ -510,7 +511,7 @@ mod tests {
 
         let outcome = save_changes(
             &path,
-            &map(&[("user.gamertag", "Bujica89"), ("llm.workers", "2")]),
+            &map(&[(keys::USER_GAMERTAG, "Bujica89"), (keys::LLM_WORKERS, "2")]),
         )
         .unwrap();
 
@@ -535,7 +536,7 @@ mod tests {
         let path = write_base(dir.path());
         let before = std::fs::read_to_string(&path).unwrap();
 
-        let error = save_changes(&path, &map(&[("image.encode_quality", "999")])).unwrap_err();
+        let error = save_changes(&path, &map(&[(keys::IMAGE_ENCODE_QUALITY, "999")])).unwrap_err();
 
         assert!(
             error.contains("encode_quality"),
@@ -549,10 +550,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = write_base(dir.path());
 
-        let ok = validate_changes(&path, &map(&[("llm.temperature", "0.5")]));
+        let ok = validate_changes(&path, &map(&[(keys::LLM_TEMPERATURE, "0.5")]));
         assert!(ok.is_ok());
 
-        let bad = validate_changes(&path, &map(&[("image.max_width", "10")]));
+        let bad = validate_changes(&path, &map(&[(keys::IMAGE_MAX_WIDTH, "10")]));
         assert!(bad.is_err());
         assert!(bad.unwrap_err().starts_with("Configuration errors:"));
     }
@@ -579,11 +580,11 @@ mod tests {
             "Unknown LLM field: unknown"
         );
         assert_eq!(
-            apply_field_error(&path, "paths.input_dir", ""),
+            apply_field_error(&path, keys::PATHS_INPUT_DIR, ""),
             "[paths] input_dir cannot be empty"
         );
         assert_eq!(
-            apply_field_error(&path, "image.grayscale", "perhaps"),
+            apply_field_error(&path, keys::IMAGE_GRAYSCALE, "perhaps"),
             "Invalid boolean value: perhaps"
         );
     }
@@ -595,7 +596,10 @@ mod tests {
 
         save_changes(
             &path,
-            &map(&[("llm.eval_batch_size", ""), ("llm.context_length", "0")]),
+            &map(&[
+                (keys::LLM_EVAL_BATCH_SIZE, ""),
+                (keys::LLM_CONTEXT_LENGTH, "0"),
+            ]),
         )
         .unwrap();
 
@@ -608,7 +612,7 @@ mod tests {
     fn backup_names_are_timestamped_bak_files() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_base(dir.path());
-        let outcome = save_changes(&path, &map(&[("llm.workers", "3")])).unwrap();
+        let outcome = save_changes(&path, &map(&[(keys::LLM_WORKERS, "3")])).unwrap();
         let backup = outcome.backup_path.unwrap();
         let name = backup.file_name().unwrap().to_string_lossy().to_string();
         assert!(
@@ -626,12 +630,13 @@ mod tests {
         let (cfg, _) = load_config(&path, false).unwrap();
         assert_eq!(cfg.inference_concurrency, 1);
         // Valid values apply and persist.
-        let outcome = save_changes(&path, &map(&[("llm.inference_concurrency", "4")])).unwrap();
+        let outcome = save_changes(&path, &map(&[(keys::LLM_INFERENCE_CONCURRENCY, "4")])).unwrap();
         assert_eq!(outcome.config.inference_concurrency, 4);
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("inference_concurrency = 4"));
         // Below 1 fails validation like `workers`.
-        let err = validate_changes(&path, &map(&[("llm.inference_concurrency", "0")])).unwrap_err();
+        let err =
+            validate_changes(&path, &map(&[(keys::LLM_INFERENCE_CONCURRENCY, "0")])).unwrap_err();
         assert!(
             err.contains("inference_concurrency=0 must be >= 1"),
             "{err}"

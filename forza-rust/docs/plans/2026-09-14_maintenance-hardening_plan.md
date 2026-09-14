@@ -282,3 +282,13 @@ unchanged.
 - Run/attempt/result lifecycle enum conversion (Phase 4 covers weather
   only; lifecycles convert only after a real status bug).
 - Any Python-tree change (frozen legacy).
+
+## Implementation status
+
+All six phases implemented; each landed only with `cargo fmt --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test
+--workspace` green plus byte-identical goldens. Phase 2 additionally
+removed the then-dead `extract(file_hash)` parameter; Phase 3 pins the
+new temp_c semantics in `constraints.rs`; Phase 6 leaves bare per-section
+match arms and INI loader pairs literal (both already loud on typo via
+catch-all errors and `full_ini_overrides_every_section`).

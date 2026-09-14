@@ -185,7 +185,7 @@ pub fn derive_and_insert_laps(
             .and_then(|s| s.trim().replace(',', ".").parse::<f64>().ok()),
         _ => None,
     };
-    let (temp_min, temp_max) = temp_range.unwrap_or((40.0, 140.0));
+    let (temp_min, temp_max) = temp_range.unwrap_or(forza_domain::lap::DEFAULT_TEMP_RANGE_F);
     let temp_c =
         temp_f.and_then(|tf| forza_domain::lap::fahrenheit_to_celsius(tf, temp_min, temp_max));
     let temp_f = temp_f.filter(|_| temp_c.is_some());
@@ -258,7 +258,7 @@ pub fn derive_and_insert_laps(
                 &race_class_str,
                 &track_fixed,
                 track_fixed.to_lowercase(),
-                weather,
+                weather.as_str(),
                 temp_f,
                 temp_c,
                 best_lap_clean,

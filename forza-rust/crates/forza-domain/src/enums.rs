@@ -313,4 +313,15 @@ mod tests {
         assert_eq!(RaceClass::from_value("GT3"), Some(RaceClass::Gt3));
         assert_eq!("Mixed".parse::<RaceClass>().unwrap(), RaceClass::Mixed);
     }
+
+    #[test]
+    fn weather_vocabulary_is_closed() {
+        // A new weather value must round-trip through the enum; logic sites
+        // match on the type instead of retyping these strings.
+        for class in WeatherType::ALL {
+            assert_eq!(WeatherType::from_value(class.as_str()), Some(*class));
+            assert_eq!(class.as_str().parse::<WeatherType>(), Ok(*class));
+        }
+        assert_eq!(WeatherType::VALUES, ["dry", "rain", "unknown"]);
+    }
 }

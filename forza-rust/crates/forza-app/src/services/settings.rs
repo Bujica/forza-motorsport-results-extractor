@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use forza_config::AppConfig;
+use forza_config::keys;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SettingRow {
@@ -101,7 +102,7 @@ fn path_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             status: dir_status(&cfg.input_dir),
             ..row(
-                "paths.input_dir",
+                keys::PATHS_INPUT_DIR,
                 "input_dir",
                 cfg.input_dir.to_string_lossy().to_string(),
                 "text",
@@ -111,7 +112,7 @@ fn path_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             status: parent_status(&cfg.pdf_file),
             ..row(
-                "paths.pdf_file",
+                keys::PATHS_PDF_FILE,
                 "pdf_file",
                 cfg.pdf_file.to_string_lossy().to_string(),
                 "text",
@@ -121,7 +122,7 @@ fn path_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             status: parent_status(&cfg.log_file),
             ..row(
-                "paths.log_file",
+                keys::PATHS_LOG_FILE,
                 "log_file",
                 cfg.log_file.to_string_lossy().to_string(),
                 "text",
@@ -139,13 +140,19 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         .collect();
     prompt_ids.sort();
     vec![
-        row("llm.url", "url", llm.url.clone(), "text", GROUP_LLM),
-        row("llm.model", "model", llm.model.clone(), "text", GROUP_LLM),
+        row(keys::LLM_URL, "url", llm.url.clone(), "text", GROUP_LLM),
+        row(
+            keys::LLM_MODEL,
+            "model",
+            llm.model.clone(),
+            "text",
+            GROUP_LLM,
+        ),
         SettingRow {
             options: prompt_ids,
             ..row(
-                "prompt.active",
-                "prompt.active",
+                keys::PROMPT_ACTIVE,
+                keys::PROMPT_ACTIVE,
                 cfg.prompt.active.clone(),
                 "choice",
                 GROUP_LLM,
@@ -154,7 +161,7 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: int_options(64, 8192, 64),
             ..row(
-                "llm.max_completion_tokens",
+                keys::LLM_MAX_COMPLETION_TOKENS,
                 "max_completion_tokens",
                 llm.max_completion_tokens.to_string(),
                 "int",
@@ -164,7 +171,7 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: float_options("0", "2", "0.05"),
             ..row(
-                "llm.temperature",
+                keys::LLM_TEMPERATURE,
                 "temperature",
                 py_float(llm.temperature),
                 "float",
@@ -174,7 +181,7 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: int_options(1, 120, 1),
             ..row(
-                "llm.timeout_connect",
+                keys::LLM_TIMEOUT_CONNECT,
                 "timeout_connect",
                 llm.timeout_connect.to_string(),
                 "int",
@@ -184,7 +191,7 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: int_options(10, 900, 10),
             ..row(
-                "llm.timeout_read",
+                keys::LLM_TIMEOUT_READ,
                 "timeout_read",
                 llm.timeout_read.to_string(),
                 "int",
@@ -194,7 +201,7 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: int_options(0, 10, 1),
             ..row(
-                "llm.max_retries",
+                keys::LLM_MAX_RETRIES,
                 "max_retries",
                 llm.max_retries.to_string(),
                 "int",
@@ -204,7 +211,7 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: vec!["png".into(), "jpeg".into(), "webp".into()],
             ..row(
-                "llm.image_format",
+                keys::LLM_IMAGE_FORMAT,
                 "image_format",
                 llm.image_format.clone(),
                 "choice",
@@ -214,7 +221,7 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: int_options(0, 32768, 256),
             ..row(
-                "llm.context_length",
+                keys::LLM_CONTEXT_LENGTH,
                 "context_length",
                 opt_str(llm.context_length),
                 "int",
@@ -227,7 +234,7 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
                 .map(|s| s.to_string())
                 .collect(),
             ..row(
-                "llm.reasoning_mode",
+                keys::LLM_REASONING_MODE,
                 "reasoning_mode",
                 llm.reasoning_mode.clone().unwrap_or_default(),
                 "choice",
@@ -237,7 +244,7 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: int_options(0, 4096, 64),
             ..row(
-                "llm.eval_batch_size",
+                keys::LLM_EVAL_BATCH_SIZE,
                 "eval_batch_size",
                 opt_str(llm.eval_batch_size),
                 "int",
@@ -247,7 +254,7 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: int_options(0, 4096, 64),
             ..row(
-                "llm.physical_batch_size",
+                keys::LLM_PHYSICAL_BATCH_SIZE,
                 "physical_batch_size",
                 opt_str(llm.physical_batch_size),
                 "int",
@@ -255,14 +262,14 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
             )
         },
         row(
-            "llm.flash_attention",
+            keys::LLM_FLASH_ATTENTION,
             "flash_attention",
             py_bool(llm.flash_attention).to_string(),
             "bool",
             GROUP_LLM,
         ),
         row(
-            "llm.offload_kv_cache_to_gpu",
+            keys::LLM_OFFLOAD_KV_CACHE_TO_GPU,
             "offload_kv_cache_to_gpu",
             py_bool(llm.offload_kv_cache_to_gpu).to_string(),
             "bool",
@@ -271,7 +278,7 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: float_options("0", "500", "1"),
             ..row(
-                "llm.performance_tps_floor",
+                keys::LLM_PERFORMANCE_TPS_FLOOR,
                 "performance_tps_floor",
                 py_float(llm.performance_tps_floor),
                 "float",
@@ -281,7 +288,7 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: float_options("0", "900", "5"),
             ..row(
-                "llm.performance_reload_elapsed_s",
+                keys::LLM_PERFORMANCE_RELOAD_ELAPSED_S,
                 "performance_reload_elapsed_s",
                 py_float(llm.performance_reload_elapsed_s),
                 "float",
@@ -291,7 +298,7 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: int_options(1, 20, 1),
             ..row(
-                "llm.performance_reload_streak",
+                keys::LLM_PERFORMANCE_RELOAD_STREAK,
                 "performance_reload_streak",
                 llm.performance_reload_streak.to_string(),
                 "int",
@@ -306,7 +313,7 @@ fn ui_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: float_options("0.5", "2.5", "0.05"),
             ..row(
-                "ui.font_scale",
+                keys::UI_FONT_SCALE,
                 "font_scale",
                 py_float(cfg.ui.font_scale),
                 "float",
@@ -316,7 +323,7 @@ fn ui_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: int_options(8, 24, 1),
             ..row(
-                "ui.min_font_px",
+                keys::UI_MIN_FONT_PX,
                 "min_font_px",
                 cfg.ui.min_font_px.to_string(),
                 "int",
@@ -329,7 +336,7 @@ fn ui_rows(cfg: &AppConfig) -> Vec<SettingRow> {
 fn runtime_rows(cfg: &AppConfig) -> Vec<SettingRow> {
     vec![
         row(
-            "user.gamertag",
+            keys::USER_GAMERTAG,
             "gamertag",
             cfg.gamertag.clone(),
             "text",
@@ -338,7 +345,7 @@ fn runtime_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: int_options(1, 16, 1),
             ..row(
-                "llm.workers",
+                keys::LLM_WORKERS,
                 "workers",
                 cfg.workers.to_string(),
                 "int",
@@ -348,7 +355,7 @@ fn runtime_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: int_options(1, 16, 1),
             ..row(
-                "llm.inference_concurrency",
+                keys::LLM_INFERENCE_CONCURRENCY,
                 "inference_concurrency",
                 cfg.inference_concurrency.to_string(),
                 "int",
@@ -358,8 +365,8 @@ fn runtime_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: int_options(640, 4096, 64),
             ..row(
-                "image.max_width",
-                "image.max_width",
+                keys::IMAGE_MAX_WIDTH,
+                keys::IMAGE_MAX_WIDTH,
                 cfg.image.max_width.to_string(),
                 "int",
                 GROUP_RUNTIME,
@@ -368,16 +375,16 @@ fn runtime_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: int_options(1, 100, 1),
             ..row(
-                "image.encode_quality",
-                "image.encode_quality",
+                keys::IMAGE_ENCODE_QUALITY,
+                keys::IMAGE_ENCODE_QUALITY,
                 cfg.image.encode_quality.to_string(),
                 "int",
                 GROUP_RUNTIME,
             )
         },
         row(
-            "image.grayscale",
-            "image.grayscale",
+            keys::IMAGE_GRAYSCALE,
+            keys::IMAGE_GRAYSCALE,
             py_bool(cfg.image.grayscale).to_string(),
             "bool",
             GROUP_RUNTIME,
@@ -385,8 +392,8 @@ fn runtime_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: float_options("-100", "250", "1"),
             ..row(
-                "validation.temp_min_f",
-                "validation.temp_min_f",
+                keys::VALIDATION_TEMP_MIN_F,
+                keys::VALIDATION_TEMP_MIN_F,
                 py_float(cfg.validation.temp_min_f),
                 "float",
                 GROUP_RUNTIME,
@@ -395,23 +402,23 @@ fn runtime_rows(cfg: &AppConfig) -> Vec<SettingRow> {
         SettingRow {
             options: float_options("-100", "250", "1"),
             ..row(
-                "validation.temp_max_f",
-                "validation.temp_max_f",
+                keys::VALIDATION_TEMP_MAX_F,
+                keys::VALIDATION_TEMP_MAX_F,
                 py_float(cfg.validation.temp_max_f),
                 "float",
                 GROUP_RUNTIME,
             )
         },
         row(
-            "pdf.dirty_lap_symbol",
-            "pdf.dirty_lap_symbol",
+            keys::PDF_DIRTY_LAP_SYMBOL,
+            keys::PDF_DIRTY_LAP_SYMBOL,
             cfg.pdf.dirty_lap_symbol.clone(),
             "text",
             GROUP_RUNTIME,
         ),
         row(
-            "pdf.show_dirty_lap_symbol",
-            "pdf.show_dirty_lap_symbol",
+            keys::PDF_SHOW_DIRTY_LAP_SYMBOL,
+            keys::PDF_SHOW_DIRTY_LAP_SYMBOL,
             py_bool(cfg.pdf.show_dirty_lap_symbol).to_string(),
             "bool",
             GROUP_RUNTIME,
@@ -475,44 +482,10 @@ mod tests {
         let snapshot = settings_snapshot(&cfg, &BTreeMap::new(), false, None);
 
         let keys: Vec<&str> = snapshot.rows.iter().map(|r| r.key.as_str()).collect();
-        assert_eq!(
-            keys,
-            vec![
-                "paths.input_dir",
-                "paths.pdf_file",
-                "paths.log_file",
-                "llm.url",
-                "llm.model",
-                "prompt.active",
-                "llm.max_completion_tokens",
-                "llm.temperature",
-                "llm.timeout_connect",
-                "llm.timeout_read",
-                "llm.max_retries",
-                "llm.image_format",
-                "llm.context_length",
-                "llm.reasoning_mode",
-                "llm.eval_batch_size",
-                "llm.physical_batch_size",
-                "llm.flash_attention",
-                "llm.offload_kv_cache_to_gpu",
-                "llm.performance_tps_floor",
-                "llm.performance_reload_elapsed_s",
-                "llm.performance_reload_streak",
-                "user.gamertag",
-                "llm.workers",
-                "llm.inference_concurrency",
-                "image.max_width",
-                "image.encode_quality",
-                "image.grayscale",
-                "validation.temp_min_f",
-                "validation.temp_max_f",
-                "pdf.dirty_lap_symbol",
-                "pdf.show_dirty_lap_symbol",
-                "ui.font_scale",
-                "ui.min_font_px",
-            ]
-        );
+        // Single spelling: the snapshot emits exactly the known key set, in
+        // display order. A new setting without display wiring (or a typo on
+        // either side) fails here.
+        assert_eq!(keys, keys::ALL_EDITABLE);
         assert!(snapshot.validation_ok);
         assert_eq!(snapshot.validation_message, OK_MESSAGE);
     }
@@ -521,12 +494,12 @@ mod tests {
     fn pending_overrides_mark_rows_pending() {
         let cfg = default_cfg();
         let mut pending = BTreeMap::new();
-        pending.insert("user.gamertag".to_string(), "NewTag".to_string());
+        pending.insert(keys::USER_GAMERTAG.to_string(), "NewTag".to_string());
         let snapshot = settings_snapshot(&cfg, &pending, true, None);
         let gamertag = snapshot
             .rows
             .iter()
-            .find(|r| r.key == "user.gamertag")
+            .find(|r| r.key == keys::USER_GAMERTAG)
             .unwrap();
         assert_eq!(gamertag.value, "NewTag");
         assert_eq!(gamertag.status, "pending");
@@ -535,7 +508,7 @@ mod tests {
         let workers = snapshot
             .rows
             .iter()
-            .find(|r| r.key == "llm.workers")
+            .find(|r| r.key == keys::LLM_WORKERS)
             .unwrap();
         assert_eq!(workers.value, "1");
         assert_eq!(workers.status, "ok");
@@ -563,12 +536,12 @@ mod tests {
         let input = snapshot
             .rows
             .iter()
-            .find(|r| r.key == "paths.input_dir")
+            .find(|r| r.key == keys::PATHS_INPUT_DIR)
             .unwrap();
         let pdf = snapshot
             .rows
             .iter()
-            .find(|r| r.key == "paths.pdf_file")
+            .find(|r| r.key == keys::PATHS_PDF_FILE)
             .unwrap();
         assert_eq!(input.status, "missing");
         assert_eq!(pdf.status, "missing");

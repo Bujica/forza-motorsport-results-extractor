@@ -433,3 +433,60 @@ fn lap_row_uniqueness_per_result_and_index() {
         "(extraction_result_id, lap_index) uniqueness enforced"
     );
 }
+
+#[test]
+fn lap_insert_derives_temp_c_with_plausibility_window() {
+    // Both insert paths share one formula + window: in-window converts,
+    // out-of-window stores NULL (never a converted absurdity).
+    let (_dir, _path, conn) = fresh_db();
+    let run_id = insert_run(&conn, &RunInsert::demo("run-t")).unwrap();
+    for image in ["img-in", "img-out"] {
+        conn.execute(
+            "INSERT INTO image_files (id, file_hash, current_name, current_path, first_seen_at, last_seen_at, created_at, updated_at)
+             VALUES (?1, 'h', 'n', 'p', datetime('now'), datetime('now'), datetime('now'), datetime('now'))",
+            [image],
+        )
+        .unwrap();
+    }
+    let mut lap_index = 0;
+    for (image, temp_f, expected_c) in [("img-in", 80.0, Some(26.7)), ("img-out", 200.0, None)] {
+        lap_index += 1;
+        let result = runs::insert_input_and_result(
+            &conn,
+            &RunId::new(&run_id),
+            &ImageFileId::new(image),
+            "process",
+            "ok",
+            lap_index,
+        )
+        .unwrap();
+        laps::insert_lap_record(
+            &conn,
+            &laps::LapRecordInsert {
+                run_id: &run_id,
+                image_file_id: image,
+                extraction_result_id: result.as_str(),
+                attempt_id: None,
+                lap_index,
+                driver: "d",
+                car: "c",
+                race_class: "A",
+                track: "T",
+                weather: "dry",
+                temp_f,
+                best_lap: "1:30.000",
+                best_lap_ms: 90_000,
+                dirty: false,
+            },
+        )
+        .unwrap();
+        let temp_c: Option<f64> = conn
+            .query_row(
+                "SELECT temp_c FROM lap_records WHERE extraction_result_id = ?1",
+                [&result],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(temp_c, expected_c, "temp_f {temp_f}");
+    }
+}

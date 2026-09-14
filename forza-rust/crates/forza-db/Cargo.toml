@@ -15,6 +15,7 @@ sha2.workspace = true
 serde_json.workspace = true
 uuid = { version = "1", features = ["v4"] }
 forza-domain = { path = "../forza-domain" }
+forza-pipeline = { path = "../forza-pipeline" }
 
 [dev-dependencies]
 tempfile.workspace = true

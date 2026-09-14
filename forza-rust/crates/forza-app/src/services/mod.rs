@@ -72,7 +72,9 @@ pub fn list_clean_flat_entries(
         .map(|r| BestLapEntry {
             track: r.track,
             race_class: r.race_class,
-            weather: r.weather.unwrap_or_else(|| "unknown".into()),
+            weather: r
+                .weather
+                .unwrap_or_else(|| forza_domain::enums::WeatherType::Unknown.as_str().into()),
             temp_c: r.temp_c,
             driver: r.driver,
             car: r.car,

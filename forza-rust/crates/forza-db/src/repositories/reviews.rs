@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use rusqlite::{Connection, params};
 
-use forza_domain::enums::RaceClass;
+use forza_domain::enums::{RaceClass, WeatherType};
 use forza_domain::reference_data::embedded_reference_data;
 use forza_domain::review_rules::driver_name_review_trigger;
 
@@ -175,7 +175,10 @@ pub fn query_review_candidates(conn: &Connection) -> Result<Vec<ReviewCandidate>
         if row.dirty && row.is_best_lap {
             push("dirty_lap", "model_marked_dirty", "true".into(), false, row);
         }
-        if row.weather.eq_ignore_ascii_case("unknown") {
+        if row
+            .weather
+            .eq_ignore_ascii_case(WeatherType::Unknown.as_str())
+        {
             push("weather", "weather_unknown", row.weather.clone(), true, row);
         }
         if row.track.is_empty() || row.track == "Unknown" {

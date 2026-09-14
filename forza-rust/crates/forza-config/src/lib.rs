@@ -8,6 +8,7 @@
 //! (`strict`) or produce collected warnings with the documented fallback.
 
 pub mod ini;
+pub mod keys;
 pub mod prompts;
 pub mod save;
 

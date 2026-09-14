@@ -117,7 +117,10 @@ fn sanitize_driver_name_matches_python() {
 fn normalize_weather_matches_python() {
     for pair in golden()["normalize_weather"].as_array().unwrap() {
         let input = pair[0].as_str().unwrap();
-        assert_eq!(normalize_weather(Some(input)), pair[1].as_str().unwrap());
+        assert_eq!(
+            normalize_weather(Some(input)).as_str(),
+            pair[1].as_str().unwrap()
+        );
     }
 }
 

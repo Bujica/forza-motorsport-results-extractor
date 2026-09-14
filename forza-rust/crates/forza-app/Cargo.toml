@@ -19,7 +19,6 @@ serde_json.workspace = true
 calamine = "0.26"
 chrono.workspace = true
 csv = "1"
-sha2.workspace = true
 opener.workspace = true
 
 [dev-dependencies]

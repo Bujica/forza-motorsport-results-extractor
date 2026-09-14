@@ -5,7 +5,7 @@ use std::collections::{BTreeSet, HashSet};
 use rusqlite::Connection;
 
 use forza_db::repositories::external_records::ExternalLapRecord;
-use forza_domain::enums::RaceClass;
+use forza_domain::enums::{RaceClass, WeatherType};
 use forza_domain::lap::strip_dirty_symbol;
 use forza_domain::ordering::{LapRowLike, ordered_lap_key, track_order_map};
 use forza_output::fmt_float;
@@ -149,7 +149,9 @@ fn row_from_export(row: forza_db::repositories::ExportFlatRow) -> BestLapRow {
         track: row.track.clone(),
         race_class,
         car_class: race_class,
-        weather: row.weather.unwrap_or_else(|| "unknown".to_string()),
+        weather: row
+            .weather
+            .unwrap_or_else(|| WeatherType::Unknown.as_str().to_string()),
         temp_f: row.temp_f,
         temp_c: row.temp_c,
         driver: row.driver.clone(),
@@ -174,7 +176,7 @@ fn row_from_external(rec: ExternalLapRecord) -> BestLapRow {
         track: rec.track.clone(),
         race_class,
         car_class: race_class,
-        weather: "dry".to_string(),
+        weather: WeatherType::Dry.as_str().to_string(),
         temp_f: None,
         temp_c: None,
         driver: rec.driver.clone(),
@@ -501,7 +503,7 @@ mod tests {
             run_id: None,
             track: track.to_string(),
             race_class,
-            weather: "dry".to_string(),
+            weather: WeatherType::Dry.as_str().to_string(),
             temp_f: Some(80.0),
             temp_c: Some(26.7),
             driver: driver.to_string(),

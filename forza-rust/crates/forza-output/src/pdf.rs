@@ -189,7 +189,7 @@ pub fn build_pdf_plan_ext(
                 mine: false,
                 time_ms: rec.best_lap_ms,
                 temp_c: None,
-                weather: "dry".to_string(),
+                weather: forza_domain::enums::WeatherType::Dry.as_str().to_string(),
                 external: true,
                 source_file: None,
             });

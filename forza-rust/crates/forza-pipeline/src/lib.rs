@@ -14,7 +14,7 @@ pub mod planning;
 pub use discovery::{find_images, find_input_files};
 pub use encoding::{EncodeError, EncodedImage, SUPPORTED_FORMATS, encode_image_payload};
 pub use error::PipelineError;
-pub use hashing::file_hash;
+pub use hashing::{file_hash, hash_bytes_hex, hash_file_hex};
 pub use metadata::{ImageMetadataInfo, inspect_metadata};
 pub use naming::semantic_filename;
 pub use planning::{

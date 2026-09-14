@@ -7,7 +7,7 @@ use regex::Regex;
 use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::enums::RaceClass;
+use crate::enums::{RaceClass, WeatherType};
 use crate::errors::DomainError;
 
 /// TCR livery names; a race where >= 30% of the grid drives one is TCR.
@@ -262,22 +262,31 @@ fn collapse_whitespace(value: &str) -> String {
 
 /// Map model/weather words (English and Portuguese) onto the supported labels.
 ///
+/// Returns the unified [`WeatherType`]; callers bound to text (SQLite,
+/// Slint, CSV) convert with [`WeatherType::as_str`].
+///
 /// # Examples
 ///
 /// ```
+/// use forza_domain::enums::WeatherType;
 /// use forza_domain::lap::normalize_weather;
 ///
-/// assert_eq!(normalize_weather(Some("chuva")), "rain");
-/// assert_eq!(normalize_weather(None), "unknown");
+/// assert_eq!(normalize_weather(Some("chuva")), WeatherType::Rain);
+/// assert_eq!(normalize_weather(None), WeatherType::Unknown);
 /// ```
-pub fn normalize_weather(value: Option<&str>) -> &'static str {
+pub fn normalize_weather(value: Option<&str>) -> WeatherType {
     let text = value.unwrap_or("").trim().to_lowercase();
     match text.as_str() {
-        "rain" | "wet" | "chuva" | "molhado" | "raining" => "rain",
-        "dry" | "seco" | "clear" | "sunny" => "dry",
-        _ => UNKNOWN_WEATHER,
+        "rain" | "wet" | "chuva" | "molhado" | "raining" => WeatherType::Rain,
+        "dry" | "seco" | "clear" | "sunny" => WeatherType::Dry,
+        _ => WeatherType::Unknown,
     }
 }
+
+/// No-config fallback plausibility window (°F). Mirrors the `[validation]`
+/// `temp_min_f`/`temp_max_f` config defaults; callers with a loaded config
+/// pass its values instead of this const.
+pub const DEFAULT_TEMP_RANGE_F: (f64, f64) = (40.0, 140.0);
 
 /// Convert °F to °C rounded to one decimal, validated against a plausible
 /// track-temperature window. Returns `None` outside `[temp_min, temp_max]`.
@@ -426,8 +435,8 @@ mod tests {
 
     #[test]
     fn unknown_weather_has_one_shared_spelling() {
-        assert_eq!(normalize_weather(None), UNKNOWN_WEATHER);
-        assert_eq!(normalize_weather(Some("storm")), UNKNOWN_WEATHER);
+        assert_eq!(normalize_weather(None), WeatherType::Unknown);
+        assert_eq!(normalize_weather(Some("storm")), WeatherType::Unknown);
     }
 
     proptest::proptest! {

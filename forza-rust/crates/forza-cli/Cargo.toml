@@ -19,6 +19,7 @@ forza-app = { path = "../forza-app" }
 forza-gui = { path = "../forza-gui" }
 forza-output = { path = "../forza-output" }
 forza-pipeline = { path = "../forza-pipeline" }
+forza-domain = { path = "../forza-domain" }
 serde_json.workspace = true
 rusqlite.workspace = true
 
