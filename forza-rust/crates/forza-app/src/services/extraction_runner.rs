@@ -56,6 +56,47 @@ where
     work.await
 }
 
+/// Verbose per-image summary line (gated by `RunParams.verbose`): model,
+/// attempts, timing/tokens, encoded payload, and DB ids. Single owner so
+/// the sequential and worker paths log the same detail.
+struct VerboseImage<'a> {
+    name: &'a str,
+    result_id: &'a forza_db::ExtractionResultId,
+    file_hash: &'a str,
+    stats: &'a forza_db::repositories::runs::ResultStats<'a>,
+    encoded: &'a forza_pipeline::EncodedImage,
+    attempt_count: i64,
+    attempt_row: Option<&'a str>,
+    laps: usize,
+    worker: bool,
+}
+
+fn verbose_image_line(v: &VerboseImage<'_>) -> String {
+    let opt = |v: Option<i64>| v.map(|n| n.to_string()).unwrap_or_else(|| "?".to_string());
+    let tps = v
+        .stats
+        .tokens_per_second
+        .map(|t| format!("{t:.1}"))
+        .unwrap_or_else(|| "?".to_string());
+    format!(
+        "[debug] {name} model={} attempts={attempt_count} duration_ms={} tokens={} tps={} {}x{} {} result={result_id} hash={file_hash} attempt={} laps={laps}{}",
+        v.stats.model.unwrap_or("?"),
+        v.stats.duration_ms,
+        opt(v.stats.total_tokens),
+        tps,
+        v.encoded.width_px,
+        v.encoded.height_px,
+        v.encoded.mime_type,
+        v.attempt_row.unwrap_or("?"),
+        if v.worker { " (worker)" } else { "" },
+        name = v.name,
+        attempt_count = v.attempt_count,
+        result_id = v.result_id,
+        file_hash = v.file_hash,
+        laps = v.laps,
+    )
+}
+
 /// Encode one image for the model request. Thin shared wrapper so both
 /// paths report the same error text; any retry/downscale policy around the
 /// encode lives here, not in two loops. Callers own fail/progress
@@ -1198,10 +1239,17 @@ where
                     )?;
                     succeeded += 1;
                     if params.verbose {
-                        on_event(RunEvent::Log(format!(
-                            "[debug] {name} result={result_id} hash={} attempts={attempt_count} attempt={row_id} laps={laps}",
-                            image.file_hash,
-                        )));
+                        on_event(RunEvent::Log(verbose_image_line(&VerboseImage {
+                            name: &name,
+                            result_id: &result_id,
+                            file_hash: &image.file_hash,
+                            stats: &stats,
+                            encoded: &encoded,
+                            attempt_count,
+                            attempt_row: Some(row_id.as_str()),
+                            laps,
+                            worker: false,
+                        })));
                     }
                     on_event(RunEvent::ImageDone {
                         name: name.clone(),
@@ -1825,10 +1873,18 @@ async fn worker_loop(
                 match finalize_outcome {
                     Ok(()) => {
                         if params.verbose {
-                            let _ = event_tx.send(RunEvent::Log(format!(
-                                "[debug] {name} result={result_id} hash={} attempts={attempt_count} laps={laps} (worker)",
-                                image.file_hash,
-                            )));
+                            let _ =
+                                event_tx.send(RunEvent::Log(verbose_image_line(&VerboseImage {
+                                    name: &name,
+                                    result_id: &result_id,
+                                    file_hash: &image.file_hash,
+                                    stats: &stats,
+                                    encoded: &encoded,
+                                    attempt_count,
+                                    attempt_row: None,
+                                    laps,
+                                    worker: true,
+                                })));
                         }
                         let _ = event_tx.send(RunEvent::ImageDone {
                             name: name.clone(),
@@ -1877,7 +1933,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    use super::{inference_permits, with_inference_permit};
+    use super::{VerboseImage, inference_permits, verbose_image_line, with_inference_permit};
 
     #[test]
     fn permits_cap_at_workers_and_floor_at_one() {
@@ -1886,6 +1942,45 @@ mod tests {
         assert_eq!(inference_permits(4, 2), 2);
         assert_eq!(inference_permits(2, 8), 2);
         assert_eq!(inference_permits(0, 0), 1);
+    }
+
+    #[test]
+    fn verbose_line_reports_ids_and_stats() {
+        let stats = forza_db::repositories::runs::ResultStats {
+            model: Some("m"),
+            model_instance_id: None,
+            input_tokens: None,
+            output_tokens: None,
+            reasoning_tokens: None,
+            total_tokens: Some(100),
+            tokens_per_second: Some(20.0),
+            time_to_first_token_s: None,
+            model_load_time_s: None,
+            duration_ms: 1500,
+        };
+        let encoded = forza_pipeline::EncodedImage {
+            data_b64: String::new(),
+            mime_type: "image/png".to_string(),
+            format: "png".to_string(),
+            width_px: 1600,
+            height_px: 900,
+            byte_count: 42,
+        };
+        let line = verbose_image_line(&VerboseImage {
+            name: "shot.png",
+            result_id: &forza_db::ExtractionResultId::new("res-1"),
+            file_hash: "h",
+            stats: &stats,
+            encoded: &encoded,
+            attempt_count: 2,
+            attempt_row: Some("att-1"),
+            laps: 3,
+            worker: false,
+        });
+        assert!(line.contains("model=m"), "{line}");
+        assert!(line.contains("duration_ms=1500"), "{line}");
+        assert!(line.contains("1600x900"), "{line}");
+        assert!(line.contains("res-1"), "{line}");
     }
 
     /// The wiring `worker_loop` relies on: with one permit, gated sections

@@ -29,6 +29,9 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Run page checkbox renamed `Debug` → `Verbose log`: it gates per-image
+  diagnostic lines, now detailed (model, attempts, duration, tokens/tps,
+  encoded payload, DB ids) from one shared builder for both run paths.
 - Dead code removed: the `--debug` CLI flag (parsed and discarded),
   `run_doctor`/`fast_db_report` wrappers, the `RunDoctor` worker request
   (production uses `RunFullDoctor`), and test/example dummies.

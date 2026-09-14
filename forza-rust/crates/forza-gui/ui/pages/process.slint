@@ -55,7 +55,7 @@ export component ProcessPage inherits Rectangle {
                             toggled => { if self.checked { root.force-checked = false; } }
                         }
                         CheckBox {
-                            text: "Debug";
+                            text: "Verbose log";
                             checked <=> root.debug-checked;
                         }
                     }

@@ -64,5 +64,6 @@ current-thread runtime (sync worker threads only).
 Every attempt persists encoded-image dimensions, runtime snapshot id,
 redacted messages/config, canonical request hash, raw/parsed payloads, token
 and timing stats — with the run's real `context_length`/`reasoning_mode`
-(no hardcoded values). The GUI Debug checkbox adds per-image diagnostic log
-lines (`RunParams::verbose`).
+(no hardcoded values). The GUI "Verbose log" checkbox adds a per-image
+diagnostic line (`RunParams::verbose`): model, attempts, duration,
+tokens/tps, encoded payload size, and DB ids.
