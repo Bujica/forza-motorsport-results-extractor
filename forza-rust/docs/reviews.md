@@ -25,11 +25,14 @@ novel car seeds the catalog immediately and appends it to the shipped
 
 ### Multiclass sessions (`Mixed`)
 
-Session class comes from `detect_race_class` (`forza-domain/src/lap.rs`):
+Session class comes from `detect_race_class` (`forza-domain/src/lap.rs`,
+returns `RaceClass`):
 a single PI letter wins; ≥30% TCR liveries → `TCR`; GT2/GT3 roster shares
-(same 30% bar, `GT2_CARS`/`GT3_CARS` in-car-name sets) → the division, or
-`Mixed` when two divisions share the grid; multiple letters → `Mixed`.
-`Mixed` is deliberately *not* a class: `VALID_CLASSES` excludes it, so
+(same 30% bar, unified `DIVISIONS` table over the `*_CARS` rosters) → the
+division, or `Mixed` when two divisions share the grid; multiple letters
+→ `Mixed`.
+`Mixed` is deliberately *not* a class: `VALID_CLASSES` (now
+`RaceClass::COMPETITION_VALUES`) excludes it, so
 every mixed-lobby image opens one `class_invalid` case asking the operator
 to pick the session class. Division membership is by car identity, not PI
 letters — a GT3 field with an odd letter out (e.g. a PI 784 S Lexus among

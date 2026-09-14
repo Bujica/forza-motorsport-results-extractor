@@ -71,7 +71,7 @@ pub fn to_attempt_insert<'a>(
 pub struct ReplayOutcome {
     pub accepted: bool,
     pub lap_rows: usize,
-    pub attempt_row_ids: Vec<String>,
+    pub attempt_row_ids: Vec<forza_db::AttemptId>,
 }
 
 /// Persist one recorded response for `image_file_id` under `run_id`.
@@ -81,9 +81,9 @@ pub struct ReplayOutcome {
 /// normalizers.
 pub fn replay_recorded_response(
     conn: &mut Connection,
-    run_id: &str,
-    image_file_id: &str,
-    extraction_result_id: &str,
+    run_id: &forza_db::RunId,
+    image_file_id: &forza_db::ImageFileId,
+    extraction_result_id: &forza_db::ExtractionResultId,
     raw_response: &str,
     model: &str,
 ) -> Result<ReplayOutcome, String> {
@@ -157,9 +157,9 @@ pub fn replay_recorded_response(
 /// 40/140 ignored custom ranges). `None` keeps the 40/140 defaults (replay).
 pub fn derive_and_insert_laps(
     conn: &Connection,
-    run_id: &str,
-    image_file_id: &str,
-    extraction_result_id: &str,
+    run_id: &forza_db::RunId,
+    image_file_id: &forza_db::ImageFileId,
+    extraction_result_id: &forza_db::ExtractionResultId,
     parsed: &serde_json::Value,
     source_file: Option<&str>,
     temp_range: Option<(f64, f64)>,

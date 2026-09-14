@@ -124,12 +124,12 @@ impl ImageInventoryService {
             });
         }
         conn.execute_batch("BEGIN IMMEDIATE")
-            .map_err(|e| forza_db::DbError::Pool(format!("BEGIN IMMEDIATE: {e}")))?;
+            .map_err(|e| forza_db::DbError::Transaction(format!("BEGIN IMMEDIATE: {e}")))?;
         let inner = Self::sync_input_folder_inner(&conn, &images);
         match inner {
             Ok(inserted) => {
                 conn.execute_batch("COMMIT")
-                    .map_err(|e| forza_db::DbError::Pool(format!("COMMIT sync: {e}")))?;
+                    .map_err(|e| forza_db::DbError::Transaction(format!("COMMIT sync: {e}")))?;
                 Ok(inserted)
             }
             Err(e) => {

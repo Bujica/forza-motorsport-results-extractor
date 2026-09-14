@@ -9,6 +9,7 @@ pub mod doctor;
 pub mod error;
 pub mod evidence;
 pub mod gui_queries;
+pub mod ids;
 pub mod image_debug;
 pub mod image_detail;
 pub mod migration;
@@ -21,6 +22,7 @@ pub use connection::{
 };
 pub use error::DbError;
 pub use gui_queries::{ImageInventoryFilter, ImageInventoryRow, image_inventory};
+pub use ids::{AttemptId, ExtractionResultId, ImageFileId, RunId, RunInputId};
 pub use image_debug::{
     DebugAttempt, DebugExtraction, DebugLap, DebugReview, DebugRuntimeSnapshot, ImageDebugCase,
     ImageDebugDetail, get_image_debug_detail, get_image_debug_detail_by_result,

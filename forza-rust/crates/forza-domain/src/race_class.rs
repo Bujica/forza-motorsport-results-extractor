@@ -81,6 +81,16 @@ impl RaceClass {
     /// Parse a free-form cell (CSV `Class`, LLM text) with the same rules as
     /// the import path: trim, uppercase, `TCR`/`GT2`/`GT3` prefix wins, else
     /// first character, else `Unknown`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use forza_domain::enums::RaceClass;
+    ///
+    /// assert_eq!(RaceClass::from_csv_cell("gt3 field"), RaceClass::Gt3);
+    /// assert_eq!(RaceClass::from_csv_cell("  A  "), RaceClass::A);
+    /// assert_eq!(RaceClass::from_csv_cell(""), RaceClass::Unknown);
+    /// ```
     #[must_use]
     pub fn from_csv_cell(value: &str) -> Self {
         let v = value.trim().to_uppercase();

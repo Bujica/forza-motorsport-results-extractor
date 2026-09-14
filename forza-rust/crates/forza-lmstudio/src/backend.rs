@@ -399,6 +399,12 @@ impl LMStudioBackend {
 
     /// Full extraction loop. `on_attempt` receives every attempt as it is
     /// recorded (persistence hook for Fase 8).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LlmError::Exhausted`] when all adaptive attempts fail, or
+    /// the underlying [`LlmError::Transport`]/[`LlmError::Http`]/
+    /// [`LlmError::Runtime`] of the fatal attempt.
     pub async fn extract<F>(
         &mut self,
         image_b64: &str,
@@ -433,7 +439,7 @@ impl LMStudioBackend {
                     .await
             };
 
-            let elapsed_ms = started.elapsed().as_millis() as i64;
+            let elapsed_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
             let (http_status, body, transport_detail): (
                 Option<u16>,
                 Option<Value>,
@@ -463,7 +469,7 @@ impl LMStudioBackend {
                     .map(|d| format!("transport error: {d}"))
                     .unwrap_or_else(|| "transport error".to_string());
                 let record = ModelAttemptRecord {
-                    attempt_number: attempt_no as i64,
+                    attempt_number: i64::from(attempt_no),
                     attempt_reason: kind.as_str().into(),
                     status: AttemptStatus::Error,
                     accepted: false,
@@ -507,7 +513,7 @@ impl LMStudioBackend {
                     .unwrap_or_default();
                 let message = format!("HTTP {status_code}{detail_suffix}");
                 let record = ModelAttemptRecord {
-                    attempt_number: attempt_no as i64,
+                    attempt_number: i64::from(attempt_no),
                     attempt_reason: kind.as_str().into(),
                     status: AttemptStatus::Error,
                     accepted: false,
@@ -519,7 +525,7 @@ impl LMStudioBackend {
                         }
                         .into(),
                     ),
-                    http_status: Some(status_code as i64),
+                    http_status: Some(i64::from(status_code)),
                     duration_ms: elapsed_ms,
                     error_code: Some(
                         if retryable {
@@ -560,12 +566,12 @@ impl LMStudioBackend {
             let Some(body) = body else {
                 let message = format!("HTTP {status_code}: response body is not valid JSON");
                 let record = ModelAttemptRecord {
-                    attempt_number: attempt_no as i64,
+                    attempt_number: i64::from(attempt_no),
                     attempt_reason: kind.as_str().into(),
                     status: AttemptStatus::Error,
                     accepted: false,
                     rejected_reason: Some("parse_error".into()),
-                    http_status: Some(status_code as i64),
+                    http_status: Some(i64::from(status_code)),
                     duration_ms: elapsed_ms,
                     error_code: Some("parse_error".into()),
                     error_message: Some(message.clone()),
@@ -619,12 +625,12 @@ impl LMStudioBackend {
                 Ok(value) => value,
                 Err(parse_error) => {
                     let record = ModelAttemptRecord {
-                        attempt_number: attempt_no as i64,
+                        attempt_number: i64::from(attempt_no),
                         attempt_reason: kind.as_str().into(),
                         status: AttemptStatus::Error,
                         accepted: false,
                         rejected_reason: Some("parse_error".into()),
-                        http_status: Some(status_code as i64),
+                        http_status: Some(i64::from(status_code)),
                         duration_ms: elapsed_ms,
                         error_code: Some("parse_error".into()),
                         error_message: Some(parse_error.clone()),
@@ -657,12 +663,12 @@ impl LMStudioBackend {
             let issues = semantic_retry_issues(&parsed);
             if !issues.is_empty() && attempt_no < self.cfg.max_retries {
                 let record = ModelAttemptRecord {
-                    attempt_number: attempt_no as i64,
+                    attempt_number: i64::from(attempt_no),
                     attempt_reason: kind.as_str().into(),
                     status: AttemptStatus::Error,
                     accepted: false,
                     rejected_reason: Some("semantic_validation".into()),
-                    http_status: Some(status_code as i64),
+                    http_status: Some(i64::from(status_code)),
                     duration_ms: elapsed_ms,
                     error_code: Some("semantic_validation".into()),
                     error_message: Some(issues.join(";")),
@@ -707,12 +713,12 @@ impl LMStudioBackend {
             let request_config = Self::request_config(&payload);
             let messages_redacted = Self::redacted_messages(&payload);
             let record = ModelAttemptRecord {
-                attempt_number: attempt_no as i64,
+                attempt_number: i64::from(attempt_no),
                 attempt_reason: kind.as_str().into(),
                 status: AttemptStatus::Ok,
                 accepted: true,
                 model_instance_id: instance_from_response.or_else(|| self.instance_id.clone()),
-                http_status: Some(status_code as i64),
+                http_status: Some(i64::from(status_code)),
                 duration_ms: elapsed_ms,
                 retry_instruction_text: Some(user_text.clone()),
                 request_config_json: Some(request_config.to_string()),
@@ -768,6 +774,11 @@ impl LMStudioBackend {
     /// that concurrent workers cannot race on `/models` / `/models/load` and
     /// unload each other's loaded instances.  Matches Python's
     /// `_model_lock` / `_MODEL_LOCKS` pattern.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LlmError::Runtime`] when the runtime is unreachable or the
+    /// model cannot be brought to a compatible loaded state.
     pub async fn ensure_loaded(&mut self, desired: &DesiredLoadConfig) -> Result<(), LlmError> {
         let lock = model_lock(&self.cfg.api_base(), &self.cfg.model).await;
         let _guard = lock.lock().await;
@@ -853,7 +864,7 @@ impl LMStudioBackend {
                     return resp
                         .json()
                         .await
-                        .map_err(|e| LlmError::Runtime(e.to_string()));
+                        .map_err(|e| LlmError::Runtime(format!("decode chat response: {e}")));
                 }
                 Err(err) => {
                     last_error = err.to_string();
@@ -935,6 +946,7 @@ fn output_text(data: &Value) -> String {
 
 /// Exponential backoff for runtime endpoints: min(0.5 * 2^(n-1), 4s).
 async fn runtime_backoff(attempt: usize) {
-    let total = (0.5 * 2f64.powi(attempt as i32 - 1)).min(4.0);
+    let shift = i32::try_from(attempt).unwrap_or(i32::MAX) - 1;
+    let total = (0.5 * 2f64.powi(shift)).min(4.0);
     tokio::time::sleep(Duration::from_secs_f64(total)).await;
 }

@@ -151,6 +151,7 @@ fn full_doctor_accepts_stamped_evidence_chain() {
     // Mirrors what the extraction runner now persists: attempts reference the
     // preflight runtime snapshot, carry a canonical request_hash, and results
     // retain the run's prompt snapshot.
+    use forza_db::ids::{ExtractionResultId, ImageFileId, RunId};
     use forza_db::repositories::runs::{AttemptInsert, insert_attempt_full};
 
     let dir = tempfile::tempdir().unwrap();
@@ -192,18 +193,19 @@ fn full_doctor_accepts_stamped_evidence_chain() {
     .unwrap();
 
     let messages = r#"[{"role":"user","content":"redacted"}]"#;
-    let request_hash = forza_db::evidence::canonical_request_hash(
-        Some(messages),
-        Some(r#"{"temperature":0.7}"#),
-        Some(&prompt_id),
-        Some("model-x"),
-        Some("hash_1"),
-        Some("png"),
-        Some("image/png"),
-        Some(1600),
-        Some(900),
-        Some(2048),
-    );
+    let request_hash =
+        forza_db::evidence::canonical_request_hash(&forza_db::evidence::RequestFingerprint {
+            request_messages_json: Some(messages),
+            request_config_json: Some(r#"{"temperature":0.7}"#),
+            prompt_snapshot_id: Some(&prompt_id),
+            model: Some("model-x"),
+            source_file_hash: Some("hash_1"),
+            request_image_format: Some("png"),
+            request_image_mime_type: Some("image/png"),
+            request_image_width: Some(1600),
+            request_image_height: Some(900),
+            request_image_bytes: Some(2048),
+        });
     let insert = AttemptInsert {
         attempt_number: 1,
         attempt_reason: "initial",
@@ -242,7 +244,14 @@ fn full_doctor_accepts_stamped_evidence_chain() {
         time_to_first_token_s: None,
         model_load_time_s: None,
     };
-    insert_attempt_full(&conn, "run-1", "img-1", "res-1", &insert).unwrap();
+    insert_attempt_full(
+        &conn,
+        &RunId::new("run-1"),
+        &ImageFileId::new("img-1"),
+        &ExtractionResultId::new("res-1"),
+        &insert,
+    )
+    .unwrap();
     conn.execute(
         "UPDATE extraction_results SET accepted_attempt_id='att-res-1-1' WHERE id='res-1'",
         [],

@@ -103,6 +103,11 @@ fn quote_minimal(field: &str, out: &mut String) {
 }
 
 /// Write the flat CSV; returns the number of rows written.
+///
+/// # Errors
+///
+/// Returns [`ExportError::Io`] when the parent directory cannot be created
+/// or the output file cannot be written.
 pub fn export_csv(rows: &[ExportRow], out_path: &Path) -> Result<usize, ExportError> {
     if let Some(parent) = out_path.parent()
         && !parent.as_os_str().is_empty()

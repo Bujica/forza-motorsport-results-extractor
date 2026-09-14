@@ -69,10 +69,23 @@ fn scene() -> Scene {
 fn replay(conn: &mut Connection, image: &str, seq: i64, body: &str) {
     let run_id = "20260825_120000_fase8";
     let result_id = forza_db::repositories::runs::insert_input_and_result(
-        conn, run_id, image, "process", "running", seq,
+        conn,
+        &forza_db::ids::RunId::new(run_id),
+        &forza_db::ids::ImageFileId::new(image),
+        "process",
+        "running",
+        seq,
     )
     .unwrap();
-    replay_recorded_response(conn, run_id, image, &result_id, body, "test-model").unwrap();
+    replay_recorded_response(
+        conn,
+        &forza_db::ids::RunId::new(run_id),
+        &forza_db::ids::ImageFileId::new(image),
+        &result_id,
+        body,
+        "test-model",
+    )
+    .unwrap();
 }
 
 #[test]

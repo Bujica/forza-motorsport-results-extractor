@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use anyhow::Context;
+
 use super::common::{load_validated_config, short_hash};
 
 pub(crate) fn cmd_run(
@@ -22,7 +24,8 @@ pub(crate) fn cmd_run(
         return cmd_live_run(&cfg, force, retry_errors, limit);
     }
 
-    let conn = forza_db::open_connection(&cfg.database_file)?;
+    let conn = forza_db::open_connection(&cfg.database_file)
+        .with_context(|| format!("open database {}", cfg.database_file.display()))?;
 
     // Single owner for discovery planning (see forza_app::build_discovery_plan):
     // retry/force/limit rules live there so CLI dry-run and the live runner

@@ -38,6 +38,13 @@ preserving operator decisions), `corrections` (scoped apply), `flags`
 (flag sync), `best_laps` (transactional frontier recompute), `images`,
 `external_records` (atomic snapshot replace).
 
+Row identities on the attempt/result path are newtypes (`src/ids.rs`:
+`RunId`, `ImageFileId`, `ExtractionResultId`, `AttemptId`, `RunInputId`)
+so swapped ids fail to compile; storage/queries stay text/integer.
+
+`DbError` splits transaction failures (`Transaction`, message carries
+`phase: cause`) from pool acquisition (`Pool(r2d2::Error)`, source kept).
+
 ## Doctor (`forza-db/src/doctor/`)
 
 `run_full_doctor` runs the ~70-check battery (integrity, run/input/result/

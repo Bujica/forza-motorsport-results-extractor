@@ -61,7 +61,6 @@ impl ImageDiscoveryPlan {
 /// When a path's stored hash matches the on-disk hash the file is `existing`.
 pub type KnownPathHashes = HashMap<String, String>;
 
-#[allow(clippy::too_many_arguments)]
 pub fn plan_images(
     all_images: &[PathBuf],
     known_hashes: &HashSet<String>,

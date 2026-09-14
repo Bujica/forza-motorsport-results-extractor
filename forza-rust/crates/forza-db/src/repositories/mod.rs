@@ -33,6 +33,7 @@ pub use runs::{
 };
 
 use crate::error::DbError;
+use crate::ids::{ImageFileId, RunId};
 use rusqlite::Connection;
 
 /// Generate an opaque row id: `{prefix}-{uuid4 simple}`.
@@ -79,18 +80,42 @@ pub fn seed_demo_database(conn: &mut Connection) -> Result<(), DbError> {
         },
     )?;
 
-    let result_a = runs::insert_input_and_result(conn, &run_id, img_a, "process", "ok", 1)?;
-    let _result_b = runs::insert_input_and_result(conn, &run_id, img_b, "process", "ok", 2)?;
-    let attempt_a = runs::insert_accepted_attempt(conn, &result_a, &run_id, img_a)?;
-    let attempt_b = runs::insert_accepted_attempt(conn, &_result_b, &run_id, img_b)?;
+    let result_a = runs::insert_input_and_result(
+        conn,
+        &RunId::new(&run_id),
+        &ImageFileId::new(img_a),
+        "process",
+        "ok",
+        1,
+    )?;
+    let _result_b = runs::insert_input_and_result(
+        conn,
+        &RunId::new(&run_id),
+        &ImageFileId::new(img_b),
+        "process",
+        "ok",
+        2,
+    )?;
+    let attempt_a = runs::insert_accepted_attempt(
+        conn,
+        &result_a,
+        &RunId::new(&run_id),
+        &ImageFileId::new(img_a),
+    )?;
+    let attempt_b = runs::insert_accepted_attempt(
+        conn,
+        &_result_b,
+        &RunId::new(&run_id),
+        &ImageFileId::new(img_b),
+    )?;
 
     laps::insert_lap_record(
         conn,
         &LapRecordInsert {
             run_id: &run_id,
             image_file_id: img_a,
-            extraction_result_id: &result_a,
-            attempt_id: Some(&attempt_a),
+            extraction_result_id: result_a.as_str(),
+            attempt_id: Some(attempt_a.as_str()),
             lap_index: 1,
             driver: "Player One",
             car: "Audi R8 LMS",
@@ -108,8 +133,8 @@ pub fn seed_demo_database(conn: &mut Connection) -> Result<(), DbError> {
         &LapRecordInsert {
             run_id: &run_id,
             image_file_id: img_b,
-            extraction_result_id: &_result_b,
-            attempt_id: Some(&attempt_b),
+            extraction_result_id: _result_b.as_str(),
+            attempt_id: Some(attempt_b.as_str()),
             lap_index: 1,
             driver: "Rival Driver",
             car: "BMW M4 GT3",

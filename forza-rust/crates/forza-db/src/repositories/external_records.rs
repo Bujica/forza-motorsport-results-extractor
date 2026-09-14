@@ -87,7 +87,7 @@ pub fn replace_active_snapshot(
         });
     }
     conn.execute_batch("BEGIN IMMEDIATE")
-        .map_err(|e| DbError::Pool(format!("BEGIN IMMEDIATE: {e}")))?;
+        .map_err(|e| DbError::Transaction(format!("BEGIN IMMEDIATE: {e}")))?;
     let inner: Result<String, DbError> = (|| {
         conn.execute(
             "UPDATE external_record_imports SET active = 0 WHERE active = 1",
@@ -145,7 +145,7 @@ pub fn replace_active_snapshot(
     match inner {
         Ok(id) => {
             conn.execute_batch("COMMIT")
-                .map_err(|e| DbError::Pool(format!("COMMIT snapshot: {e}")))?;
+                .map_err(|e| DbError::Transaction(format!("COMMIT snapshot: {e}")))?;
             Ok(id)
         }
         Err(e) => {

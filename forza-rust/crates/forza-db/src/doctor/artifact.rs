@@ -70,7 +70,7 @@ fn prompt_payload_hash(
     sha256_hex(canonical.as_bytes())
 }
 
-use crate::evidence::canonical_request_hash;
+use crate::evidence::{RequestFingerprint, canonical_request_hash};
 
 // ── Artifact checks (artifact_checks.py) ─────────────────────────────────────
 
@@ -690,18 +690,18 @@ fn invalid_request_hashes(conn: &Connection) -> Result<i64, DbError> {
             invalid += 1;
             continue;
         };
-        let expected = canonical_request_hash(
-            request_messages.as_deref(),
-            request_config.as_deref(),
-            prompt_snapshot_id.as_deref(),
-            model.as_deref(),
-            source_file_hash.as_deref(),
-            image_format.as_deref(),
-            image_mime.as_deref(),
-            image_width,
-            image_height,
-            image_bytes,
-        );
+        let expected = canonical_request_hash(&RequestFingerprint {
+            request_messages_json: request_messages.as_deref(),
+            request_config_json: request_config.as_deref(),
+            prompt_snapshot_id: prompt_snapshot_id.as_deref(),
+            model: model.as_deref(),
+            source_file_hash: source_file_hash.as_deref(),
+            request_image_format: image_format.as_deref(),
+            request_image_mime_type: image_mime.as_deref(),
+            request_image_width: image_width,
+            request_image_height: image_height,
+            request_image_bytes: image_bytes,
+        });
         if expected != stored_hash {
             invalid += 1;
         }

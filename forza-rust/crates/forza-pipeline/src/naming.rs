@@ -23,6 +23,18 @@ fn safe_name(text: &str) -> String {
 ///
 /// Takes the unified [`RaceClass`] so a new class cannot silently render as an
 /// empty or fallback string in renamed files.
+///
+/// # Examples
+///
+/// ```
+/// use forza_domain::enums::RaceClass;
+/// use forza_pipeline::semantic_filename;
+///
+/// assert_eq!(
+///     semantic_filename("Fuji Speedway", RaceClass::A, ".png"),
+///     "Fuji Speedway - A.png"
+/// );
+/// ```
 pub fn semantic_filename(track: &str, race_class: RaceClass, suffix: &str) -> String {
     let track_part = {
         let s = safe_name(track);

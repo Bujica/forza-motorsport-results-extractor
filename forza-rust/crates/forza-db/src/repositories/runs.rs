@@ -6,6 +6,7 @@
 //! the application configuration crate.
 
 use crate::error::DbError;
+use crate::ids::{AttemptId, ExtractionResultId, ImageFileId, RunId, RunInputId};
 use rusqlite::{Connection, params};
 
 pub struct RunInsert {
@@ -211,20 +212,20 @@ pub fn update_run_metadata(
 /// doctor reports as `run_inputs_process_without_one_result`.
 pub fn insert_input_and_result(
     conn: &Connection,
-    run_id: &str,
-    image_file_id: &str,
+    run_id: &RunId,
+    image_file_id: &ImageFileId,
     decision: &str,
     result_status: &str,
     input_order: i64,
-) -> Result<String, DbError> {
+) -> Result<ExtractionResultId, DbError> {
     if !conn.is_autocommit() {
         return Err(DbError::SchemaState {
             message: "insert_input_and_result requires autocommit (no outer transaction)".into(),
         });
     }
     conn.execute_batch("BEGIN IMMEDIATE")
-        .map_err(|e| DbError::Pool(format!("BEGIN IMMEDIATE: {e}")))?;
-    let inner: Result<String, DbError> = (|| {
+        .map_err(|e| DbError::Transaction(format!("BEGIN IMMEDIATE: {e}")))?;
+    let inner: Result<ExtractionResultId, DbError> = (|| {
         // `run_inputs.id` is `INTEGER PRIMARY KEY AUTOINCREMENT` (atomic,
         // worker-safe): never compute `MAX(id)+1` client-side — concurrent
         // workers snapshotting the same MAX would collide on the PK.
@@ -241,12 +242,12 @@ pub fn insert_input_and_result(
              VALUES (?1, ?2, ?3, ?4, ?5, 0, datetime('now'), datetime('now'))",
             params![result_id, run_id, input_id, image_file_id, result_status],
         )?;
-        Ok(result_id)
+        Ok(ExtractionResultId::new(result_id))
     })();
     match inner {
         Ok(id) => {
             conn.execute_batch("COMMIT")
-                .map_err(|e| DbError::Pool(format!("COMMIT input+result: {e}")))?;
+                .map_err(|e| DbError::Transaction(format!("COMMIT input+result: {e}")))?;
             Ok(id)
         }
         Err(e) => {
@@ -261,12 +262,12 @@ pub fn insert_input_and_result(
 /// "retry_errors"), with the pending result row.
 pub fn insert_processed_input(
     conn: &Connection,
-    run_id: &str,
-    image_file_id: &str,
+    run_id: &RunId,
+    image_file_id: &ImageFileId,
     input_path: &str,
     process_reason: &str,
     input_order: i64,
-) -> Result<String, DbError> {
+) -> Result<ExtractionResultId, DbError> {
     insert_processed_input_full(
         conn,
         run_id,
@@ -283,12 +284,12 @@ pub fn insert_processed_input(
 /// non-unique `(run_id, input_order)` predicate.
 pub fn insert_processed_input_full(
     conn: &Connection,
-    run_id: &str,
-    image_file_id: &str,
+    run_id: &RunId,
+    image_file_id: &ImageFileId,
     input_path: &str,
     process_reason: &str,
     input_order: i64,
-) -> Result<(String, i64), DbError> {
+) -> Result<(ExtractionResultId, RunInputId), DbError> {
     if !conn.is_autocommit() {
         return Err(DbError::SchemaState {
             message: "insert_processed_input_full requires autocommit (no outer transaction)"
@@ -296,8 +297,8 @@ pub fn insert_processed_input_full(
         });
     }
     conn.execute_batch("BEGIN IMMEDIATE")
-        .map_err(|e| DbError::Pool(format!("BEGIN IMMEDIATE: {e}")))?;
-    let inner: Result<(String, i64), DbError> = (|| {
+        .map_err(|e| DbError::Transaction(format!("BEGIN IMMEDIATE: {e}")))?;
+    let inner: Result<(ExtractionResultId, RunInputId), DbError> = (|| {
         conn.execute(
             "INSERT INTO run_inputs (run_id, image_file_id, decision, input_order,
                                      input_path, process_reason, created_at)
@@ -318,12 +319,15 @@ pub fn insert_processed_input_full(
              VALUES (?1, ?2, ?3, ?4, 'running', 0, datetime('now'), datetime('now'))",
             params![result_id, run_id, input_id, image_file_id],
         )?;
-        Ok((result_id, input_id))
+        Ok((
+            ExtractionResultId::new(result_id),
+            RunInputId::new(input_id),
+        ))
     })();
     match inner {
         Ok(pair) => {
             conn.execute_batch("COMMIT")
-                .map_err(|e| DbError::Pool(format!("COMMIT processed input: {e}")))?;
+                .map_err(|e| DbError::Transaction(format!("COMMIT processed input: {e}")))?;
             Ok(pair)
         }
         Err(e) => {
@@ -378,11 +382,11 @@ pub struct AttemptInsert<'a> {
 /// (raw/parsed/config/messages/stats) as persisted by the pipeline.
 pub fn insert_attempt_full(
     conn: &Connection,
-    run_id: &str,
-    image_file_id: &str,
-    extraction_result_id: &str,
+    run_id: &RunId,
+    image_file_id: &ImageFileId,
+    extraction_result_id: &ExtractionResultId,
     record: &AttemptInsert<'_>,
-) -> Result<String, DbError> {
+) -> Result<AttemptId, DbError> {
     let id = format!("att-{extraction_result_id}-{}", record.attempt_number);
     conn.execute(
         "INSERT INTO extraction_attempts
@@ -446,15 +450,14 @@ pub fn insert_attempt_full(
             record.model_load_time_s,
         ],
     )?;
-    Ok(id)
+    Ok(AttemptId::new(id))
 }
 
 /// Mark a result as ok and link its accepted attempt.
-#[allow(clippy::too_many_arguments)]
 pub fn finalize_result_ok(
     conn: &Connection,
-    result_id: &str,
-    accepted_attempt_row_id: &str,
+    result_id: &ExtractionResultId,
+    accepted_attempt_row_id: &AttemptId,
     attempt_count: i64,
     stats: &ResultStats<'_>,
 ) -> Result<(), DbError> {
@@ -574,7 +577,6 @@ pub fn mark_run_running(conn: &Connection, run_id: &str) -> Result<(), DbError> 
 }
 
 /// Finalize a run with outcome counters.
-#[allow(clippy::too_many_arguments)]
 /// Finalize a run and recompute every stored counter from the relational
 /// rows (Python  semantics): run_inputs decisions for the input
 /// counters, extraction_results statuses for the result counters, and open
@@ -621,13 +623,12 @@ pub fn find_image_id_by_hash(
 
 /// Insert an accepted attempt for a result. The caller must ensure the
 /// result's own status is consistent (`ck_attempt_acceptance_status`).
-#[allow(clippy::too_many_arguments)]
 pub fn insert_accepted_attempt(
     conn: &Connection,
-    result_id: &str,
-    run_id: &str,
-    image_file_id: &str,
-) -> Result<String, DbError> {
+    result_id: &ExtractionResultId,
+    run_id: &RunId,
+    image_file_id: &ImageFileId,
+) -> Result<AttemptId, DbError> {
     let attempt_id = format!("att-{result_id}");
     let changed = conn.execute(
         "INSERT INTO extraction_attempts
@@ -647,7 +648,7 @@ pub fn insert_accepted_attempt(
             ),
         });
     }
-    Ok(attempt_id)
+    Ok(AttemptId::new(attempt_id))
 }
 
 /// Reconcile abandoned runs: every extraction_run still marked `running` at

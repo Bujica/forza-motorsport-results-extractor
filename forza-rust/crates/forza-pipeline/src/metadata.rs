@@ -33,6 +33,11 @@ pub struct ImageMetadataInfo {
 
 /// Inspect the physical file; `file_modified_at` stays the official race-date
 /// source in this project (captured by callers via `fs::metadata`).
+///
+/// # Errors
+///
+/// Returns [`PipelineError::Encode`] when filesystem metadata cannot be read
+/// or the image cannot be opened/decoded.
 pub fn inspect_metadata(path: &Path) -> Result<ImageMetadataInfo, PipelineError> {
     let meta = std::fs::metadata(path).map_err(|e| PipelineError::Encode {
         path: path.to_path_buf(),

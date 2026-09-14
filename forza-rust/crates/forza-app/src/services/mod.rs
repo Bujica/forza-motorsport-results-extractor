@@ -168,7 +168,8 @@ pub fn run_doctor(database_file: &std::path::Path) -> Result<DoctorSummary, Stri
 }
 
 pub fn run_full_doctor_on_path(database_file: &std::path::Path) -> Result<DoctorSummary, String> {
-    let status = forza_db::migration::schema_status(database_file).map_err(|e| e.to_string())?;
+    let status = forza_db::migration::schema_status(database_file)
+        .map_err(|e| format!("schema status {}: {e}", database_file.display()))?;
     let status_label = match status {
         forza_db::migration::SchemaStatus::Empty => "empty".to_string(),
         forza_db::migration::SchemaStatus::Current => "current".to_string(),
@@ -198,7 +199,8 @@ pub fn run_full_doctor_on_path(database_file: &std::path::Path) -> Result<Doctor
             Ok(DoctorSummary::from_report(report))
         }
         _ => {
-            let conn = forza_db::open_connection(database_file).map_err(|e| e.to_string())?;
+            let conn = forza_db::open_connection(database_file)
+                .map_err(|e| format!("open database {}: {e}", database_file.display()))?;
             // Determine precise schema_status label via doctor helper
             let precise_status = {
                 // Use doctor's internal label if possible: rely on schema_state_label via full report

@@ -16,3 +16,4 @@ current behavior contract; current behavior lives in the topic docs and the
 | --- | --- |
 | `2026-09-04_rust_migration_completion.md` | Migration sign-off: parity verification, deferred scope, residual risks. |
 | `2026-09-10_post_migration_refinement.md` | Post-sign-off cycle: god-file splits, runner/discovery dedup, review refinement, backlog A–F, workers=2 incident + inference concurrency. |
+| `2026-09-14_unified-race-class_and_skill_rules.md` | Unified `RaceClass` + skill-rules cycle: error context/chains, build policy, lints, casts, param structs, newtype IDs, doctests, proptest. |

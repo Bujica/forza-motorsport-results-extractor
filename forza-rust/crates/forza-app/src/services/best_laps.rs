@@ -191,6 +191,11 @@ fn row_from_external(rec: ExternalLapRecord) -> BestLapRow {
 }
 
 /// Load all best-lap rows (internal frontier + active external), sorted per domain ordering.
+///
+/// # Errors
+///
+/// Returns `Err` with the database message when lap or external-record
+/// queries fail.
 pub fn list_best_laps(conn: &Connection, gamertag_lower: &str) -> Result<Vec<BestLapRow>, String> {
     let _ = forza_db::migration::seed_reference_catalog(conn);
     let internal = forza_db::repositories::laps::list_clean_flat(conn, gamertag_lower)

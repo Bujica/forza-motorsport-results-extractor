@@ -60,30 +60,30 @@ pub(super) fn apply_review_detail(ui: &MainWindow) {
                 }
                 _ => "—".to_string(),
             };
-            let current_driver = c.driver.clone().unwrap_or_default();
-            let current_car = c.car.clone().unwrap_or_default();
+            let current_driver = c.driver.as_deref().unwrap_or("");
+            let current_car = c.car.as_deref().unwrap_or("");
             let current_lap = c
                 .current_best_lap
-                .clone()
-                .or_else(|| c.best_lap.clone())
-                .unwrap_or_default();
+                .as_deref()
+                .or(c.best_lap.as_deref())
+                .unwrap_or("");
             ui.set_review_detail_lines(
                 format!(
                     "Case: {}\nStable ID: {}\nOutcome: {}\nReason: {}\nTrigger: {}\nModel value: {}\nCorrected value: {}\nDecision: {}\nError: {}\nResolution: {}\nFile: {}\nCurrent track: {}\nCurrent class: {}\nCurrent weather: {}\nTemp: {}\nCurrent driver: {}\nCurrent car: {}\nCurrent lap: {}",
                     c.case_number,
-                    c.image_file_id.clone().unwrap_or_default(),
+                    c.image_file_id.as_deref().unwrap_or(""),
                     display_outcome(&c.status, c.outcome.as_deref()),
                     c.reason,
-                    c.trigger.clone().unwrap_or_default(),
-                    c.model_value.clone().unwrap_or_default(),
-                    c.corrected_value.clone().unwrap_or_default(),
+                    c.trigger.as_deref().unwrap_or(""),
+                    c.model_value.as_deref().unwrap_or(""),
+                    c.corrected_value.as_deref().unwrap_or(""),
                     decision,
-                    c.error_type.clone().unwrap_or_default(),
-                    c.resolution_note.clone().unwrap_or_default(),
-                    c.source_file.clone().unwrap_or_default(),
-                    c.track.clone().unwrap_or_default(),
-                    c.race_class.clone().unwrap_or_default(),
-                    c.weather.clone().unwrap_or_default(),
+                    c.error_type.as_deref().unwrap_or(""),
+                    c.resolution_note.as_deref().unwrap_or(""),
+                    c.source_file.as_deref().unwrap_or(""),
+                    c.track.as_deref().unwrap_or(""),
+                    c.race_class.as_deref().unwrap_or(""),
+                    c.weather.as_deref().unwrap_or(""),
                     temp,
                     current_driver,
                     current_car,

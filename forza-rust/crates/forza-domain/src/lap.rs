@@ -105,6 +105,7 @@ fn remove_variation_selectors(value: &str) -> String {
 
 /// Remove trailing dirty-lap symbol(s) and preceding whitespace. Symbols in
 /// the middle or beginning are preserved.
+#[must_use]
 pub fn strip_dirty_symbol(value: &str) -> String {
     let s = value.trim();
     let s = remove_variation_selectors(s);
@@ -115,6 +116,7 @@ const LAP_TIME_PLACEHOLDERS: &[&str] = &["", "--", "---", "dnf", "dnq", "null", 
 
 /// Convert a lap time string (`MM:SS.mmm` or `SS.mmm`) to canonical integer
 /// milliseconds. Gap times, placeholders, and invalid values return `None`.
+#[must_use]
 pub fn parse_lap_time_ms(value: Option<&str>) -> Option<i64> {
     let raw = value?.trim();
     if LAP_TIME_PLACEHOLDERS.contains(&raw.to_lowercase().as_str()) {
@@ -238,6 +240,15 @@ fn collapse_whitespace(value: &str) -> String {
 }
 
 /// Map model/weather words (English and Portuguese) onto the supported labels.
+///
+/// # Examples
+///
+/// ```
+/// use forza_domain::lap::normalize_weather;
+///
+/// assert_eq!(normalize_weather(Some("chuva")), "rain");
+/// assert_eq!(normalize_weather(None), "unknown");
+/// ```
 pub fn normalize_weather(value: Option<&str>) -> &'static str {
     let text = value.unwrap_or("").trim().to_lowercase();
     match text.as_str() {
@@ -377,6 +388,16 @@ mod tests {
     fn unknown_weather_has_one_shared_spelling() {
         assert_eq!(normalize_weather(None), UNKNOWN_WEATHER);
         assert_eq!(normalize_weather(Some("storm")), UNKNOWN_WEATHER);
+    }
+
+    proptest::proptest! {
+        /// Format/parse round-trip over a full day of milliseconds, clean and
+        /// dirty: the canonical text form must always decode back.
+        #[test]
+        fn lap_time_format_parse_round_trip(ms in 0i64..86_400_000, dirty in proptest::bool::ANY) {
+            let text = format_lap_time_ms(ms, dirty).unwrap();
+            proptest::prop_assert_eq!(parse_lap_time_ms(Some(&text)), Some(ms));
+        }
     }
 
     fn grid(rows: &[(&str, &str)]) -> Vec<RawGridEntry> {

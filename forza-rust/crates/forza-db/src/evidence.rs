@@ -87,21 +87,32 @@ fn json_column(value: Option<&str>) -> String {
     }
 }
 
+/// Fingerprint inputs for [`canonical_request_hash`]: every persisted
+/// request-evidence field. Bundled so callers cannot silently swap two
+/// `Option<&str>` parts (the old 11-argument form allowed exactly that).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RequestFingerprint<'a> {
+    pub request_messages_json: Option<&'a str>,
+    pub request_config_json: Option<&'a str>,
+    pub prompt_snapshot_id: Option<&'a str>,
+    pub model: Option<&'a str>,
+    pub source_file_hash: Option<&'a str>,
+    pub request_image_format: Option<&'a str>,
+    pub request_image_mime_type: Option<&'a str>,
+    pub request_image_width: Option<i64>,
+    pub request_image_height: Option<i64>,
+    pub request_image_bytes: Option<i64>,
+}
+
 /// Hash the exact redacted request evidence persisted in SQLite
 /// (mirrors `forza.db.evidence.canonical_request_hash`).
-#[allow(clippy::too_many_arguments)]
-pub fn canonical_request_hash(
-    request_messages_json: Option<&str>,
-    request_config_json: Option<&str>,
-    prompt_snapshot_id: Option<&str>,
-    model: Option<&str>,
-    source_file_hash: Option<&str>,
-    request_image_format: Option<&str>,
-    request_image_mime_type: Option<&str>,
-    request_image_width: Option<i64>,
-    request_image_height: Option<i64>,
-    request_image_bytes: Option<i64>,
-) -> String {
+///
+/// # Errors
+///
+/// Infallible by design: every part has a canonical null encoding, so this
+/// never fails and returns `String` directly.
+#[must_use]
+pub fn canonical_request_hash(fp: &RequestFingerprint<'_>) -> String {
     let opt_str = |v: Option<&str>| opt_json_string(v);
     let opt_int = |v: Option<i64>| match v {
         Some(n) => n.to_string(),
@@ -113,16 +124,16 @@ pub fn canonical_request_hash(
          \"request_image_height\":{},\"request_image_mime_type\":{},\
          \"request_image_width\":{},\"request_messages_json\":{},\
          \"source_file_hash\":{}}}",
-        opt_str(model),
-        opt_str(prompt_snapshot_id),
-        json_column(request_config_json),
-        opt_int(request_image_bytes),
-        opt_str(request_image_format),
-        opt_int(request_image_height),
-        opt_str(request_image_mime_type),
-        opt_int(request_image_width),
-        json_column(request_messages_json),
-        opt_str(source_file_hash),
+        opt_str(fp.model),
+        opt_str(fp.prompt_snapshot_id),
+        json_column(fp.request_config_json),
+        opt_int(fp.request_image_bytes),
+        opt_str(fp.request_image_format),
+        opt_int(fp.request_image_height),
+        opt_str(fp.request_image_mime_type),
+        opt_int(fp.request_image_width),
+        json_column(fp.request_messages_json),
+        opt_str(fp.source_file_hash),
     );
     let digest = Sha256::digest(canonical.as_bytes());
     format!("{digest:x}")
@@ -131,25 +142,25 @@ pub fn canonical_request_hash(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::{canonical_request_hash, python_json_dumps};
+    use super::{RequestFingerprint, canonical_request_hash, python_json_dumps};
 
     // Golden value generated with Python:
     // json.dumps(canonical, ensure_ascii=True, sort_keys=True,
     //            separators=(",", ":")) + sha256.
     #[test]
     fn request_hash_matches_python_golden() {
-        let got = canonical_request_hash(
-            Some(r#"[{"content":"hello","role":"user"}]"#),
-            Some(r#"{"model":"qwen","temperature":0.7}"#),
-            Some("p:abc"),
-            Some("qwen2-7b"),
-            Some("deadbeef_123"),
-            Some("png"),
-            Some("image/png"),
-            Some(1600),
-            Some(900),
-            Some(2048),
-        );
+        let got = canonical_request_hash(&RequestFingerprint {
+            request_messages_json: Some(r#"[{"content":"hello","role":"user"}]"#),
+            request_config_json: Some(r#"{"model":"qwen","temperature":0.7}"#),
+            prompt_snapshot_id: Some("p:abc"),
+            model: Some("qwen2-7b"),
+            source_file_hash: Some("deadbeef_123"),
+            request_image_format: Some("png"),
+            request_image_mime_type: Some("image/png"),
+            request_image_width: Some(1600),
+            request_image_height: Some(900),
+            request_image_bytes: Some(2048),
+        });
         assert_eq!(
             got,
             "c32760b55db2e032aea8f379825a129a4f55d145e38771ff3985a87dae83b363"

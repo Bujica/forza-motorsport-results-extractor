@@ -3,7 +3,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {
     #[error("transport error: {0}")]
-    Transport(String),
+    Transport(#[from] reqwest::Error),
 
     #[error("LM Studio returned HTTP {status}")]
     Http { status: u16 },

@@ -31,9 +31,9 @@ fn stamp_writes_track_dash_class_with_source_extension() {
 
     stamp_semantic_name(
         &conn,
-        "img-s",
+        &forza_db::ids::ImageFileId::new("img-s"),
         std::path::Path::new("some/dir/shot.png"),
-        "res-s",
+        &forza_db::ids::ExtractionResultId::new("res-s"),
     );
 
     let name: Option<String> = conn
@@ -60,9 +60,9 @@ fn stamp_without_laps_leaves_null() {
 
     stamp_semantic_name(
         &conn,
-        "img-n",
+        &forza_db::ids::ImageFileId::new("img-n"),
         std::path::Path::new("shot.png"),
-        "res-missing",
+        &forza_db::ids::ExtractionResultId::new("res-missing"),
     );
 
     let name: Option<String> = conn

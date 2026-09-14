@@ -14,6 +14,7 @@ pub const SUPPORTED_FORMATS: &[(&str, &str)] = &[
     ("webp", "image/webp"),
 ];
 
+#[must_use]
 pub fn mime_for_format(format: &str) -> Option<&'static str> {
     let lower = format.to_lowercase();
     SUPPORTED_FORMATS
@@ -38,7 +39,9 @@ pub enum EncodeError {
     #[error("unsupported image format '{0}'. Valid options: png, jpeg, webp")]
     UnsupportedFormat(String),
     #[error("encode failed: {0}")]
-    Io(String),
+    Io(#[from] std::io::Error),
+    #[error("encode failed: {0}")]
+    Image(#[from] image::ImageError),
     #[error("invalid max_width {0}: must be >= 1")]
     InvalidWidth(u32),
 }
@@ -47,6 +50,13 @@ pub enum EncodeError {
 ///
 /// Failures are operational errors; returning an empty payload is unsafe
 /// because callers would send an invalid data URL to the model.
+///
+/// # Errors
+///
+/// Returns [`EncodeError::InvalidWidth`] when `max_width` is zero,
+/// [`EncodeError::UnsupportedFormat`] for unknown containers, and
+/// [`EncodeError::Io`]/[`EncodeError::Image`] when the file cannot be
+/// read, decoded, or re-encoded.
 pub fn encode_image_payload(
     path: &Path,
     max_width: u32,
@@ -65,12 +75,8 @@ pub fn encode_image_payload(
     };
     let mime = mime_static.to_string();
 
-    let reader = image::ImageReader::open(path).map_err(|e| EncodeError::Io(e.to_string()))?;
-    let img = reader
-        .with_guessed_format()
-        .map_err(|e| EncodeError::Io(e.to_string()))?
-        .decode()
-        .map_err(|e| EncodeError::Io(e.to_string()))?;
+    let reader = image::ImageReader::open(path)?;
+    let img = reader.with_guessed_format()?.decode()?;
 
     let mut rgb = img.to_rgb8();
     if rgb.width() > max_width {
@@ -94,14 +100,12 @@ pub fn encode_image_payload(
     match fmt.as_str() {
         "png" => {
             use image::ImageEncoder as _;
-            image::codecs::png::PngEncoder::new(&mut buffer)
-                .write_image(
-                    dynamic.as_bytes(),
-                    dynamic.width(),
-                    dynamic.height(),
-                    dynamic.color().into(),
-                )
-                .map_err(|e| EncodeError::Io(e.to_string()))?;
+            image::codecs::png::PngEncoder::new(&mut buffer).write_image(
+                dynamic.as_bytes(),
+                dynamic.width(),
+                dynamic.height(),
+                dynamic.color().into(),
+            )?;
         }
         "jpeg" => {
             use image::ImageEncoder as _;
@@ -111,15 +115,12 @@ pub fn encode_image_payload(
                     dynamic.width(),
                     dynamic.height(),
                     dynamic.color().into(),
-                )
-                .map_err(|e| EncodeError::Io(e.to_string()))?;
+                )?;
         }
         "webp" => {
             // The pure-Rust image crate encodes lossless webp only; quality is
             // ignored here (documented divergence from PIL's lossy quality).
-            dynamic
-                .write_to(&mut buffer, image::ImageFormat::WebP)
-                .map_err(|e| EncodeError::Io(e.to_string()))?;
+            dynamic.write_to(&mut buffer, image::ImageFormat::WebP)?;
         }
         other => return Err(EncodeError::UnsupportedFormat(other.to_string())),
     }

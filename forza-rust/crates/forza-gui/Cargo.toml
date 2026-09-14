@@ -15,12 +15,12 @@ path = "src/main.rs"
 
 [dependencies]
 rfd = "0.15"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde.workspace = true
+serde_json.workspace = true
 slint = "1"
-tokio = { version = "1", features = ["rt", "sync", "time"] }
-anyhow = "1"
-tracing = "0.1"
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 forza-config = { path = "../forza-config" }
 forza-db = { path = "../forza-db" }
@@ -28,8 +28,8 @@ forza-domain = { path = "../forza-domain" }
 forza-app = { path = "../forza-app" }
 forza-output = { path = "../forza-output" }
 forza-pipeline = { path = "../forza-pipeline" }
-opener = "0.7"
-rusqlite = { version = "0.40", features = ["bundled"] }
+opener.workspace = true
+rusqlite.workspace = true
 
 [build-dependencies]
 slint-build = "1"
@@ -39,7 +39,7 @@ slint-build = "1"
 windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true
 
 # Slint-generated code emits #[allow(unsafe_code)] and is full of unwraps,
 # which conflicts with the workspace-level policy. The GUI crate opts out of

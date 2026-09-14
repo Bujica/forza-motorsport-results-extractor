@@ -6,7 +6,8 @@ Scope: working in `forza-rust/`.
 
 ## Toolchain
 
-Pinned stable Rust via `forza-rust/rust-toolchain.toml`. All commands run with
+Pinned stable Rust via `forza-rust/rust-toolchain.toml`. MSRV
+`rust-version = "1.88"` (edition 2024 + let-chains). All commands run with
 `forza-rust/` as working directory.
 
 ```cmd
@@ -40,6 +41,42 @@ git push                              # pre-push runs fmt + clippy + test
 ```
 
 Bypass only with reason: `SKIP_GUARD=1 git push`.
+
+## Lint policy (`Cargo.toml [workspace.lints]`)
+
+- `rust.unsafe_code = "forbid"` (the GUI crate opts out for Slint-generated
+  code only; hand-written `unsafe` needs a `// SAFETY:` comment).
+- `clippy.correctness = "deny"`; `suspicious`/`style`/`complexity`/`perf` =
+  `"warn"` (groups sit at priority -1 so the individual allows below win).
+- `clippy.unwrap_used`/`expect_used = "warn"`; tests allow both explicitly,
+  production code uses `?`, `let-else`, or `unreachable!` with a documented
+  invariant (`expect` is rejected by the pre-push hook).
+- Every crate inherits via `[lints] workspace = true` except `forza-gui`
+  (see its `Cargo.toml` comment). `missing_docs` stays off: 113 warnings in
+  `forza-domain` alone (every `value_enum!` variant would need docs via a
+  macro change) — key fallible APIs carry `# Errors` sections instead.
+
+## Dependencies and profiles
+
+- Shared third-party versions live in `[workspace.dependencies]`; crates use
+  `dep.workspace = true` so upgrades stay in lockstep.
+- `[profile.release]`: `opt-level 3`, `lto = "fat"`, `codegen-units = 1`,
+  `strip = true`. `[profile.dev.package."*"]` optimizes dependencies in dev.
+
+## Error conventions
+
+- Library crates define `thiserror` enums with `#[source]`-preserving
+  variants (`DbError::Sqlite/Io/Pool`, `EncodeError::Io/Image`,
+  `LlmError::Transport`); message-complete cases (`Transaction`,
+  `Runtime`, `Parse`) document why they carry no source.
+- Binaries (`cli`/`gui`) use `anyhow` + `.context()`/`.with_context()` with
+  the affected path/phase.
+- `forza-app` services return `Result<_, String>` with operation context
+  (`encode {path}: …`, `model load: …`, `open database {path}: …`).
+- Row identities on the attempt/result path are newtypes (`db/src/ids.rs`:
+  `RunId`, `ImageFileId`, `ExtractionResultId`, `AttemptId`, `RunInputId`)
+  with `Display`/`AsRef<str>`/`ToSql`/`FromSql`; SQLite/CSV/Slint stay
+  `String` at the boundary.
 
 ## Fixtures (`forza-rust/fixtures/`)
 

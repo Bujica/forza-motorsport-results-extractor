@@ -7,6 +7,12 @@ use sha2::{Digest, Sha256};
 
 use crate::error::PipelineError;
 
+/// Hash a file with SHA-256 and return `(hex, size_bytes, format)`.
+///
+/// # Errors
+///
+/// Returns [`PipelineError::HashFailed`] when the file cannot be opened or
+/// read (missing file, permissions, I/O failure mid-stream).
 pub fn file_hash(path: &Path) -> Result<String, PipelineError> {
     let mut file = std::fs::File::open(path).map_err(|e| PipelineError::HashFailed {
         path: path.to_path_buf(),

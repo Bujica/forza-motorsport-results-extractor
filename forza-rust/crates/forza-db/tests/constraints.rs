@@ -4,6 +4,7 @@
 //! Constraint and relationship tests translated from
 //! `forza-rust/docs/database.md` — the integrity invariants of the baseline.
 
+use forza_db::ids::{ImageFileId, RunId};
 use forza_db::repositories::{RunInsert, RunMetadata, insert_run, laps, runs, update_run_metadata};
 use forza_db::repositories::{insert_image_file, insert_review_case};
 use forza_db::test_support::seed_demo_database;
@@ -28,9 +29,22 @@ fn one_accepted_attempt_per_result_is_enforced() {
         [],
     )
     .unwrap();
-    let result =
-        runs::insert_input_and_result(&conn, &run_id, "img-x", "process", "ok", 1).unwrap();
-    let first = runs::insert_accepted_attempt(&conn, &result, &run_id, "img-x").unwrap();
+    let result = runs::insert_input_and_result(
+        &conn,
+        &RunId::new(&run_id),
+        &ImageFileId::new("img-x"),
+        "process",
+        "ok",
+        1,
+    )
+    .unwrap();
+    let first = runs::insert_accepted_attempt(
+        &conn,
+        &result,
+        &RunId::new(&run_id),
+        &ImageFileId::new("img-x"),
+    )
+    .unwrap();
 
     let second = format!("att-2-{result}");
     let rejected = conn.execute(
@@ -310,14 +324,21 @@ fn vocabulary_checks_reject_invalid_values() {
     )
     .unwrap();
     let run_id = insert_run(&conn, &RunInsert::demo("run-v")).unwrap();
-    let result =
-        runs::insert_input_and_result(&conn, &run_id, "img-v", "process", "ok", 1).unwrap();
+    let result = runs::insert_input_and_result(
+        &conn,
+        &RunId::new(&run_id),
+        &ImageFileId::new("img-v"),
+        "process",
+        "ok",
+        1,
+    )
+    .unwrap();
     let negative_lap = laps::insert_lap_record(
         &conn,
         &laps::LapRecordInsert {
             run_id: &run_id,
             image_file_id: "img-v",
-            extraction_result_id: &result,
+            extraction_result_id: result.as_str(),
             attempt_id: None,
             lap_index: 1,
             driver: "D",
@@ -380,12 +401,19 @@ fn lap_row_uniqueness_per_result_and_index() {
         },
     )
     .unwrap();
-    let result =
-        runs::insert_input_and_result(&conn, &run_id, "img-l", "process", "ok", 1).unwrap();
+    let result = runs::insert_input_and_result(
+        &conn,
+        &RunId::new(&run_id),
+        &ImageFileId::new("img-l"),
+        "process",
+        "ok",
+        1,
+    )
+    .unwrap();
     let row = laps::LapRecordInsert {
         run_id: &run_id,
         image_file_id: "img-l",
-        extraction_result_id: &result,
+        extraction_result_id: result.as_str(),
         attempt_id: None,
         lap_index: 7,
         driver: "d",

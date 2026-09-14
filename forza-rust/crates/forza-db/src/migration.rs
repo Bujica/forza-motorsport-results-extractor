@@ -57,12 +57,19 @@ pub fn schema_status(path: &Path) -> Result<SchemaStatus, DbError> {
 /// schema contains mutual references), then stamps `PRAGMA user_version`.
 /// Re-running on a current database is a no-op; on a populated database with
 /// a different version it is refused.
+///
+/// # Errors
+///
+/// Returns [`DbError::SchemaState`] for a populated database whose
+/// `user_version` differs from [`SCHEMA_VERSION`], [`DbError::Io`] when the
+/// parent directory cannot be created, or [`DbError::Sqlite`]/
+/// [`DbError::Transaction`] on DDL/seed failures.
 pub fn upgrade(path: &Path) -> Result<(), DbError> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
         && !parent.exists()
     {
-        std::fs::create_dir_all(parent).map_err(|e| DbError::Pool(e.to_string()))?;
+        std::fs::create_dir_all(parent)?;
     }
     let mut conn = Connection::open(path)?;
 
@@ -89,7 +96,7 @@ pub fn upgrade(path: &Path) -> Result<(), DbError> {
                 // Surface backfill failures: a silent skip leaves a DB the
                 // doctor later flags with no trace of the real cause.
                 c.execute_batch(sql)
-                    .map_err(|e| DbError::Pool(format!("backfill index {name}: {e}")))?;
+                    .map_err(|e| DbError::Transaction(format!("backfill index {name}: {e}")))?;
             }
         }
         Ok(())
@@ -157,7 +164,7 @@ pub fn seed_reference_catalog(conn: &rusqlite::Connection) -> Result<(), crate::
         });
     }
     conn.execute_batch("BEGIN IMMEDIATE")
-        .map_err(|e| DbError::Pool(format!("BEGIN IMMEDIATE: {e}")))?;
+        .map_err(|e| DbError::Transaction(format!("BEGIN IMMEDIATE: {e}")))?;
     let inner: Result<(), DbError> = (|| {
         let data = forza_domain::reference_data::embedded_reference_data();
         for name in &data.tracks {
@@ -181,7 +188,7 @@ pub fn seed_reference_catalog(conn: &rusqlite::Connection) -> Result<(), crate::
     match inner {
         Ok(()) => {
             conn.execute_batch("COMMIT")
-                .map_err(|e| DbError::Pool(format!("COMMIT catalog seed: {e}")))?;
+                .map_err(|e| DbError::Transaction(format!("COMMIT catalog seed: {e}")))?;
             Ok(())
         }
         Err(e) => {

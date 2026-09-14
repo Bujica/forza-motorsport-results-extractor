@@ -33,6 +33,11 @@ pub fn configure_connection(conn: &Connection) -> Result<(), DbError> {
 }
 
 /// Open a single configured connection.
+///
+/// # Errors
+///
+/// Returns [`DbError`] when the file cannot be opened, the mandatory
+/// pragmas (WAL, foreign keys) cannot be applied, or the pool errors.
 pub fn open_connection(path: &Path) -> Result<Connection, DbError> {
     let conn = Connection::open(path)?;
     configure_connection(&conn)?;

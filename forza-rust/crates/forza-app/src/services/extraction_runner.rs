@@ -14,8 +14,22 @@ use rusqlite::OptionalExtension;
 /// Inference permits for one run: at most `concurrency` model calls in
 /// flight across all workers (never more than workers, at least one).
 /// Pure so the sizing rule is unit-testable.
+#[must_use]
 fn inference_permits(workers: u32, concurrency: u32) -> usize {
-    (workers.min(concurrency).max(1)) as usize
+    usize::try_from(workers.min(concurrency).max(1)).unwrap_or(usize::MAX)
+}
+
+/// Saturating `i64` (INI-validated, lower-bounded) to `u32`: absurd upper
+/// values saturate instead of wrapping around through `as`.
+#[must_use]
+fn sat_u32(v: i64) -> u32 {
+    u32::try_from(v).unwrap_or(u32::MAX)
+}
+
+/// Saturating `i64` to `u64` for timeouts (same rationale as [`sat_u32`]).
+#[must_use]
+fn sat_u64(v: i64) -> u64 {
+    u64::try_from(v).unwrap_or(u64::MAX)
 }
 
 /// Runs `work` holding one inference permit. The unit under test for the
@@ -54,7 +68,7 @@ fn encode_stage(image_path: &Path, params: &RunParams) -> Result<EncodedImage, S
         &params.image_format,
         params.grayscale,
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| format!("encode {}: {e}", image_path.display()))
 }
 
 /// Ensure the model is loaded before inference. Single owner so
@@ -67,7 +81,7 @@ async fn ensure_loaded_stage(
     backend
         .ensure_loaded(desired)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| format!("model load: {e}"))
 }
 
 /// Outcome of the gated model section in `worker_loop`: computed under one
@@ -84,7 +98,7 @@ enum GatedModelOutcome {
 struct GatedExtracted {
     result: Result<ModelExtractionResult, String>,
     attempt_count: i64,
-    accepted_row: Option<String>,
+    accepted_row: Option<forza_db::AttemptId>,
 }
 
 /// Owned image data for worker threads (avoids borrowing `plan` across threads).
@@ -97,8 +111,8 @@ struct GatedExtracted {
 struct WorkerImage {
     path: PathBuf,
     file_hash: String,
-    result_id: String,
-    input_id: i64,
+    result_id: forza_db::ExtractionResultId,
+    input_id: forza_db::RunInputId,
     input_order: i64,
 }
 
@@ -216,15 +230,15 @@ impl RunParams {
             retry_errors: false,
             selected_image_file_ids: None,
             max_images: None,
-            workers: cfg.workers as u32,
-            inference_concurrency: cfg.inference_concurrency.max(1) as u32,
+            workers: sat_u32(cfg.workers.max(1)),
+            inference_concurrency: sat_u32(cfg.inference_concurrency.max(1)),
             url: cfg.llm.url.clone(),
             model: cfg.llm.model.clone(),
             max_tokens: cfg.llm.max_completion_tokens,
             temperature: cfg.llm.temperature,
-            timeout_connect: cfg.llm.timeout_connect.max(1) as u64,
-            timeout_read: cfg.llm.timeout_read.max(1) as u64,
-            max_retries: cfg.llm.max_retries.max(1) as u32,
+            timeout_connect: sat_u64(cfg.llm.timeout_connect.max(1)),
+            timeout_read: sat_u64(cfg.llm.timeout_read.max(1)),
+            max_retries: sat_u32(cfg.llm.max_retries.max(1)),
             prompt_id: cfg.prompt.active.clone(),
             context_length: cfg.llm.context_length.unwrap_or(5000),
             reasoning_mode: cfg.llm.reasoning_mode.clone(),
@@ -236,7 +250,7 @@ impl RunParams {
             temp_max_f: cfg.validation.temp_max_f,
             verbose: false,
             log_file: cfg.log_file.clone(),
-            max_width: cfg.image.max_width.clamp(1, u32::MAX as i64) as u32,
+            max_width: sat_u32(cfg.image.max_width.clamp(1, u32::MAX as i64)),
             encode_quality: cfg.image.encode_quality.clamp(1, 100) as u8,
             image_format: cfg.llm.image_format.clone(),
             grayscale: cfg.image.grayscale,
@@ -393,16 +407,18 @@ fn upsert_image_for_run(
             file_hash,
             name,
             path.to_string_lossy(),
-            std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(0),
-            meta.as_ref().map(|m| m.width_px as i64).unwrap_or(0),
-            meta.as_ref().map(|m| m.height_px as i64).unwrap_or(0),
+            std::fs::metadata(path)
+                .map(|m| i64::try_from(m.len()).unwrap_or(i64::MAX))
+                .unwrap_or(0),
+            meta.as_ref().map(|m| i64::from(m.width_px)).unwrap_or(0),
+            meta.as_ref().map(|m| i64::from(m.height_px)).unwrap_or(0),
             meta.as_ref()
                 .map(|m| m.image_format.to_lowercase())
                 .unwrap_or_else(|| "png".into()),
             meta.as_ref()
                 .and_then(|m| m.mime_type.clone())
                 .unwrap_or_else(|| "image/png".into()),
-            meta.as_ref().and_then(|m| m.bit_depth.map(|b| b as i64)),
+            meta.as_ref().and_then(|m| m.bit_depth.map(i64::from)),
             meta.as_ref().map(|m| m.color_mode.clone()),
             meta.as_ref().map(|m| m.image_metadata_json.clone()),
             meta.as_ref().and_then(|m| m.file_modified_at.clone()),
@@ -606,8 +622,8 @@ where
             max_completion_tokens: params.max_tokens,
             temperature: params.temperature,
             max_retries: i64::from(params.max_retries),
-            timeout_connect: params.timeout_connect as i64,
-            timeout_read: params.timeout_read as i64,
+            timeout_connect: i64::try_from(params.timeout_connect).unwrap_or(i64::MAX),
+            timeout_read: i64::try_from(params.timeout_read).unwrap_or(i64::MAX),
             config_extra_json: Some(&params.app_version),
         },
     )
@@ -721,7 +737,7 @@ where
 
     let (processed, succeeded, failed) = if params.workers > 1 && total_new > 0 {
         // ── Multi-worker parallel extraction ────────────────────────────
-        let workers = params.workers as usize;
+        let workers = usize::try_from(params.workers).unwrap_or(usize::MAX);
         let (event_tx, event_rx) = channel();
         let control = Arc::new(control.clone());
         // Run-shared inference semaphore: at most `inference_concurrency`
@@ -760,8 +776,8 @@ where
                 };
             let (result_id, input_id) = match insert_processed_input_full(
                 &conn,
-                &run_id,
-                &image_file_id,
+                &forza_db::RunId::new(&run_id),
+                &forza_db::ImageFileId::new(&image_file_id),
                 &image.path.to_string_lossy(),
                 process_reason,
                 input_order,
@@ -781,7 +797,7 @@ where
             stamp_result_prompt(&conn, &result_id, &prompt_snapshot_id);
             stamp_input_metadata(
                 &conn,
-                &run_id,
+                &forza_db::RunId::new(&run_id),
                 input_id,
                 &image.file_hash,
                 &name,
@@ -790,7 +806,7 @@ where
             // Link batch duplicates to their canonical same-run input.
             canonical_input
                 .entry(image.file_hash.clone())
-                .or_insert(input_id);
+                .or_insert(input_id.as_i64());
             ready.push(WorkerImage {
                 path: image.path.clone(),
                 file_hash: image.file_hash.clone(),
@@ -873,7 +889,7 @@ where
                             worker_loop(
                                 w_idx,
                                 conn_path,
-                                &run_id_clone,
+                                &forza_db::RunId::new(&run_id_clone),
                                 batch,
                                 &params_clone,
                                 control_clone,
@@ -1035,8 +1051,8 @@ where
             // Pending result row before the call (status running).
             let (result_id, input_id) = insert_processed_input_full(
                 &conn,
-                &run_id,
-                &image_file_id,
+                &forza_db::RunId::new(&run_id),
+                &forza_db::ImageFileId::new(&image_file_id),
                 &image.path.to_string_lossy(),
                 process_reason,
                 input_order,
@@ -1045,7 +1061,7 @@ where
             stamp_result_prompt(&conn, &result_id, &prompt_snapshot_id);
             stamp_input_metadata(
                 &conn,
-                &run_id,
+                &forza_db::RunId::new(&run_id),
                 input_id,
                 &image.file_hash,
                 &name,
@@ -1083,11 +1099,13 @@ where
 
             // Extract with attempt persistence.
             let mut attempt_count = 0i64;
-            let mut accepted_row: Option<String> = None;
+            let mut accepted_row: Option<forza_db::AttemptId> = None;
+            let run_id_typed = forza_db::RunId::new(&run_id);
+            let image_id_typed = forza_db::ImageFileId::new(&image_file_id);
             let extract_result = {
                 let conn_ref = &conn;
-                let run_id_ref = run_id.clone();
-                let image_id = image_file_id.clone();
+                let run_id_ref = run_id_typed.clone();
+                let image_id = image_id_typed.clone();
                 let result_id_ref = result_id.clone();
                 let model_name = params.model.clone();
                 backend
@@ -1123,8 +1141,8 @@ where
                 Ok(result) => {
                     let laps = match crate::services::extraction_replay::derive_and_insert_laps(
                         &conn,
-                        &run_id,
-                        &image_file_id,
+                        &run_id_typed,
+                        &image_id_typed,
                         &result_id,
                         &result.parsed,
                         Some(&name),
@@ -1176,7 +1194,7 @@ where
                         attempt_count,
                         &stats,
                         &encoded,
-                        &image_file_id,
+                        &image_id_typed,
                         &image.path,
                     )?;
                     succeeded += 1;
@@ -1257,7 +1275,7 @@ where
 /// call sites: failing to record a failure must not abort the run.
 fn fail_result(
     conn: &Connection,
-    result_id: &str,
+    result_id: &forza_db::ExtractionResultId,
     error_type: &str,
     message: &str,
     attempt_count: Option<i64>,
@@ -1314,12 +1332,12 @@ fn build_result_stats<'a>(
 #[allow(clippy::too_many_arguments)]
 fn finalize_ok_stage(
     conn: &Connection,
-    result_id: &str,
-    accepted_row_id: &str,
+    result_id: &forza_db::ExtractionResultId,
+    accepted_row_id: &forza_db::AttemptId,
     attempt_count: i64,
     stats: &forza_db::repositories::runs::ResultStats<'_>,
     encoded: &forza_pipeline::EncodedImage,
-    image_file_id: &str,
+    image_file_id: &forza_db::ImageFileId,
     image_path: &std::path::Path,
 ) -> Result<(), String> {
     forza_db::repositories::runs::finalize_result_ok(
@@ -1341,7 +1359,7 @@ fn finalize_ok_stage(
             encoded.mime_type,
             i64::from(encoded.width_px),
             i64::from(encoded.height_px),
-            encoded.byte_count as i64,
+            i64::try_from(encoded.byte_count).unwrap_or(i64::MAX),
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -1358,9 +1376,9 @@ fn finalize_ok_stage(
 #[allow(clippy::too_many_arguments)]
 fn persist_attempt_with_evidence(
     conn: &Connection,
-    run_id: &str,
-    image_file_id: &str,
-    result_id: &str,
+    run_id: &forza_db::RunId,
+    image_file_id: &forza_db::ImageFileId,
+    result_id: &forza_db::ExtractionResultId,
     record: &ModelAttemptRecord,
     encoded: &forza_pipeline::EncodedImage,
     prompt_snapshot_id: &str,
@@ -1369,7 +1387,7 @@ fn persist_attempt_with_evidence(
     model: &str,
     context_length: Option<i64>,
     reasoning_mode: Option<&str>,
-) -> Option<String> {
+) -> Option<forza_db::AttemptId> {
     let mut insert = crate::services::extraction_replay::to_attempt_insert(
         record,
         model,
@@ -1380,20 +1398,21 @@ fn persist_attempt_with_evidence(
     insert.request_image_mime_type = Some(&encoded.mime_type);
     insert.request_image_width = Some(i64::from(encoded.width_px));
     insert.request_image_height = Some(i64::from(encoded.height_px));
-    insert.request_image_bytes = Some(encoded.byte_count as i64);
+    insert.request_image_bytes = Some(i64::try_from(encoded.byte_count).unwrap_or(i64::MAX));
     insert.runtime_snapshot_id = Some(runtime_snapshot_id);
-    let request_hash = forza_db::evidence::canonical_request_hash(
-        insert.request_messages_json,
-        insert.request_config_json,
-        Some(prompt_snapshot_id),
-        insert.model,
-        Some(source_file_hash),
-        insert.request_image_format,
-        insert.request_image_mime_type,
-        insert.request_image_width,
-        insert.request_image_height,
-        insert.request_image_bytes,
-    );
+    let request_hash =
+        forza_db::evidence::canonical_request_hash(&forza_db::evidence::RequestFingerprint {
+            request_messages_json: insert.request_messages_json,
+            request_config_json: insert.request_config_json,
+            prompt_snapshot_id: Some(prompt_snapshot_id),
+            model: insert.model,
+            source_file_hash: Some(source_file_hash),
+            request_image_format: insert.request_image_format,
+            request_image_mime_type: insert.request_image_mime_type,
+            request_image_width: insert.request_image_width,
+            request_image_height: insert.request_image_height,
+            request_image_bytes: insert.request_image_bytes,
+        });
     insert.request_hash = Some(&request_hash);
     insert_attempt_full_checked(conn, run_id, image_file_id, result_id, &insert)
         .ok()
@@ -1402,7 +1421,11 @@ fn persist_attempt_with_evidence(
 
 /// Every result retains the immutable prompt snapshot of its run (doctor
 /// check `result_prompt_mismatch`).
-fn stamp_result_prompt(conn: &Connection, result_id: &str, prompt_snapshot_id: &str) {
+fn stamp_result_prompt(
+    conn: &Connection,
+    result_id: &forza_db::ExtractionResultId,
+    prompt_snapshot_id: &str,
+) {
     let _ = conn.execute(
         "UPDATE extraction_results SET prompt_snapshot_id=?2 WHERE id=?1",
         rusqlite::params![result_id, prompt_snapshot_id],
@@ -1414,8 +1437,8 @@ fn stamp_result_prompt(conn: &Connection, result_id: &str, prompt_snapshot_id: &
 /// centrally, and workers must not rely on it as a key).
 fn stamp_input_metadata(
     conn: &Connection,
-    run_id: &str,
-    input_id: i64,
+    run_id: &forza_db::RunId,
+    input_id: forza_db::RunInputId,
     file_hash: &str,
     name: &str,
     path: &std::path::Path,
@@ -1424,7 +1447,9 @@ fn stamp_input_metadata(
     let extension = path
         .extension()
         .map(|value| value.to_string_lossy().to_lowercase());
-    let size_bytes = file_metadata.as_ref().map(|metadata| metadata.len() as i64);
+    let size_bytes = file_metadata
+        .as_ref()
+        .map(|metadata| i64::try_from(metadata.len()).unwrap_or(i64::MAX));
     let mtime_ns = file_metadata
         .and_then(|metadata| metadata.modified().ok())
         .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
@@ -1455,9 +1480,9 @@ fn stamp_input_metadata(
 /// extraction.
 pub fn stamp_semantic_name(
     conn: &Connection,
-    image_file_id: &str,
+    image_file_id: &forza_db::ImageFileId,
     image_path: &std::path::Path,
-    result_id: &str,
+    result_id: &forza_db::ExtractionResultId,
 ) {
     let row: Option<(String, String)> = conn
         .query_row(
@@ -1516,11 +1541,11 @@ fn fail_run_preflight(conn: &Connection, run_id: &str, detail: &str) -> String {
 
 fn insert_attempt_full_checked(
     conn: &Connection,
-    run_id: &str,
-    image_file_id: &str,
-    result_id: &str,
+    run_id: &forza_db::RunId,
+    image_file_id: &forza_db::ImageFileId,
+    result_id: &forza_db::ExtractionResultId,
     insert: &forza_db::repositories::runs::AttemptInsert<'_>,
-) -> Result<String, String> {
+) -> Result<forza_db::AttemptId, String> {
     forza_db::repositories::runs::insert_attempt_full(
         conn,
         run_id,
@@ -1539,7 +1564,7 @@ fn insert_attempt_full_checked(
 async fn worker_loop(
     _w_idx: usize,
     conn_path: PathBuf,
-    run_id: &str,
+    run_id: &forza_db::RunId,
     batch: Vec<WorkerImage>,
     params: &RunParams,
     control: Arc<RunControl>,
@@ -1629,7 +1654,7 @@ async fn worker_loop(
         let _ = prompt_snapshot_id;
         let image_file_id =
             match find_image_id_by_hash(&conn, &image.file_hash).map_err(|e| e.to_string()) {
-                Ok(Some(id)) => id,
+                Ok(Some(id)) => forza_db::ImageFileId::new(id),
                 Ok(None) => {
                     fail_result(
                         &conn,
@@ -1686,7 +1711,7 @@ async fn worker_loop(
                 return GatedModelOutcome::LoadFailed(msg);
             }
             let mut attempt_count = 0i64;
-            let mut accepted_row: Option<String> = None;
+            let mut accepted_row: Option<forza_db::AttemptId> = None;
             let model_name = params.model.clone();
             let result = backend
                 .extract(

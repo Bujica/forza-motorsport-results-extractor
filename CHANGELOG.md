@@ -29,6 +29,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Race classes unified on the `RaceClass` enum (order, color, CSV parsing
+  as exhaustive methods — a new class is a compile error, not a silent
+  black fallback); division rosters collapsed into one table;
+  `BestLapRow`/filters, review validation, and GUI options derive from it.
+  No behavior change (goldens byte-identical).
+- Error diagnostics carry context and chains: encode/model-load/DB-path
+  context at the `String` boundaries, `anyhow` context in CLI open paths,
+  source-preserving `DbError::Pool`, `EncodeError::Io/Image`, and
+  `LlmError::Transport` variants (`Transaction` keeps the phase-labeled
+  message form), plus `# Errors` sections on the key fallible APIs.
+  Display strings unchanged.
+- Row identities on the attempt/result path are newtypes (`RunId`,
+  `ImageFileId`, `ExtractionResultId`, `AttemptId`, `RunInputId`); swapped
+  ids no longer compile. Storage stays text/integer.
+- Workspace build policy: shared versions inherited from
+  `[workspace.dependencies]`, `rust-version = "1.88"`, release profile
+  (`lto = "fat"`, `codegen-units = 1`, `strip`); clippy `correctness`
+  denied and `suspicious/style/complexity/perf` warned workspace-wide;
+  INI-boundary integer casts saturate instead of wrapping.
 - Review system refined beyond Python parity: `ignore case` removed end to
   end (write path, UI, filter bucket, CHECK vocabularies — `ImageFlagStatus`
   untouched); `decide` classifies `confirmed` vs `model_error` with

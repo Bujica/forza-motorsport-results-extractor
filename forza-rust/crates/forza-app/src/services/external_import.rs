@@ -80,6 +80,13 @@ struct Issue {
 }
 
 /// Import a spreadsheet file (CSV or XLSX) into normalized records (without DB).
+///
+/// # Errors
+///
+/// Returns `Err` when the file cannot be read, the workbook has no header
+/// row with the required columns, or row limits are exceeded. Per-row
+/// problems (unmapped tracks, invalid laps) are collected into
+/// [`ExternalImportResult::issues_json`], not returned as errors.
 pub fn import_spreadsheet(
     source_path: &Path,
     known_tracks: &[String],

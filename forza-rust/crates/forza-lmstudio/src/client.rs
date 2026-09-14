@@ -114,24 +114,26 @@ impl RuntimeClient {
         format!("{}/models", api_base(&self.url))
     }
 
+    /// List models known to the LM Studio runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LlmError::Transport`] on connection/timeout failures and
+    /// [`LlmError::Http`] for non-2xx statuses.
     pub async fn list_models(&self) -> Result<Vec<RuntimeModel>, LlmError> {
         let response = self
             .http
             .get(self.models_url())
             .timeout(self.timeout)
             .send()
-            .await
-            .map_err(|e| LlmError::Transport(e.to_string()))?;
+            .await?;
         let status = response.status();
         if !status.is_success() {
             return Err(LlmError::Http {
                 status: status.as_u16(),
             });
         }
-        let data: Value = response
-            .json()
-            .await
-            .map_err(|e| LlmError::Transport(e.to_string()))?;
+        let data: Value = response.json().await?;
 
         let mut out = Vec::new();
         for row in model_rows(&data) {

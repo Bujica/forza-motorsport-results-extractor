@@ -4,6 +4,7 @@
 //! `list_failed_images_for_retry`: only available images whose LATEST
 //! extraction result is `error` are selected (Python retry-errors contract).
 
+use forza_db::ids::{ImageFileId, RunId};
 use forza_db::repositories::images::list_failed_images_for_retry;
 use forza_db::repositories::runs::{RunInsert, insert_input_and_result, insert_run};
 
@@ -48,11 +49,35 @@ fn only_latest_error_results_are_selected() {
     seed_image(&conn, "img-missing", "hash-missing", "missing");
 
     // ok image: latest result is fine.
-    insert_input_and_result(&conn, &run_id, "img-ok", "process", "ok", 1).unwrap();
+    insert_input_and_result(
+        &conn,
+        &RunId::new(&run_id),
+        &ImageFileId::new("img-ok"),
+        "process",
+        "ok",
+        1,
+    )
+    .unwrap();
     // error image: latest result failed.
-    insert_input_and_result(&conn, &run_id, "img-err", "process", "error", 2).unwrap();
+    insert_input_and_result(
+        &conn,
+        &RunId::new(&run_id),
+        &ImageFileId::new("img-err"),
+        "process",
+        "error",
+        2,
+    )
+    .unwrap();
     // missing image: latest result failed but the file is gone.
-    insert_input_and_result(&conn, &run_id, "img-missing", "process", "error", 3).unwrap();
+    insert_input_and_result(
+        &conn,
+        &RunId::new(&run_id),
+        &ImageFileId::new("img-missing"),
+        "process",
+        "error",
+        3,
+    )
+    .unwrap();
 
     let selected = list_failed_images_for_retry(&conn).unwrap();
     assert_eq!(selected.len(), 1, "selected: {selected:?}");
@@ -68,9 +93,25 @@ fn older_ok_result_does_not_shadow_newer_error() {
 
     seed_image(&conn, "img-x", "hash-x", "available");
     // First run: ok. Second run: error → the LATEST (error) must win.
-    insert_input_and_result(&conn, &run_a, "img-x", "process", "ok", 1).unwrap();
+    insert_input_and_result(
+        &conn,
+        &RunId::new(&run_a),
+        &ImageFileId::new("img-x"),
+        "process",
+        "ok",
+        1,
+    )
+    .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1100));
-    insert_input_and_result(&conn, &run_b, "img-x", "process", "error", 1).unwrap();
+    insert_input_and_result(
+        &conn,
+        &RunId::new(&run_b),
+        &ImageFileId::new("img-x"),
+        "process",
+        "error",
+        1,
+    )
+    .unwrap();
 
     let selected = list_failed_images_for_retry(&conn).unwrap();
     assert_eq!(selected.len(), 1, "latest error must select the image");
@@ -83,9 +124,25 @@ fn newer_ok_result_shadows_older_error() {
     let run_b = insert_run(&conn, &RunInsert::demo("20260101_000003_b")).unwrap();
 
     seed_image(&conn, "img-y", "hash-y", "available");
-    insert_input_and_result(&conn, &run_a, "img-y", "process", "error", 1).unwrap();
+    insert_input_and_result(
+        &conn,
+        &RunId::new(&run_a),
+        &ImageFileId::new("img-y"),
+        "process",
+        "error",
+        1,
+    )
+    .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1100));
-    insert_input_and_result(&conn, &run_b, "img-y", "process", "ok", 1).unwrap();
+    insert_input_and_result(
+        &conn,
+        &RunId::new(&run_b),
+        &ImageFileId::new("img-y"),
+        "process",
+        "ok",
+        1,
+    )
+    .unwrap();
 
     let selected = list_failed_images_for_retry(&conn).unwrap();
     assert!(selected.is_empty(), "recovered images must not retry");

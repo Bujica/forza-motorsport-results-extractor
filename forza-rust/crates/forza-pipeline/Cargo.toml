@@ -7,24 +7,20 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-base64 = "0.22"
-sha2 = "0.10"
+base64.workspace = true
+sha2.workspace = true
 walkdir = "2"
 forza-domain = { path = "../forza-domain" }
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
-thiserror = "2"
-chrono = "0.4"
-serde_json = "1"
-tracing = "0.1"
+image.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true
 
 # Test fixtures exercise fallible filesystem/image helpers directly, so the
-# unwraps live in test code only.
-[lints.rust]
-unsafe_code = "forbid"
-
-[lints.clippy]
-unwrap_used = "warn"
-expect_used = "warn"
+# unwraps live in test code only (covered by `cfg_attr(test, ...)` allows).
+[lints]
+workspace = true

@@ -87,8 +87,8 @@ fn accepted_fixture_flows_through_parse_validate_and_persistence() {
     .unwrap();
     let result_id = forza_db::repositories::runs::insert_input_and_result(
         &conn,
-        &run_id,
-        "img-replay",
+        &forza_db::ids::RunId::new(&run_id),
+        &forza_db::ids::ImageFileId::new("img-replay"),
         "process",
         "running",
         1,
@@ -97,8 +97,8 @@ fn accepted_fixture_flows_through_parse_validate_and_persistence() {
 
     let outcome: ReplayOutcome = replay_recorded_response(
         &mut conn,
-        &run_id,
-        "img-replay",
+        &forza_db::ids::RunId::new(&run_id),
+        &forza_db::ids::ImageFileId::new("img-replay"),
         &result_id,
         &fixture_guard.1,
         "test-model",
@@ -165,8 +165,8 @@ fn lap_projection_matches_python_filtering_and_session_class() {
     .unwrap();
     let result_id = forza_db::repositories::runs::insert_input_and_result(
         &conn,
-        &run_id,
-        "img-projection",
+        &forza_db::ids::RunId::new(&run_id),
+        &forza_db::ids::ImageFileId::new("img-projection"),
         "process",
         "running",
         1,
@@ -186,8 +186,8 @@ fn lap_projection_matches_python_filtering_and_session_class() {
     let parsed: serde_json::Value = serde_json::from_str(raw).unwrap();
     let lap_rows = derive_and_insert_laps(
         &conn,
-        &run_id,
-        "img-projection",
+        &forza_db::ids::RunId::new(&run_id),
+        &forza_db::ids::ImageFileId::new("img-projection"),
         &result_id,
         &parsed,
         Some("projection.png"),
@@ -255,14 +255,19 @@ fn malformed_fixture_also_replays_cleanly_under_current_rules() {
     )
     .unwrap();
     let result_id = forza_db::repositories::runs::insert_input_and_result(
-        &conn, &run_id, "img-rm", "process", "running", 1,
+        &conn,
+        &forza_db::ids::RunId::new(&run_id),
+        &forza_db::ids::ImageFileId::new("img-rm"),
+        "process",
+        "running",
+        1,
     )
     .unwrap();
 
     let outcome = replay_recorded_response(
         &mut conn,
-        &run_id,
-        "img-rm",
+        &forza_db::ids::RunId::new(&run_id),
+        &forza_db::ids::ImageFileId::new("img-rm"),
         &result_id,
         &fixture_guard.1,
         "test-model",
@@ -272,7 +277,14 @@ fn malformed_fixture_also_replays_cleanly_under_current_rules() {
     assert!(outcome.accepted);
 }
 
-fn temp_db_with_result(dir: &std::path::Path, tag: &str) -> (rusqlite::Connection, String, String) {
+fn temp_db_with_result(
+    dir: &std::path::Path,
+    tag: &str,
+) -> (
+    rusqlite::Connection,
+    String,
+    forza_db::ids::ExtractionResultId,
+) {
     let db_path = dir.join(format!("temp-{tag}.sqlite3"));
     let conn = fresh_db(&db_path);
     let run_id = forza_db::repositories::insert_run(
@@ -294,7 +306,12 @@ fn temp_db_with_result(dir: &std::path::Path, tag: &str) -> (rusqlite::Connectio
     )
     .unwrap();
     let result_id = forza_db::repositories::runs::insert_input_and_result(
-        &conn, &run_id, "img-temp", "process", "running", 1,
+        &conn,
+        &forza_db::ids::RunId::new(&run_id),
+        &forza_db::ids::ImageFileId::new("img-temp"),
+        "process",
+        "running",
+        1,
     )
     .unwrap();
     (conn, run_id, result_id)
@@ -325,8 +342,8 @@ fn out_of_window_temperature_persists_null_like_python() {
         .unwrap();
         derive_and_insert_laps(
             &conn,
-            &run_id,
-            "img-temp",
+            &forza_db::ids::RunId::new(&run_id),
+            &forza_db::ids::ImageFileId::new("img-temp"),
             &result_id,
             &parsed,
             Some("temp.png"),

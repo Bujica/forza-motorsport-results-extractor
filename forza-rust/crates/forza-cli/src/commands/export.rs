@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
+
 use super::common::load_validated_config;
 
 pub(crate) fn cmd_export(
@@ -11,7 +13,8 @@ pub(crate) fn cmd_export(
     pdf: bool,
 ) -> anyhow::Result<()> {
     let cfg = load_validated_config(config_path, strict)?;
-    let conn = forza_db::open_connection(&cfg.database_file)?;
+    let conn = forza_db::open_connection(&cfg.database_file)
+        .with_context(|| format!("open database {}", cfg.database_file.display()))?;
     let rows = forza_db::repositories::laps::list_clean_flat(&conn, &cfg.gamertag.to_lowercase())?;
     if rows.is_empty() {
         println!("export: no best-lap rows to export");

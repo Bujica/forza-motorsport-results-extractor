@@ -6,7 +6,12 @@ use std::fmt;
 pub enum DbError {
     Sqlite(rusqlite::Error),
     Io(std::io::Error),
-    Pool(String),
+    /// Phase-labeled transaction failure. The message already carries the
+    /// phase and the cause text (e.g. `"COMMIT sync: <cause>"`), so it is
+    /// complete without a source chain.
+    Transaction(String),
+    /// Connection-pool acquisition failure; the r2d2 source is preserved.
+    Pool(r2d2::Error),
     /// The database schema is not usable for the requested operation.
     SchemaState {
         message: String,
@@ -18,7 +23,8 @@ impl fmt::Display for DbError {
         match self {
             Self::Sqlite(e) => write!(f, "sqlite error: {e}"),
             Self::Io(e) => write!(f, "io error: {e}"),
-            Self::Pool(m) => write!(f, "pool error: {m}"),
+            Self::Transaction(m) => write!(f, "{m}"),
+            Self::Pool(e) => write!(f, "pool error: {e}"),
             Self::SchemaState { message } => write!(f, "{message}"),
         }
     }
@@ -29,7 +35,8 @@ impl std::error::Error for DbError {
         match self {
             Self::Sqlite(e) => Some(e),
             Self::Io(e) => Some(e),
-            Self::Pool(_) | Self::SchemaState { .. } => None,
+            Self::Pool(e) => Some(e),
+            Self::Transaction(_) | Self::SchemaState { .. } => None,
         }
     }
 }
@@ -48,6 +55,6 @@ impl From<std::io::Error> for DbError {
 
 impl From<r2d2::Error> for DbError {
     fn from(e: r2d2::Error) -> Self {
-        Self::Pool(e.to_string())
+        Self::Pool(e)
     }
 }

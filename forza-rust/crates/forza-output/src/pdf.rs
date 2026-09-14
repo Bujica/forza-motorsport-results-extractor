@@ -634,6 +634,11 @@ fn title_case(s: &str) -> String {
 
 /// Render the best-laps PDF. Returns the set of source files that contributed
 /// rows (mirrors `generate_pdf`'s `used_files` return value).
+///
+/// # Errors
+///
+/// Returns [`PdfRenderError::Io`] when the output file (or its archive copy
+/// of a previous report) cannot be written.
 pub fn render_pdf(plan: &PdfDocumentPlan, path: &Path) -> Result<HashSet<String>, PdfRenderError> {
     let mut used_files: HashSet<String> = HashSet::new();
     if plan.stats.laps == 0 && plan.external_count == 0 {
@@ -853,13 +858,15 @@ fn draw_table(renderer: &mut Renderer, table: &PdfTable, options: &PdfRenderOpti
         }
         draw_table_block(
             renderer,
-            table,
-            color,
-            &header_labels,
-            &wrapped,
-            &dirty_highlight,
-            0,
-            table.rows.len(),
+            &TableBlock {
+                table,
+                color,
+                header_labels: &header_labels,
+                wrapped: &wrapped,
+                dirty_highlight: &dirty_highlight,
+                first_row: 0,
+                end_row: table.rows.len(),
+            },
         );
         return;
     }
@@ -881,13 +888,15 @@ fn draw_table(renderer: &mut Renderer, table: &PdfTable, options: &PdfRenderOpti
         }
         draw_table_block(
             renderer,
-            table,
-            color,
-            &header_labels,
-            &wrapped,
-            &dirty_highlight,
-            first,
-            end,
+            &TableBlock {
+                table,
+                color,
+                header_labels: &header_labels,
+                wrapped: &wrapped,
+                dirty_highlight: &dirty_highlight,
+                first_row: first,
+                end_row: end,
+            },
         );
         first = end;
         if first < table.rows.len() {
@@ -898,18 +907,26 @@ fn draw_table(renderer: &mut Renderer, table: &PdfTable, options: &PdfRenderOpti
     }
 }
 
-/// Draw one contiguous block of rows; the header repeats on every block.
-#[allow(clippy::too_many_arguments)]
-fn draw_table_block(
-    renderer: &mut Renderer,
-    table: &PdfTable,
+/// One contiguous block of rows to draw; the header repeats on every block.
+/// Bundled so the draw call cannot swap two same-typed slices.
+struct TableBlock<'a> {
+    table: &'a PdfTable,
     color: Rgb,
-    header_labels: &[&str; 6],
-    wrapped: &[[Vec<String>; 6]],
-    dirty_highlight: &[bool],
+    header_labels: &'a [&'a str; 6],
+    wrapped: &'a [[Vec<String>; 6]],
+    dirty_highlight: &'a [bool],
     first_row: usize,
     end_row: usize,
-) {
+}
+
+/// Draw one contiguous block of rows; the header repeats on every block.
+fn draw_table_block(renderer: &mut Renderer, block: &TableBlock<'_>) {
+    let table = block.table;
+    let color = block.color;
+    let header_labels = block.header_labels;
+    let wrapped = block.wrapped;
+    let dirty_highlight = block.dirty_highlight;
+    let (first_row, end_row) = (block.first_row, block.end_row);
     let block_heights: Vec<f64> = (first_row..end_row)
         .map(|i| {
             wrapped[i]

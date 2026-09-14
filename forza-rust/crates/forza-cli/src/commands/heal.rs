@@ -109,18 +109,19 @@ pub(crate) fn cmd_db_heal(config_path: &Path, db_path: &Path) -> anyhow::Result<
             bytes,
             stored_hash,
         ) = row?;
-        let expected = forza_db::evidence::canonical_request_hash(
-            messages.as_deref(),
-            config.as_deref(),
-            prompt_id.as_deref(),
-            model.as_deref(),
-            source_hash.as_deref(),
-            image_format.as_deref(),
-            image_mime.as_deref(),
-            width,
-            height,
-            bytes,
-        );
+        let expected =
+            forza_db::evidence::canonical_request_hash(&forza_db::evidence::RequestFingerprint {
+                request_messages_json: messages.as_deref(),
+                request_config_json: config.as_deref(),
+                prompt_snapshot_id: prompt_id.as_deref(),
+                model: model.as_deref(),
+                source_file_hash: source_hash.as_deref(),
+                request_image_format: image_format.as_deref(),
+                request_image_mime_type: image_mime.as_deref(),
+                request_image_width: width,
+                request_image_height: height,
+                request_image_bytes: bytes,
+            });
         if stored_hash.as_deref() != Some(expected.as_str()) {
             conn.execute(
                 "UPDATE extraction_attempts SET request_hash=?2 WHERE id=?1",
@@ -158,9 +159,9 @@ pub(crate) fn cmd_db_heal(config_path: &Path, db_path: &Path) -> anyhow::Result<
         }
         forza_app::services::extraction_runner::stamp_semantic_name(
             &conn,
-            image_id,
+            &forza_db::ImageFileId::new(image_id),
             std::path::Path::new(current_path),
-            result_id,
+            &forza_db::ExtractionResultId::new(result_id),
         );
         let after: Option<String> = conn.query_row(
             "SELECT semantic_name FROM image_files WHERE id = ?1",

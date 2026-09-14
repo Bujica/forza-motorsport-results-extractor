@@ -15,6 +15,7 @@ pub trait LapRowLike {
 }
 
 /// Case-insensitive order map based on the canonical track file.
+#[must_use]
 pub fn track_order_map(track_order: &[String]) -> HashMap<String, usize> {
     track_order
         .iter()
@@ -23,6 +24,7 @@ pub fn track_order_map(track_order: &[String]) -> HashMap<String, usize> {
         .collect()
 }
 
+#[must_use]
 pub fn track_order_key(track: &str, order_map: &HashMap<String, usize>) -> (usize, String) {
     let normalized = track.trim();
     let fallback = order_map.len() + 1;
@@ -33,6 +35,7 @@ pub fn track_order_key(track: &str, order_map: &HashMap<String, usize>) -> (usiz
     )
 }
 
+#[must_use]
 pub fn class_order_key(race_class: &str) -> (u32, String) {
     let normalized = race_class.trim();
     (class_order(normalized), normalized.to_string())

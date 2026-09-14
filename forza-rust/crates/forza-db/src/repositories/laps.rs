@@ -248,12 +248,12 @@ pub fn add_result(
         });
     }
     conn.execute_batch("BEGIN IMMEDIATE")
-        .map_err(|e| DbError::Pool(format!("BEGIN IMMEDIATE: {e}")))?;
+        .map_err(|e| DbError::Transaction(format!("BEGIN IMMEDIATE: {e}")))?;
     let inner = add_result_inner(conn, result, run_id, image_file_id, entries);
     match inner {
         Ok(created) => {
             conn.execute_batch("COMMIT")
-                .map_err(|e| DbError::Pool(format!("COMMIT add_result: {e}")))?;
+                .map_err(|e| DbError::Transaction(format!("COMMIT add_result: {e}")))?;
             Ok(created)
         }
         Err(e) => {

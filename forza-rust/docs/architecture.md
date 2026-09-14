@@ -10,7 +10,7 @@ Scope: crate layout, dependency direction, runtime flows.
 | --- | --- |
 | `forza-domain` | Pure rules: lap parsing, frontier, review triggers, normalizers, ordering, reference data. No I/O. Leaf dependency. |
 | `forza-config` | `forza_config.ini` parsing (`load_config`), validation (`validate_config`), atomic save with backup. |
-| `forza-db` | rusqlite storage: `schema_ddl.rs` (frozen DDL, `SCHEMA_VERSION = 2`), `migration.rs` (`upgrade()` builds from zero), repositories, `gui_queries.rs`, `image_debug.rs`, `doctor/` (~70 checks in submodules). |
+| `forza-db` | rusqlite storage: `schema_ddl.rs` (frozen DDL, `SCHEMA_VERSION = 2`), `migration.rs` (`upgrade()` builds from zero), repositories, `ids.rs` (typed row identities), `gui_queries.rs`, `image_debug.rs`, `doctor/` (~70 checks in submodules). |
 | `forza-pipeline` | Discovery, planning/dedup, hashing, metadata, encoding, naming. No DB. |
 | `forza-lmstudio` | Async HTTP backend (`backend.rs`), model client (`client.rs`), load-config compat, response parse/validate/repair. |
 | `forza-output` | CSV (BOM + CRLF) and dependency-free PDF writer (cover, indexed TOC with section links, class tables, archive-before-write). |
@@ -20,7 +20,11 @@ Scope: crate layout, dependency direction, runtime flows.
 
 Dependency direction: `domain`/`pipeline` are leaves (third-party deps only);
 `app` orchestrates; `cli`/`gui` are thin over `app`. Do not introduce cycles
-or let runtime crates grow Python-style service layers.
+or let runtime crates grow Python-style service layers. Shared third-party
+versions are inherited from `[workspace.dependencies]` (see
+`development.md`); race classes are owned by `RaceClass`
+(`forza-domain/src/race_class.rs`: order, color, CSV parsing — never match
+class strings ad hoc).
 
 ## Extraction run flow (`forza-app/src/services/extraction_runner.rs`)
 

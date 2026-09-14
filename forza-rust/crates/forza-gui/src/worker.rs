@@ -53,7 +53,7 @@ impl WorkerContext {
         let mut guard = self
             .pool
             .lock()
-            .map_err(|e| forza_db::DbError::Pool(e.to_string()))?;
+            .map_err(|e| forza_db::DbError::Transaction(e.to_string()))?;
         if guard.is_none() {
             *guard = Some(forza_db::connection_pool(&self.database_file, POOL_SIZE)?);
         }
