@@ -199,9 +199,6 @@ pub const TABLE_DDL: &[&str] = &[
 	max_retries INTEGER, 
 	timeout_connect INTEGER, 
 	timeout_read INTEGER, 
-	performance_tps_floor FLOAT, 
-	performance_reload_elapsed_s FLOAT, 
-	performance_reload_streak INTEGER, 
 	config_extra_json VARCHAR, 
 	total_inputs INTEGER DEFAULT 0 NOT NULL, 
 	to_process INTEGER DEFAULT 0 NOT NULL, 
@@ -588,4 +585,7 @@ pub const INDEX_DDL: &[&str] = &[
 /// v2: `run_inputs.id` is `INTEGER PRIMARY KEY AUTOINCREMENT` (atomic,
 /// worker-safe) instead of a client-computed `MAX(id)+1`. Old v1 databases
 /// are test-only and are rebuilt from scratch (no data migration).
-pub const SCHEMA_VERSION: i64 = 2;
+/// v3: drops the never-wired `performance_*` slow-streak reload columns from
+/// `extraction_runs` (the reload-before-next feature was removed; rebuild
+/// the database from scratch, no data migration).
+pub const SCHEMA_VERSION: i64 = 3;

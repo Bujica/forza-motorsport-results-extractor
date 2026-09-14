@@ -45,8 +45,7 @@ text.
 Model identity = `{id, path, display_name, key, model_key}`. `ensure_loaded`
 reuses a compatible loaded instance (context length satisfied,
 `physical_batch_size` uncomparable, `eval_batch_size`/flash/offload exact) or
-POSTs `/models/load`. `PerformancePolicy` defaults: 20.0 tok/s floor, 45 s
-elapsed, streak 3.
+POSTs `/models/load`.
 
 ## Overview snapshot (`runtime_status`)
 

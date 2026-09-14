@@ -32,9 +32,6 @@ eval_batch_size = 512
 physical_batch_size = 256
 flash_attention = false
 offload_kv_cache_to_gpu = no
-performance_tps_floor = 15.5
-performance_reload_elapsed_s = 30.0
-performance_reload_streak = 5
 
 [image]
 max_width = 1920
@@ -81,9 +78,6 @@ fn missing_file_yields_python_defaults() {
     assert_eq!(cfg.llm.physical_batch_size, None);
     assert!(cfg.llm.flash_attention);
     assert!(cfg.llm.offload_kv_cache_to_gpu);
-    assert_eq!(cfg.llm.performance_tps_floor, 20.0);
-    assert_eq!(cfg.llm.performance_reload_elapsed_s, 45.0);
-    assert_eq!(cfg.llm.performance_reload_streak, 3);
     assert_eq!(cfg.image.max_width, 2560);
     assert_eq!(cfg.image.encode_quality, 85);
     assert!(cfg.image.grayscale);
@@ -111,8 +105,6 @@ fn full_ini_overrides_every_section() {
     assert_eq!(cfg.llm.physical_batch_size, Some(256));
     assert!(!cfg.llm.flash_attention);
     assert!(!cfg.llm.offload_kv_cache_to_gpu);
-    assert_eq!(cfg.llm.performance_tps_floor, 15.5);
-    assert_eq!(cfg.llm.performance_reload_streak, 5);
     assert_eq!(cfg.pdf.dirty_lap_symbol, "x");
     assert!(!cfg.pdf.show_dirty_lap_symbol);
     assert!(validate_config(&cfg).is_ok());
@@ -198,9 +190,6 @@ fn validation_collects_all_failures() {
             physical_batch_size: None,
             flash_attention: true,
             offload_kv_cache_to_gpu: true,
-            performance_tps_floor: 1.0,
-            performance_reload_elapsed_s: 1.0,
-            performance_reload_streak: 0,
         },
         image: forza_config::ImageConfig {
             max_width: 100,
@@ -233,7 +222,6 @@ fn validation_collects_all_failures() {
         "timeout_read",
         "timeout_connect",
         "context_length",
-        "performance_reload_streak",
         "max_width",
         "encode_quality",
         "temp_min_f",

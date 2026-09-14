@@ -865,7 +865,7 @@ where
 
         // Spawn preflight snapshot on the main connection (single call).
         let snapshot = {
-            let backend = LMStudioBackend::new(params.backend_config(), Default::default())
+            let backend = LMStudioBackend::new(params.backend_config())
                 .map_err(|e| fail_run_preflight(&conn, &run_id, &e.to_string()))?;
             let desired = params.desired_load_config();
             backend
@@ -1021,8 +1021,8 @@ where
         (w_processed, w_succeeded, w_failed)
     } else {
         // ── Sequential (single-worker) extraction ───────────────────────
-        let mut backend = LMStudioBackend::new(params.backend_config(), Default::default())
-            .map_err(|e| e.to_string())?;
+        let mut backend =
+            LMStudioBackend::new(params.backend_config()).map_err(|e| e.to_string())?;
         let desired = params.desired_load_config();
 
         // Deterministic preflight snapshot id — the row itself is only
@@ -1644,7 +1644,7 @@ async fn worker_loop(
         }
     };
 
-    let mut backend = match LMStudioBackend::new(params.backend_config(), Default::default()) {
+    let mut backend = match LMStudioBackend::new(params.backend_config()) {
         Ok(b) => b,
         Err(e) => {
             let _ = event_tx.send(RunEvent::Log(format!("worker backend: {e}")));

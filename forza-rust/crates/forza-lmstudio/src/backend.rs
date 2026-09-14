@@ -1,7 +1,6 @@
 //! Extraction backend: OpenAI-compatible-ish chat call to LM Studio with
-//! adaptive retries (transport / json / semantic), attempt records, response
-//! stats, and the performance slow-streak flag. Ported from
-//! `forza/lmstudio/backend.py`.
+//! adaptive retries (transport / json / semantic), attempt records, and
+//! response stats. Ported from `forza/lmstudio/backend.py`.
 
 use std::time::{Duration, Instant};
 
@@ -83,27 +82,6 @@ impl BackendConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct PerformancePolicy {
-    pub tps_floor: f64,
-    pub reload_elapsed_s: f64,
-    pub reload_streak: i64,
-}
-
-impl Default for PerformancePolicy {
-    // Python parity (`backend.py`): 20 tok/s floor, 45 s elapsed, streak 3.
-    // A derived `Default` (0/0.0/0) made `elapsed_s > 0.0` always true, so
-    // every call counted as slow and `reload_before_next` latched on after
-    // the first image, forever.
-    fn default() -> Self {
-        Self {
-            tps_floor: 20.0,
-            reload_elapsed_s: 45.0,
-            reload_streak: 3,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct RuntimeSnapshot {
     pub endpoint: String,
     pub configured_model: String,
@@ -127,52 +105,16 @@ pub struct RuntimeSnapshot {
     pub model_matches_config: Option<bool>,
 }
 
-/// Slow-streak state machine (persisted fields land with Fase 8).
-#[derive(Debug, Default)]
-pub struct PerformanceTracker {
-    pub slow_streak: i64,
-    pub reload_before_next: bool,
-}
-
-impl PerformanceTracker {
-    pub fn track(&mut self, policy: &PerformancePolicy, elapsed_s: f64, stats: &Value) {
-        let tps = stats.get("tokens_per_second").and_then(Value::as_f64);
-        let mut slow = false;
-        if tps.is_some_and(|tps| tps < policy.tps_floor) {
-            slow = true;
-        }
-        if elapsed_s > policy.reload_elapsed_s {
-            slow = true;
-        }
-        self.slow_streak = if slow { self.slow_streak + 1 } else { 0 };
-        if self.slow_streak >= policy.reload_streak {
-            self.reload_before_next = true;
-        } else {
-            // A fast extract breaks the streak AND clears a pending reload:
-            // without this, one slow streak armed reloads for every future
-            // extract even after performance recovered.
-            self.reload_before_next = false;
-        }
-    }
-
-    /// Consume a pending reload (called after the reload was performed).
-    pub fn take_reload_before_next(&mut self) -> bool {
-        std::mem::replace(&mut self.reload_before_next, false)
-    }
-}
-
 pub struct LMStudioBackend {
     cfg: BackendConfig,
-    policy: PerformancePolicy,
     http: reqwest::Client,
     runtime: RuntimeClient,
-    performance: PerformanceTracker,
     instance_id: Option<String>,
     load_config: Option<Value>,
 }
 
 impl LMStudioBackend {
-    pub fn new(cfg: BackendConfig, performance: PerformancePolicy) -> Result<Self, LlmError> {
+    pub fn new(cfg: BackendConfig) -> Result<Self, LlmError> {
         // Total timeout stays read-bound, but the TCP/TLS connect phase gets
         // its own budget: previously `timeout_connect_secs` never reached the
         // chat client (only `list_models`), so slow connects were misbilled
@@ -184,18 +126,12 @@ impl LMStudioBackend {
             .map_err(|e| LlmError::Runtime(format!("http client: {e}")))?;
         let runtime = RuntimeClient::new(&cfg.url, cfg.timeout_connect_secs);
         Ok(Self {
-            policy: performance,
             cfg,
             http,
             runtime,
-            performance: PerformanceTracker::default(),
             instance_id: None,
             load_config: None,
         })
-    }
-
-    pub fn performance(&self) -> &PerformanceTracker {
-        &self.performance
     }
 
     /// Capture the runtime state used by the run lifecycle's preflight row.
@@ -645,10 +581,6 @@ impl LMStudioBackend {
                 (None, Some(o)) => Some(o),
                 (None, None) => None,
             };
-            let elapsed_s = started.elapsed().as_secs_f64();
-            self.performance
-                .track(&self.policy.clone(), elapsed_s, &stats);
-
             let request_config = Self::request_config(&payload);
             let messages_redacted = Self::redacted_messages(&payload);
             let record = ModelAttemptRecord {

@@ -8,8 +8,12 @@ Scope: `forza-gui` — Slint pages, callbacks, worker channel, state rules.
 
 `run()` resolves the DB path (config → cwd/ini/exe candidates, workspace
 preference), then `ensure_database()`: missing/empty schema is built from
-zero via `upgrade()` (catalog seeded), incompatible schemas refuse with
-`db-reset` guidance. A `database created` line goes to stderr on first run.
+zero via `upgrade()` (catalog seeded). An incompatible schema opens a native
+recovery dialog — migrate in place (backup first, data preserved), back up
+and recreate from zero, or quit untouched — instead of exiting with an
+invisible error (a bare `Err` goes to stderr only, unseen on a console-less
+Windows launch). Recovery confirmations show the backup path. A `database
+created` line goes to stderr on first run.
 
 ## Pages (`forza-gui/ui/pages/*.slint`, wired in `ui/main.slint`)
 

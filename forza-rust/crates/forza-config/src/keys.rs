@@ -39,9 +39,6 @@ pub const LLM_EVAL_BATCH_SIZE: &str = "llm.eval_batch_size";
 pub const LLM_PHYSICAL_BATCH_SIZE: &str = "llm.physical_batch_size";
 pub const LLM_FLASH_ATTENTION: &str = "llm.flash_attention";
 pub const LLM_OFFLOAD_KV_CACHE_TO_GPU: &str = "llm.offload_kv_cache_to_gpu";
-pub const LLM_PERFORMANCE_TPS_FLOOR: &str = "llm.performance_tps_floor";
-pub const LLM_PERFORMANCE_RELOAD_ELAPSED_S: &str = "llm.performance_reload_elapsed_s";
-pub const LLM_PERFORMANCE_RELOAD_STREAK: &str = "llm.performance_reload_streak";
 pub const LLM_WORKERS: &str = "llm.workers";
 pub const LLM_INFERENCE_CONCURRENCY: &str = "llm.inference_concurrency";
 
@@ -81,9 +78,6 @@ pub const ALL_EDITABLE: &[&str] = &[
     LLM_PHYSICAL_BATCH_SIZE,
     LLM_FLASH_ATTENTION,
     LLM_OFFLOAD_KV_CACHE_TO_GPU,
-    LLM_PERFORMANCE_TPS_FLOOR,
-    LLM_PERFORMANCE_RELOAD_ELAPSED_S,
-    LLM_PERFORMANCE_RELOAD_STREAK,
     USER_GAMERTAG,
     LLM_WORKERS,
     LLM_INFERENCE_CONCURRENCY,

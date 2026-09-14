@@ -53,9 +53,6 @@ pub struct LlmConfig {
     pub physical_batch_size: Option<i64>,
     pub flash_attention: bool,
     pub offload_kv_cache_to_gpu: bool,
-    pub performance_tps_floor: f64,
-    pub performance_reload_elapsed_s: f64,
-    pub performance_reload_streak: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -347,10 +344,6 @@ pub fn load_config(path: &Path, strict: bool) -> Result<(AppConfig, Warnings), C
     let physical_batch_size = loader.opt_int("lmstudio", "physical_batch_size", None);
     let flash_attention = loader.boolean("lmstudio", "flash_attention", true);
     let offload_kv_cache_to_gpu = loader.boolean("lmstudio", "offload_kv_cache_to_gpu", true);
-    let performance_tps_floor = loader.float("lmstudio", "performance_tps_floor", 20.0);
-    let performance_reload_elapsed_s =
-        loader.float("lmstudio", "performance_reload_elapsed_s", 45.0);
-    let performance_reload_streak = loader.int("lmstudio", "performance_reload_streak", 3);
 
     let workers = loader.int("llm", "workers", 1);
     let inference_concurrency = loader.int("llm", "inference_concurrency", 1);
@@ -393,9 +386,6 @@ pub fn load_config(path: &Path, strict: bool) -> Result<(AppConfig, Warnings), C
         ("lmstudio", "physical_batch_size"),
         ("lmstudio", "flash_attention"),
         ("lmstudio", "offload_kv_cache_to_gpu"),
-        ("lmstudio", "performance_tps_floor"),
-        ("lmstudio", "performance_reload_elapsed_s"),
-        ("lmstudio", "performance_reload_streak"),
         ("llm", "workers"),
         ("llm", "inference_concurrency"),
         ("llm", "backend"),
@@ -453,9 +443,6 @@ pub fn load_config(path: &Path, strict: bool) -> Result<(AppConfig, Warnings), C
             physical_batch_size,
             flash_attention,
             offload_kv_cache_to_gpu,
-            performance_tps_floor,
-            performance_reload_elapsed_s,
-            performance_reload_streak,
         },
         image: ImageConfig {
             max_width,
@@ -558,22 +545,6 @@ pub fn validate_config(cfg: &AppConfig) -> Result<(), Vec<String>> {
             cfg.llm.max_retries
         ));
     }
-    if !cfg.llm.performance_tps_floor.is_finite()
-        || !(0.0..=500.0).contains(&cfg.llm.performance_tps_floor)
-    {
-        errors.push(format!(
-            "[lmstudio] performance_tps_floor={} must be finite and within [0, 500]",
-            cfg.llm.performance_tps_floor
-        ));
-    }
-    if !cfg.llm.performance_reload_elapsed_s.is_finite()
-        || !(0.0..=900.0).contains(&cfg.llm.performance_reload_elapsed_s)
-    {
-        errors.push(format!(
-            "[lmstudio] performance_reload_elapsed_s={} must be finite and within [0, 900]",
-            cfg.llm.performance_reload_elapsed_s
-        ));
-    }
     if !cfg.validation.temp_min_f.is_finite() || !cfg.validation.temp_max_f.is_finite() {
         errors.push("[validation] temp bounds must be finite numbers".to_string());
     }
@@ -603,12 +574,6 @@ pub fn validate_config(cfg: &AppConfig) -> Result<(), Vec<String>> {
         && v <= 0
     {
         errors.push(format!("[lmstudio] physical_batch_size={v} must be > 0"));
-    }
-    if cfg.llm.performance_reload_streak < 1 {
-        errors.push(format!(
-            "[lmstudio] performance_reload_streak={} must be >= 1",
-            cfg.llm.performance_reload_streak
-        ));
     }
     if !(640..=4096).contains(&cfg.image.max_width) {
         errors.push(format!(

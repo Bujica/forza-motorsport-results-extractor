@@ -275,36 +275,6 @@ fn llm_rows(cfg: &AppConfig) -> Vec<SettingRow> {
             "bool",
             GROUP_LLM,
         ),
-        SettingRow {
-            options: float_options("0", "500", "1"),
-            ..row(
-                keys::LLM_PERFORMANCE_TPS_FLOOR,
-                "performance_tps_floor",
-                py_float(llm.performance_tps_floor),
-                "float",
-                GROUP_LLM,
-            )
-        },
-        SettingRow {
-            options: float_options("0", "900", "5"),
-            ..row(
-                keys::LLM_PERFORMANCE_RELOAD_ELAPSED_S,
-                "performance_reload_elapsed_s",
-                py_float(llm.performance_reload_elapsed_s),
-                "float",
-                GROUP_LLM,
-            )
-        },
-        SettingRow {
-            options: int_options(1, 20, 1),
-            ..row(
-                keys::LLM_PERFORMANCE_RELOAD_STREAK,
-                "performance_reload_streak",
-                llm.performance_reload_streak.to_string(),
-                "int",
-                GROUP_LLM,
-            )
-        },
     ]
 }
 

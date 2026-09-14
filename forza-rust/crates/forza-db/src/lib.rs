@@ -32,7 +32,10 @@ pub use image_detail::{
     DetailAttemptRow, DetailLapRow, DetailResultRow, ImageDetailMeta, attempts_for_image,
     image_detail_meta, laps_for_image, results_for_image,
 };
-pub use migration::{SCHEMA_VERSION, SchemaStatus, schema_status, upgrade};
+pub use migration::{
+    MigrateOutcome, SCHEMA_VERSION, SchemaStatus, backup_database, migrate, schema_status,
+    sidecar_paths, upgrade,
+};
 
 /// Maximum bind parameters per statement chunk. The bundled SQLite allows
 /// 32766 variables (older builds 999); materialized `IN (?,?,…)` lists past

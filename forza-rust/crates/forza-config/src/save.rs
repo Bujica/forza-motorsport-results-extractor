@@ -165,13 +165,10 @@ fn apply_llm(cfg: &mut AppConfig, key: &str, value: &str) -> Result<(), String> 
         "timeout_connect" => llm.timeout_connect = parse_int(value)?,
         "timeout_read" => llm.timeout_read = parse_int(value)?,
         "max_retries" => llm.max_retries = parse_int(value)?,
-        "performance_reload_streak" => llm.performance_reload_streak = parse_int(value)?,
         "eval_batch_size" => llm.eval_batch_size = parse_opt_int(value)?,
         "physical_batch_size" => llm.physical_batch_size = parse_opt_int(value)?,
         "context_length" => llm.context_length = parse_opt_int(value)?,
         "temperature" => llm.temperature = parse_float(value)?,
-        "performance_tps_floor" => llm.performance_tps_floor = parse_float(value)?,
-        "performance_reload_elapsed_s" => llm.performance_reload_elapsed_s = parse_float(value)?,
         "flash_attention" => llm.flash_attention = parse_bool(value)?,
         "offload_kv_cache_to_gpu" => llm.offload_kv_cache_to_gpu = parse_bool(value)?,
         "url" => llm.url = value.to_string(),
@@ -348,22 +345,13 @@ fn write_candidate(config_path: &Path, cfg: &AppConfig) -> Result<(), String> {
         "offload_kv_cache_to_gpu",
         py_bool(llm.offload_kv_cache_to_gpu),
     );
-    doc.set(
-        "lmstudio",
+    for obsolete in [
+        "api_family",
+        "max_parse_retries",
         "performance_tps_floor",
-        &py_float(llm.performance_tps_floor),
-    );
-    doc.set(
-        "lmstudio",
         "performance_reload_elapsed_s",
-        &py_float(llm.performance_reload_elapsed_s),
-    );
-    doc.set(
-        "lmstudio",
         "performance_reload_streak",
-        &llm.performance_reload_streak.to_string(),
-    );
-    for obsolete in ["api_family", "max_parse_retries"] {
+    ] {
         doc.remove_key("lmstudio", obsolete);
     }
     doc.remove_section("ollama");

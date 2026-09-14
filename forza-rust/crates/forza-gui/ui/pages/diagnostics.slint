@@ -38,7 +38,6 @@ export component DiagnosticsPage inherits Rectangle {
     in property <string> overview-configured-load: "—";
     in property <string> overview-configured-request: "—";
     in property <string> overview-configured-image: "—";
-    in property <string> overview-runtime-policy: "—";
     in property <string> overview-loaded-runtime: "—";
     in property <string> overview-capabilities: "—";
     in property <string> overview-model-info: "—";
@@ -159,7 +158,6 @@ export component DiagnosticsPage inherits Rectangle {
                     OverviewRow { label: "Configured load"; value: root.overview-configured-load; }
                     OverviewRow { label: "Configured request"; value: root.overview-configured-request; }
                     OverviewRow { label: "Image request"; value: root.overview-configured-image; }
-                    OverviewRow { label: "Runtime policy"; value: root.overview-runtime-policy; }
                     OverviewRow { label: "Loaded runtime"; value: root.overview-loaded-runtime; }
                     OverviewRow { label: "Capabilities"; value: root.overview-capabilities; }
                     OverviewRow { label: "Model info"; value: root.overview-model-info; }

@@ -42,9 +42,6 @@ eval_batch_size   = 1024
 physical_batch_size =
 flash_attention   = true
 offload_kv_cache_to_gpu = true
-performance_tps_floor = 20.0
-performance_reload_elapsed_s = 45.0
-performance_reload_streak = 3
 
 [image]
 # Default extraction image settings. Tune after validating results on your hardware.

@@ -69,26 +69,143 @@ fn clamp_split(value: f32, base: f32) -> f32 {
     value.clamp(150.0, (base - 150.0).max(150.0))
 }
 
-/// Outcome of [`ensure_database`].
+/// Outcome of [`ensure_database`]: `None` means the user chose to quit (or a
+/// recovery failure was already reported in a dialog), so startup should exit
+/// gracefully instead of propagating an error nobody can see.
 #[derive(Debug)]
 struct DbReady {
     created: bool,
 }
 
-/// Create the database from zero when missing (see call site).
-fn ensure_database(db_path: &Path) -> anyhow::Result<DbReady> {
+/// How to recover from an incompatible database (the dialog answer, kept
+/// separate so the file operations stay testable without showing any UI).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveryChoice {
+    /// Migrate in place, preserving data (a backup is made first).
+    Migrate,
+    /// Back up the old file and create a fresh database.
+    Recreate,
+    /// Quit without touching anything.
+    Quit,
+}
+
+/// What the recovery did (surfaced in the confirmation dialog).
+#[derive(Debug)]
+enum RecoveryDone {
+    Migrated { backup: PathBuf },
+    Recreated { backup: PathBuf },
+}
+
+/// Ask what to do with an incompatible database. Yes = migrate in place,
+/// No = back up and recreate fresh, Cancel/closed = quit untouched.
+fn ask_database_recovery(db_path: &Path, found: i64) -> RecoveryChoice {
+    use forza_db::migration::SCHEMA_VERSION;
+    match rfd::MessageDialog::new()
+        .set_title("Incompatible database")
+        .set_description(format!(
+            "This database uses schema v{found}, but this build expects v{SCHEMA_VERSION}.\n\n\
+             Yes — migrate in place (keeps your data; a backup is made first).\n\
+             No — back up the old file and create a fresh database.\n\
+             Cancel — quit without changing anything.\n\n\
+             {}",
+            db_path.display()
+        ))
+        .set_buttons(rfd::MessageButtons::YesNoCancel)
+        .set_level(rfd::MessageLevel::Warning)
+        .show()
+    {
+        rfd::MessageDialogResult::Yes => RecoveryChoice::Migrate,
+        rfd::MessageDialogResult::No => RecoveryChoice::Recreate,
+        _ => RecoveryChoice::Quit,
+    }
+}
+
+fn show_dialog(level: rfd::MessageLevel, title: &str, body: &str) {
+    rfd::MessageDialog::new()
+        .set_title(title)
+        .set_description(body)
+        .set_level(level)
+        .show();
+}
+
+/// Execute a recovery choice: backup + migrate or recreate. Pure file
+/// operations, no UI — the dialog only decides the `choice`.
+fn resolve_incompatible(
+    db_path: &Path,
+    choice: RecoveryChoice,
+) -> anyhow::Result<Option<RecoveryDone>> {
+    use forza_db::migration::{backup_database, migrate, sidecar_paths, upgrade};
+    match choice {
+        RecoveryChoice::Quit => Ok(None),
+        RecoveryChoice::Migrate => {
+            let backup = backup_database(db_path).map_err(|e| anyhow::anyhow!("{e}"))?;
+            migrate(db_path).map_err(|e| anyhow::anyhow!("{e}"))?;
+            Ok(Some(RecoveryDone::Migrated { backup }))
+        }
+        RecoveryChoice::Recreate => {
+            let backup = backup_database(db_path).map_err(|e| anyhow::anyhow!("{e}"))?;
+            std::fs::remove_file(db_path)?;
+            for sidecar in sidecar_paths(db_path) {
+                if sidecar.exists() {
+                    std::fs::remove_file(&sidecar)?;
+                }
+            }
+            upgrade(db_path).map_err(|e| anyhow::anyhow!("{e}"))?;
+            Ok(Some(RecoveryDone::Recreated { backup }))
+        }
+    }
+}
+
+/// Create the database from zero when missing; on an incompatible schema ask
+/// (native dialog) whether to migrate, recreate, or quit. A silent `Err`
+/// here kills the process with no visible message on a console-less Windows
+/// launch, so every path either recovers, informs via dialog, or quits by
+/// explicit choice.
+fn ensure_database(db_path: &Path) -> anyhow::Result<Option<DbReady>> {
     use forza_db::migration::{SchemaStatus, schema_status, upgrade};
     match schema_status(db_path).map_err(|e| anyhow::anyhow!("{e}"))? {
         SchemaStatus::Empty => {
             upgrade(db_path).map_err(|e| anyhow::anyhow!("{e}"))?;
-            Ok(DbReady { created: true })
+            Ok(Some(DbReady { created: true }))
         }
-        SchemaStatus::Current => Ok(DbReady { created: false }),
-        SchemaStatus::Incompatible { found } => Err(anyhow::anyhow!(
-            "database {} has incompatible schema (user_version={found}); \
-             delete it or run `forza maintenance db-reset --yes` to recreate",
-            db_path.display()
-        )),
+        SchemaStatus::Current => Ok(Some(DbReady { created: false })),
+        SchemaStatus::Incompatible { found } => {
+            let choice = ask_database_recovery(db_path, found);
+            match resolve_incompatible(db_path, choice) {
+                Ok(recovered) => {
+                    if recovered.is_none() {
+                        // Explicit Quit: leave everything untouched.
+                        return Ok(None);
+                    }
+                    if let Some(RecoveryDone::Migrated { ref backup })
+                    | Some(RecoveryDone::Recreated { ref backup }) = recovered
+                    {
+                        let what = if matches!(recovered, Some(RecoveryDone::Migrated { .. })) {
+                            "migrated"
+                        } else {
+                            "recreated"
+                        };
+                        let body = format!(
+                            "Database {what}; the previous file was kept as a backup:\n{}",
+                            backup.display()
+                        );
+                        eprintln!("{body}");
+                        show_dialog(rfd::MessageLevel::Info, "Database ready", &body);
+                    }
+                    Ok(Some(DbReady { created: false }))
+                }
+                Err(e) => {
+                    let body = format!(
+                        "Database recovery failed: {e}\n\n\
+                         Delete the file or run `forza maintenance db-reset --yes` \
+                         to recreate it from zero."
+                    );
+                    eprintln!("{body}");
+                    show_dialog(rfd::MessageLevel::Error, "Database recovery failed", &body);
+                    Ok(None)
+                }
+            }
+        }
     }
 }
 
@@ -168,15 +285,15 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
             cfg.database_file = db_path.clone();
         }
     }
-    // Create the database from zero when none was found (Python `app.py`
-    // parity for the missing/empty case, minus the question dialog: there
-    // is nothing to destroy). Incompatible databases refuse with reset
-    // guidance instead of silent destruction.
-    // Create the database from zero when none was found (Python `app.py`
-    // parity for the missing/empty case, minus the question dialog: there
-    // is nothing to destroy). Incompatible databases refuse with reset
-    // guidance instead of silent destruction.
-    if ensure_database(&db_path)?.created {
+    // Missing/empty databases are created from zero with no prompt (there is
+    // nothing to destroy). Incompatible schemas open a native recovery dialog
+    // (migrate / recreate-from-backup / quit) instead of exiting silently —
+    // a bare `Err` here is invisible on a console-less Windows launch.
+    let Some(ready) = ensure_database(&db_path)? else {
+        // Quit by explicit choice (or after an already-reported failure).
+        return Ok(());
+    };
+    if ready.created {
         eprintln!("database created: {}", db_path.display());
     }
 
@@ -473,17 +590,17 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::ensure_database;
+    use super::{RecoveryChoice, ensure_database, resolve_incompatible};
 
     #[test]
     fn missing_database_is_created_from_zero() {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("fresh.sqlite3");
         assert!(!db.exists());
-        let ready = ensure_database(&db).unwrap();
+        let ready = ensure_database(&db).unwrap().expect("no dialog on empty");
         assert!(ready.created);
         // Second call is a no-op on the now-current database.
-        let again = ensure_database(&db).unwrap();
+        let again = ensure_database(&db).unwrap().expect("no dialog on current");
         assert!(!again.created);
         assert!(matches!(
             forza_db::migration::schema_status(&db).unwrap(),
@@ -491,16 +608,78 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn incompatible_database_is_refused_with_guidance() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = dir.path().join("foreign.sqlite3");
+    fn foreign_database(dir: &tempfile::TempDir, name: &str, version: i64) -> std::path::PathBuf {
+        let db = dir.path().join(name);
         ensure_database(&db).unwrap();
         let conn = forza_db::open_connection(&db).unwrap();
-        conn.execute_batch("PRAGMA user_version = 424242").unwrap();
+        conn.execute_batch(&format!("PRAGMA user_version = {version}"))
+            .unwrap();
         drop(conn);
-        let err = ensure_database(&db).unwrap_err().to_string();
-        assert!(err.contains("incompatible schema"), "{err}");
-        assert!(err.contains("db-reset"), "{err}");
+        db
+    }
+
+    #[test]
+    fn quit_leaves_incompatible_database_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = foreign_database(&dir, "foreign.sqlite3", 424242);
+        let done = resolve_incompatible(&db, RecoveryChoice::Quit).unwrap();
+        assert!(done.is_none());
+        assert!(matches!(
+            forza_db::migration::schema_status(&db).unwrap(),
+            forza_db::migration::SchemaStatus::Incompatible { found: 424242 }
+        ));
+    }
+
+    #[test]
+    fn unknown_versions_cannot_migrate_but_can_recreate() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = foreign_database(&dir, "foreign.sqlite3", 424242);
+        let err = resolve_incompatible(&db, RecoveryChoice::Migrate)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no migration path"), "{err}");
+        // A backup was still made before the failed migration.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+
+        let done = resolve_incompatible(&db, RecoveryChoice::Recreate).unwrap();
+        assert!(matches!(done, Some(super::RecoveryDone::Recreated { .. })));
+        assert!(matches!(
+            forza_db::migration::schema_status(&db).unwrap(),
+            forza_db::migration::SchemaStatus::Current
+        ));
+    }
+
+    #[test]
+    fn v2_database_migrates_with_data_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("v2.sqlite3");
+        ensure_database(&db).unwrap();
+        let conn = forza_db::open_connection(&db).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE extraction_runs ADD COLUMN performance_tps_floor FLOAT;
+             ALTER TABLE extraction_runs ADD COLUMN performance_reload_elapsed_s FLOAT;
+             ALTER TABLE extraction_runs ADD COLUMN performance_reload_streak INTEGER;
+             INSERT INTO extraction_runs (id, model, created_at)
+              VALUES ('run-v2', 'm', datetime('now'));
+             PRAGMA user_version = 2;",
+        )
+        .unwrap();
+        drop(conn);
+
+        let done = resolve_incompatible(&db, RecoveryChoice::Migrate).unwrap();
+        assert!(matches!(done, Some(super::RecoveryDone::Migrated { .. })));
+        assert!(matches!(
+            forza_db::migration::schema_status(&db).unwrap(),
+            forza_db::migration::SchemaStatus::Current
+        ));
+        let conn = forza_db::open_connection(&db).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM extraction_runs WHERE id = 'run-v2'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }

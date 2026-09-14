@@ -10,6 +10,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- GUI recovery for incompatible databases: instead of exiting silently
+  (a bare `Err` is invisible on a console-less Windows launch), startup now
+  offers a native dialog — migrate in place (keeps data, backup made first),
+  back up and recreate from zero, or quit untouched. `forza-db` gains a
+  `migrate()` path (currently v2 → v3: drop the removed `performance_*`
+  columns) plus timestamped `backup_database()`; unknown versions still
+  refuse with `db-reset` guidance.
+
 - GUI creates the database from zero when none is found (`ensure_database`:
   missing/empty schema is built via `upgrade()`, incompatible schemas refuse
   with `db-reset` guidance instead of failing at startup).

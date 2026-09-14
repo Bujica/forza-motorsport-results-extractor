@@ -82,6 +82,11 @@ CREATE TABLE extraction_runs (
 
 Rules:
 
+- `performance_tps_floor`, `performance_reload_elapsed_s`,
+  `performance_reload_streak` exist on the Python line only. The Rust schema
+  (v3+) drops them — the slow-streak reload feature was removed there as
+  never-wired dead code; v2 → v3 migration (`forza-db/src/migration.rs`)
+  drops the columns, data preserved.
 - `failed` on this table means run failure or failed result count depending on column context; `status='failed'` is operational lifecycle state.
 - `operational_error_*` is for backend/preflight/config failures.
 - A failed preflight must not create `extraction_results`; planned process

@@ -372,7 +372,6 @@ pub(crate) fn handle_response(response: Response, ui: slint::Weak<MainWindow>) {
                         w.set_overview_configured_load(s.lm_configured_load.clone().into());
                         w.set_overview_configured_request(s.lm_configured_request.clone().into());
                         w.set_overview_configured_image(s.lm_configured_image.clone().into());
-                        w.set_overview_runtime_policy(s.lm_runtime_policy.clone().into());
                         w.set_overview_loaded_runtime(s.lm_loaded_runtime.clone().into());
                         w.set_overview_capabilities(s.lm_capabilities.clone().into());
                         w.set_overview_model_info(s.lm_model_info.clone().into());

@@ -287,7 +287,6 @@ pub struct OverviewSnapshot {
     pub lm_configured_load: String,
     pub lm_configured_request: String,
     pub lm_configured_image: String,
-    pub lm_runtime_policy: String,
     pub lm_loaded_runtime: String,
     pub lm_capabilities: String,
     pub lm_model_info: String,
@@ -419,12 +418,6 @@ pub fn build_overview_snapshot(
         "max width {} · quality {} · grayscale {}",
         cfg.image.max_width, cfg.image.encode_quality, cfg.image.grayscale
     );
-    let lm_runtime_policy = format!(
-        "reload if TPS < {} for {} image(s) after {}s",
-        cfg.llm.performance_tps_floor,
-        cfg.llm.performance_reload_streak,
-        cfg.llm.performance_reload_elapsed_s
-    );
     let dashboard = {
         let images: i64 = conn
             .query_row("SELECT COUNT(*) FROM image_files", [], |r| r.get(0))
@@ -452,7 +445,6 @@ pub fn build_overview_snapshot(
         lm_configured_load,
         lm_configured_request,
         lm_configured_image,
-        lm_runtime_policy,
         lm_loaded_runtime,
         lm_capabilities,
         lm_model_info,

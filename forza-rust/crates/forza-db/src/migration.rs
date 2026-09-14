@@ -20,6 +20,101 @@ pub enum SchemaStatus {
     Incompatible { found: i64 },
 }
 
+/// Outcome of [`migrate`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MigrateOutcome {
+    /// Nothing to do: the database was already current (or was empty and got
+    /// created from zero by [`upgrade`]).
+    AlreadyCurrent,
+    /// Stepped forward one or more versions, data preserved.
+    Migrated { from: i64 },
+}
+
+/// Columns dropped by the v2 → v3 migration (the removed slow-streak reload
+/// feature; write-never/read-never on the Rust line, so dropping is lossless
+/// here — Python-written values in a shared file are discarded by design).
+const V3_DROPPED_COLUMNS: &[&str] = &[
+    "performance_tps_floor",
+    "performance_reload_elapsed_s",
+    "performance_reload_streak",
+];
+
+/// WAL sidecar paths next to `path` (`<db>-wal`, `<db>-shm`).
+pub fn sidecar_paths(path: &Path) -> [std::path::PathBuf; 2] {
+    [
+        path.with_extension("sqlite3-wal"),
+        path.with_extension("sqlite3-shm"),
+    ]
+}
+
+/// Copy `path` to a timestamped backup next to it and return the backup path.
+///
+/// WAL sidecars are copied too when present, so the backup is restorable as
+/// a unit. Never destroys: both [`migrate`] (before touching a live
+/// database) and the GUI recovery flow (before recreating from zero) go
+/// through here.
+pub fn backup_database(path: &Path) -> Result<std::path::PathBuf, DbError> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let backup = path.with_extension(format!("sqlite3.bak-{stamp}"));
+    std::fs::copy(path, &backup)?;
+    for sidecar in sidecar_paths(path) {
+        if sidecar.exists() {
+            let dest = std::path::PathBuf::from(format!("{}.bak-{stamp}", sidecar.display()));
+            std::fs::copy(&sidecar, &dest)?;
+        }
+    }
+    Ok(backup)
+}
+
+/// Step an outdated database forward to [`SCHEMA_VERSION`], preserving data.
+///
+/// Currently knows v2 → v3 only (drop the three `performance_*` columns).
+/// Unknown versions are refused with [`DbError::SchemaState`] — delete or
+/// `db-reset` instead. Empty databases are created via [`upgrade`].
+/// Returns [`MigrateOutcome::Migrated`] with the version stepped from.
+///
+/// # Errors
+///
+/// Returns [`DbError::SchemaState`] for unknown versions or when the
+/// post-migration [`schema_status`] is not [`SchemaStatus::Current`],
+/// [`DbError::Sqlite`] on DDL failures.
+pub fn migrate(path: &Path) -> Result<MigrateOutcome, DbError> {
+    match schema_status(path)? {
+        SchemaStatus::Empty => {
+            upgrade(path)?;
+            Ok(MigrateOutcome::AlreadyCurrent)
+        }
+        SchemaStatus::Current => Ok(MigrateOutcome::AlreadyCurrent),
+        SchemaStatus::Incompatible { found } => {
+            if found != 2 {
+                return Err(DbError::SchemaState {
+                    message: format!(
+                        "no migration path: database has user_version={found} but this build expects {SCHEMA_VERSION}; \
+                         delete it or run `forza maintenance db-reset --yes` to recreate"
+                    ),
+                });
+            }
+            let conn = Connection::open(path)?;
+            for column in V3_DROPPED_COLUMNS {
+                conn.execute_batch(&format!("ALTER TABLE extraction_runs DROP COLUMN {column}"))?;
+            }
+            conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            match schema_status(path)? {
+                SchemaStatus::Current => Ok(MigrateOutcome::Migrated { from: found }),
+                other => Err(DbError::SchemaState {
+                    message: format!(
+                        "migration v{found}→v{SCHEMA_VERSION} did not converge (status: {other:?}); \
+                         restore the .bak file or recreate from zero"
+                    ),
+                }),
+            }
+        }
+    }
+}
+
 fn table_count(conn: &Connection) -> Result<i64, DbError> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",

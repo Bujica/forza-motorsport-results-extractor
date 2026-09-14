@@ -8,11 +8,13 @@ Scope: `forza-db` — schema, migration, repositories, doctor, maintenance.
 
 - Engine: SQLite via rusqlite (WAL + busy timeout + FK enforcement, see
   `forza-db/src/connection.rs`).
-- Version marker: `PRAGMA user_version`, currently `SCHEMA_VERSION = 2`
+- Version marker: `PRAGMA user_version`, currently `SCHEMA_VERSION = 3`
   (`forza-db/src/schema_ddl.rs`, frozen DDL — do not edit by hand).
 - `migration::upgrade()` builds a fresh database from zero and refuses
-  foreign versions. There is no auto-migration of old schemas; test databases
-  are rebuilt.
+  foreign versions. `migration::migrate()` steps known old versions forward
+  (currently v2 → v3: drop the removed `performance_*` columns, data
+  preserved); unknown versions refuse with `db-reset` guidance. Always back
+  up first (`migration::backup_database()`); test databases are rebuilt.
 - The `frozen_schema_*` doctor checks enforce the baseline at runtime.
 - **Never open one sqlite file with both implementations.** Python and Rust
   schemas/versions differ; mixing them produces `Incompatible` errors by design.
