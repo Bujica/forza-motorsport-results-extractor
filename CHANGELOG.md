@@ -142,11 +142,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   extraction runner (sequential + multi-worker), Slint GUI, review/flag
   lifecycle, CSV/PDF export, DB doctor, and maintenance CLI are ported and
   verified against the Python baseline. The Python line stays frozen at
-  0.21.0-beta.1 (reference only).
+  0.21.0 (final, reference only).
 - Database schema v2 (`run_inputs.id` autoincrement); test databases must be
   recreated via `forza.exe maintenance db-upgrade`.
-- Developer docs for the Rust implementation live in `forza-rust/docs/`;
+- Developer docs for the Rust implementation live in `forza-rust/docs/`
+  (entry point: `forza-rust/docs/architecture-visual.html`, which also links
+  every crate's rustdoc page);
   root `docs/` remains the frozen Python-era reference.
+
+---
+
+## [0.21.0] - 2026-09-15
+
+Final release of the Python line. The Python implementation (`forza/`,
+`tests/`, PyInstaller packaging, `pyproject.toml` version `0.21.0`) is
+frozen as legacy reference from this point on; active development
+continues in Rust (`forza-rust/`, workspace version `0.1.0`). No further
+Python releases are planned — changes since `0.21.0-beta.1`:
+
+### Fixed
+
+- Duplicate workflow in the image browser: the duplicate filter emitted the
+  bound method instead of its value, sorts were not group-aware, and the
+  images table viewport could clip (`forza/gui/models/image_table_model.py`,
+  `forza/gui/views/image_browser_view.py`, covered by
+  `tests/test_gui_duplicate_filter_flow.py`).
+- Operator-confirmed novel cars appended to the shipped `cars.txt`
+  (mirrored in `forza-rust/assets/cars.txt`).
 
 ---
 

@@ -3,11 +3,15 @@
 
 Forza Motorsport Results Extractor is a Windows desktop tool for extracting lap-time data from Forza Motorsport results-screen screenshots using a local LM Studio vision model.
 
-Status: public beta. The current release target is `0.21.0-beta.1`.
+Status: public beta. Two tracks, do not mix:
 
-Implementation: Rust (`forza-rust/` workspace — `forza.exe` CLI + `forza-gui`
-desktop app) is the current product code. The Python implementation (`forza/`)
-is frozen at the 0.21.0-beta.1 baseline and kept for reference only.
+| Track | Version | State | Code |
+| --- | --- | --- | --- |
+| Python (legacy) | `0.21.0` final | Frozen, reference only | `forza/`, `tests/`, PyInstaller bundle |
+| Rust (current) | `0.1.0` | Active development | `forza-rust/` workspace (`forza.exe` CLI + `forza-gui` desktop app) |
+
+Implementation: Rust is the current product code. The Python implementation
+is frozen at the 0.21.0 final baseline and kept for reference only.
 
 ## Target and support scope
 
@@ -36,9 +40,10 @@ The beta does not target Forza Horizon, older Forza Motorsport layouts, leaderbo
 - Does not support Forza Horizon.
 - Does not support older Forza Motorsport UI layouts as a product target.
 
-## Windows beta bundle
+## Windows beta bundle (Python line, `0.21.0` final)
 
-The beta bundle is a one-folder Windows distribution intended for testers. It includes the GUI executable, CLI maintenance executable, migrations, runtime reference data, and starter configuration templates.
+The beta bundle is a one-folder Windows distribution intended for testers,
+built from the legacy Python line. It includes the GUI executable, CLI maintenance executable, migrations, runtime reference data, and starter configuration templates. A Rust-built bundle does not exist yet (see `QUICK_GUIDE.md`).
 
 Expected artifact name:
 
@@ -74,7 +79,7 @@ Normal CLI processing is still available for operational use:
 
 The GUI is the primary product surface. The CLI is retained for operational commands such as database setup, validation, and controlled processing.
 
-Legacy Python install (`forza/` frozen at 0.21.0-beta.1, reference only):
+Legacy Python install (`forza/` frozen at 0.21.0 final, reference only):
 
 ```cmd
 pip install -e ".[dev,gui]"
@@ -106,6 +111,8 @@ Users are responsible for the model they run, the endpoint they configure, and t
 - [Beta packaging policy](docs/release/beta_packaging.md)
 - [Rust implementation docs](forza-rust/docs/README.md) — current developer
   reference (architecture, database, reviews, GUI, LM Studio, output, config).
+  Start at the visual entry point: [forza-rust/docs/architecture-visual.html](forza-rust/docs/architecture-visual.html),
+  which maps all 9 crates and links every crate's rustdoc page.
   Root `docs/` is the frozen Python-era reference.
 
 ## Contributing and security

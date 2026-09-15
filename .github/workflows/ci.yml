@@ -3,8 +3,14 @@ name: CI
 on:
   push:
     branches: [main, dev]
+    paths-ignore:
+      # Rust-only changes are covered by rust.yml; the Python line is
+      # frozen at 0.21.0 (legacy reference) — skip its CI there.
+      - 'forza-rust/**'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'forza-rust/**'
 
 jobs:
   test:

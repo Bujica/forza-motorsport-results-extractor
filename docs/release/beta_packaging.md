@@ -1,6 +1,8 @@
 # Windows Beta Packaging
 
-Status: current
+Status: current — Python line (`0.21.0` final, legacy). A Rust (`0.1.0`)
+bundle policy does not exist yet; when created, it must mirror the
+one-folder + explicit allow-list rules below.
 Target game: Forza Motorsport, 2023 release.
 Target screenshot type: post-race Results screen.
 

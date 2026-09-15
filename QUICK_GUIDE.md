@@ -25,10 +25,10 @@ python -m forza gui
 ## Beta bundle quick start
 
 The shipped beta bundle below is built from the legacy Python line
-(PyInstaller — see `docs/release/beta_packaging.md`). A Rust-built bundle
-(`forza.exe` + `forza-gui.exe` via `cargo build --release`) is not packaged
-yet; from source, run the binaries from `forza-rust/target/debug/` (or
-`release/`) as shown above.
+(`0.21.0` final — PyInstaller — see `docs/release/beta_packaging.md`).
+A Rust-built bundle (`0.1.0`, `forza.exe` + `forza-gui.exe` via
+`cargo build --release`) is not packaged yet; from source, run the binaries
+from `forza-rust/target/debug/` (or `release/`) as shown above.
 
 From the unpacked bundle folder:
 

@@ -6,7 +6,8 @@ This guide is for testers using the Windows beta bundle.
 ## Scope
 
 - Product: Forza Motorsport Results Extractor.
-- Release: `0.21.0-beta.1`.
+- Release: `0.21.0` (final release of the legacy Python line — no further
+  Python releases planned; current development is Rust `0.1.0` in `forza-rust/`).
 - Target game: Forza Motorsport, 2023 release.
 - Target screenshot type: post-race Results screen.
 - Platform: Windows.

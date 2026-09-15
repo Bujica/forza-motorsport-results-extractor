@@ -2,6 +2,11 @@
 //!
 //! Services never know widgets; they return typed results that any
 //! front-end can consume.
+//!
+//! New to the workspace? Start at the visual architecture map
+//! ([`architecture-visual.html`](../../docs/architecture-visual.html)):
+//! all 9 crates, dependency layers, the end-to-end data flow, and links
+//! to every crate's rustdoc page.
 
 // Unit tests assert with unwrap/expect like the other crates.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]

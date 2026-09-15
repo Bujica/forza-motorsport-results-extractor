@@ -72,9 +72,12 @@ pub(crate) fn wire_run(main: &MainWindow) {
             // "Log file not found" forever. The errors sibling gets failures.
             let log_file = params.log_file.clone();
             let errors_file = forza_app::errors_log_path(&params.log_file);
-            let ui = ui.clone();
-            let _handle = forza_app::spawn_extraction(params, control, move |event| {
-                let ui = ui.clone();
+            let event_ui = ui.clone();
+            // Thread spawn only fails on resource exhaustion; report it
+            // through the same failure path as RunEvent::Failed instead of
+            // panicking (which would kill the GUI with no message).
+            let _handle = match forza_app::spawn_extraction(params, control, move |event| {
+                let ui = event_ui.clone();
                 // Cloned per event: the inner callback must stay `'static`.
                 let log_file = log_file.clone();
                 let errors_file = errors_file.clone();
@@ -183,7 +186,22 @@ pub(crate) fn wire_run(main: &MainWindow) {
                         }
                     }
                 });
-            });
+            }) {
+                Ok(handle) => handle,
+                Err(message) => {
+                    // The run never started: undo the "running" state set
+                    // above and surface the cause like any other failure.
+                    RUN_CONTROL.with(|slot| *slot.borrow_mut() = None);
+                    let line = format!("[failed] run failed to start: {message}");
+                    append_run_log(line.clone());
+                    if let Some(w) = ui.upgrade() {
+                        w.set_run_running(false);
+                        w.set_run_paused(false);
+                        set_status(&w, "run failed to start (see run log)");
+                    }
+                    return;
+                }
+            };
         });
     }
     {

@@ -4,15 +4,21 @@ Status: current
 Audience: developer, maintainer, LLM
 Scope: the `forza-rust/` workspace — the current product code.
 
-The Python tree in `forza/` is frozen at 0.21.0-beta.1 and documented under
-root `docs/` (legacy reference — behavior rules there predate the port, code
-pointers there do not apply here). When this documentation disagrees with
-`forza-rust/crates/` source, the source wins.
+The Python tree in `forza/` is frozen at 0.21.0 (final, legacy) and
+documented under root `docs/` (legacy reference — behavior rules there
+predate the port, code pointers there do not apply here). When this
+documentation disagrees with `forza-rust/crates/` source, the source wins.
+
+> 🗺️ **New here? Start at the visual entry point:
+> [`architecture-visual.html`](architecture-visual.html)** — one page mapping
+> all 9 crates, their dependencies, the end-to-end data flow, and links to
+> every crate's rustdoc page (`cargo doc --no-deps --workspace` output).
 
 ## Map
 
 | Document | Use |
 | --- | --- |
+| [`architecture-visual.html`](architecture-visual.html) | **Start here.** Visual map: 9 crates, dependency layers, data flow, rustdoc links. |
 | `development.md` | Toolchain, build/test/lint gates, fixtures, CI. Start here to work. |
 | `architecture.md` | Crates, dependency direction, runtime flows (run, rebuild, GUI, LM Studio). |
 | `database.md` | Schema v2, migration, doctor battery, tables, maintenance commands. |

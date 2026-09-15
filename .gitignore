@@ -37,6 +37,10 @@ output/reports/
 # User config
 forza_config.ini
 
+# Local UI state (window geometry, splits, columns) — per-machine, never commit
+ui_state.json
+output/ui_state.json
+
 # Build
 build/
 dist/

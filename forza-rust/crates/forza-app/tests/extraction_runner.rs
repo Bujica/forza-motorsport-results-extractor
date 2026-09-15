@@ -67,7 +67,8 @@ fn spawn(
     let (tx, rx) = mpsc::channel();
     let handle = spawn_extraction(params, control, move |event| {
         tx.send(event).unwrap();
-    });
+    })
+    .expect("test spawns the extraction thread");
     (rx, handle)
 }
 

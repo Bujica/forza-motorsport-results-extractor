@@ -478,18 +478,22 @@ fn upsert_image_for_run(
 /// cooperatively at safe checkpoints (between images); the current image
 /// finishes first. When `params.workers > 1` images are processed in
 /// parallel across that many Tokio worker tasks.
+///
+/// Thread-spawn failure is reported as `Err` (never a panic): spawning only
+/// fails on resource exhaustion, and killing the host process would hide
+/// the cause from the CLI/GUI event stream.
 pub fn spawn_extraction<F>(
     params: RunParams,
     control: RunControl,
     on_event: F,
-) -> std::thread::JoinHandle<()>
+) -> Result<std::thread::JoinHandle<()>, String>
 where
     F: Fn(RunEvent) + Send + 'static,
 {
     std::thread::Builder::new()
         .name("forza-extraction".into())
         .spawn(move || run_blocking(params, control, on_event))
-        .unwrap_or_else(|e| panic!("extraction thread: {e}"))
+        .map_err(|e| format!("extraction thread: {e}"))
 }
 
 fn run_blocking<F>(params: RunParams, control: RunControl, on_event: F)
@@ -907,6 +911,7 @@ where
 
         // Spawn worker threads (each owns its own Connection + single-thread rt).
         let mut handles = Vec::new();
+        let mut spawn_error: Option<String> = None;
         for (w_idx, batch) in batches.into_iter().enumerate() {
             let params_clone = params.clone();
             let conn_path = params.database_file.clone();
@@ -918,33 +923,52 @@ where
             let snapshot_id_clone = snapshot_id.clone();
             let inference_clone = Arc::clone(&inference);
 
-            handles.push(
-                std::thread::Builder::new()
-                    .name(format!("forza-worker-{w_idx}"))
-                    .spawn(move || {
-                        let rt = tokio::runtime::Builder::new_current_thread()
-                            .enable_all()
-                            .build()
-                            .unwrap_or_else(|e| panic!("worker {w_idx} tokio runtime: {e}"));
-                        rt.block_on(async {
-                            worker_loop(
-                                w_idx,
-                                conn_path,
-                                &forza_db::RunId::new(&run_id_clone),
-                                batch,
-                                &params_clone,
-                                control_clone,
-                                event_tx_clone,
-                                &process_reason_clone,
-                                &prompt_id_clone,
-                                &snapshot_id_clone,
-                                inference_clone,
-                            )
-                            .await
-                        });
-                    })
-                    .unwrap_or_else(|e| panic!("worker {w_idx} thread spawn: {e}")),
-            );
+            match std::thread::Builder::new()
+                .name(format!("forza-worker-{w_idx}"))
+                .spawn(move || {
+                    let rt = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(rt) => rt,
+                        // Same graceful pattern as everywhere else in this
+                        // file: report through the event channel and stop
+                        // this worker instead of panicking the process.
+                        // The orphan-marking safety net below finalizes the
+                        // batch's rows as `error`.
+                        Err(e) => {
+                            let _ = event_tx_clone.send(RunEvent::Failed(format!(
+                                "worker {w_idx} tokio runtime: {e}"
+                            )));
+                            return;
+                        }
+                    };
+                    rt.block_on(async {
+                        worker_loop(
+                            w_idx,
+                            conn_path,
+                            &forza_db::RunId::new(&run_id_clone),
+                            batch,
+                            &params_clone,
+                            control_clone,
+                            event_tx_clone,
+                            &process_reason_clone,
+                            &prompt_id_clone,
+                            &snapshot_id_clone,
+                            inference_clone,
+                        )
+                        .await
+                    });
+                }) {
+                Ok(handle) => handles.push(handle),
+                // Resource exhaustion: keep the workers that did spawn
+                // (their work is collected and joined below) and fail the
+                // run after finalizing partial results.
+                Err(e) => {
+                    spawn_error = Some(format!("worker {w_idx} thread spawn: {e}"));
+                    break;
+                }
+            }
         }
         drop(event_tx);
 
@@ -1016,6 +1040,13 @@ where
         // already includes them.)
         let _ = pre_failed;
         backfill_batch_duplicate_links(&conn, &run_id);
+
+        // A worker that never spawned leaves its batch to the orphan-marking
+        // safety net above; fail the run after partial results are final so
+        // the CLI/GUI reports the cause instead of a successful partial run.
+        if let Some(message) = spawn_error {
+            return Err(message);
+        }
 
         let w_processed = w_succeeded + w_failed;
         (w_processed, w_succeeded, w_failed)

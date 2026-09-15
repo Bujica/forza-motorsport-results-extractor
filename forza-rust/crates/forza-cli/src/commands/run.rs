@@ -195,7 +195,8 @@ fn cmd_live_run(
                 forza_app::append_log_file(&errors_file, &line);
             }
         }
-    });
+    })
+    .map_err(|message| anyhow::anyhow!("{message}"))?;
     handle
         .join()
         .map_err(|_| anyhow::anyhow!("extraction thread panicked"))?;
