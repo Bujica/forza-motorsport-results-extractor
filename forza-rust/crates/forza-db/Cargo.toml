@@ -1,0 +1,24 @@
+[package]
+name = "forza-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+rusqlite.workspace = true
+r2d2.workspace = true
+r2d2_sqlite = "0.35"
+thiserror.workspace = true
+sha2.workspace = true
+serde_json.workspace = true
+uuid = { version = "1", features = ["v4"] }
+forza-domain = { path = "../forza-domain" }
+forza-pipeline = { path = "../forza-pipeline" }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

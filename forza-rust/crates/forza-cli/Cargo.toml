@@ -1,0 +1,32 @@
+[package]
+name = "forza-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "forza"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+anyhow.workspace = true
+forza-config = { path = "../forza-config" }
+forza-db = { path = "../forza-db" }
+forza-app = { path = "../forza-app" }
+# Only for the `gui` subcommand (same `forza_gui::run` entry as the
+# `forza-gui` binary); every other subcommand is GUI-free.
+forza-gui = { path = "../forza-gui" }
+forza-output = { path = "../forza-output" }
+forza-pipeline = { path = "../forza-pipeline" }
+forza-domain = { path = "../forza-domain" }
+serde_json.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,352 @@
+// Images inventory page: filter bar, sortable 7-column inventory table with
+// Python-style selection (plain click = single, Ctrl+click = toggle,
+// Shift+click = range, Ctrl+A = all), batch action bar, and the selection
+// side panel.
+
+import { Button, ComboBox, ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { ImageItem } from "../models.slint";
+import { Card, EmptyState, FilterCombo, BatchActionBar, SplitterH, SplitterV, TableCell, SortHeaderCell } from "../components/common.slint";
+
+export component ImagesPage inherits Rectangle {
+    background: transparent;
+
+    // Models & state (bound from MainWindow)
+    in property <[ImageItem]> images;
+    in property <[string]> image-tracks;
+    in property <[string]> image-runs;
+    in-out property <string> image-file-filter;
+    in-out property <string> image-best-filter;
+    in-out property <string> image-inventory-filter;
+    in-out property <string> image-track-filter;
+    in-out property <string> image-run-filter;
+    in-out property <string> image-process-filter;
+    in-out property <int> selected-index;
+    in-out property <int> selected-image-count;
+    in property <bool> run-running;
+    in property <string> detail-title;
+    in property <string> detail-lines;
+    in property <image> detail-preview;
+    in property <bool> detail-has-preview;
+    in property <string> selection-summary;
+    // Sort state: column index + direction (false asc / true desc).
+    in property <int> sort-column;
+    in property <bool> sort-ascending;
+    in-out property <bool> confirm-delete;
+    // Rename plan preview (confirm dialog parity with Python
+    // `confirm_rename_plan`: totals + one `source -> target` line per change).
+    in-out property <bool> confirm-rename: false;
+    in property <string> rename-plan-lines;
+    in property <string> rename-summary;
+    // Scan status label text (bound from MainWindow).
+    in-out property <string> scan-status;
+    // Layout state (QSplitter parity): table↔panel split, preview height.
+    in-out property <length> table-split: 780px;
+    in-out property <length> preview-h: 300px;
+    // Column widths 13px base (QuadHD min): 320 / 110 / 320 / 100 / 105 / 105 / 140 stretch
+    in-out property <length> col-name-w: 320px;
+    in-out property <length> col-date-w: 110px;
+    in-out property <length> col-semantic-w: 320px;
+    in-out property <length> col-file-w: 100px;
+    in-out property <length> col-dup-w: 105px;
+    in-out property <length> col-proc-w: 105px;
+    in-out property <length> col-best-w: 140px;
+
+    callback refresh-requested(string, string, string, string, string, string);
+    callback scan-folder();
+    callback selection-changed(int);
+    callback selection-toggle(int);
+    callback selection-single(int);
+    callback selection-range(int);
+    callback select-all();
+    callback clear-selection();
+    callback process-selected();
+    callback rename-selected();
+    callback execute-rename();
+    callback export-selected();
+    callback rescan-selected();
+    callback delete-selected();
+    callback sort-changed(int);
+    callback open-image-detail(int);
+    callback select-in-images();
+
+    function fire-refresh() {
+        root.confirm-delete = false;
+        root.confirm-rename = false;
+        root.refresh-requested(root.image-file-filter, root.image-best-filter,
+            root.image-inventory-filter, root.image-track-filter,
+            root.image-run-filter, root.image-process-filter);
+    }
+
+    function header-state(column: int) -> int {
+        if root.sort-column != column { return 0; }
+        return root.sort-ascending ? 1 : 2;
+    }
+
+    // Human labels for the Process column (Python _processing_label parity).
+    function process-label(status: string) -> string {
+        return status == "unprocessed" ? "Unprocessed"
+            : status == "processing" ? "Processing"
+            : status == "processed_ok" ? "OK"
+            : status == "processed_error" ? "Error"
+            : status == "cancelled" ? "Cancelled"
+            : status == "skipped" ? "Skipped"
+            : status;
+    }
+
+    VerticalLayout {
+        spacing: 6px;
+
+        // Filter bar — horizontal Flickable: combos scroll when the window is
+        // narrower than their 1050px min and stretch to fill on wider displays.
+        HorizontalLayout {
+            height: 36px;
+            spacing: 8px;
+            alignment: center;
+            Text { text: "Images"; color: Theme.text; font-weight: 700; min-width: 52px; vertical-alignment: center; height: 28px; }
+            Flickable {
+                height: 28px;
+                horizontal-stretch: 1;
+                viewport-width: Math.max(1050px, self.width);
+                viewport-height: 28px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    FilterCombo { combo-min-w: 130px; label: "Best";
+                        model-value: ["all", "pending", "contributing", "non_contributing"];
+                        current-index: 0; selected(value) => { root.image-best-filter = value; root.fire-refresh(); } }
+                    FilterCombo { combo-min-w: 110px; label: "File";
+                        model-value: ["all", "available", "missing"];
+                        current-index: 0; selected(value) => { root.image-file-filter = value; root.fire-refresh(); } }
+                    FilterCombo { combo-min-w: 150px; label: "Process";
+                        model-value: ["all", "unprocessed", "processing", "processed_ok",
+                                "processed_error", "cancelled", "skipped"];
+                        current-index: 0; selected(value) => { root.image-process-filter = value; root.fire-refresh(); } }
+                    FilterCombo { combo-min-w: 110px; label: "Inventory";
+                        model-value: ["all", "duplicate"];
+                        current-index: 0; selected(value) => { root.image-inventory-filter = value; root.fire-refresh(); } }
+                    FilterCombo { combo-min-w: 320px; label: "Track";
+                        model-value: root.image-tracks;
+                        current-index: 0; selected(value) => { root.image-track-filter = value; root.fire-refresh(); } }
+                    FilterCombo { combo-min-w: 200px; label: "Run";
+                        model-value: root.image-runs;
+                        current-index: 0; selected(value) => { root.image-run-filter = value; root.fire-refresh(); } }
+                }
+            }
+            Text { text: root.scan-status; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; height: 28px; overflow: elide; }
+            Button { text: "Scan folder"; height: 28px; clicked => { root.scan-folder(); } }
+        }
+
+        // Batch action bar (standalone between filter bar and table+sidepanel)
+                BatchActionBar {
+                    selected-count: root.selected-image-count;
+                    process-selected() => { root.process-selected(); }
+                    rename() => { root.rename-selected(); }
+                    export() => { root.export-selected(); }
+                    rescan-selected() => { root.rescan-selected(); }
+                    delete() => { root.confirm-delete = true; }
+                }
+
+        HorizontalLayout {
+            spacing: 0px;
+            vertical-stretch: 1;
+
+            // Table column — width driven by the splitter (QSplitter parity).
+            VerticalLayout {
+                width: root.table-split;
+                spacing: 4px;
+
+                // Table (header+body) inside a single Card so grid insets align —
+                // header and rows share the same 4px inset, solving the 5px offset seen in screenshots.
+                Card {
+                    vertical-stretch: 1;
+                    clip: true;
+                    VerticalLayout {
+                        padding: 4px;
+                        spacing: 4px;
+                        // Table header — same width contract as the body cells below,
+                        // so the columns line up by construction.
+                        Rectangle {
+                            height: 26px;
+                            background: Theme.header-bg;
+                            border-radius: 4px;
+                            clip: true;
+                    HorizontalLayout {
+                        SortHeaderCell { label: "Name"; col-min-width <=> root.col-name-w; default-width: 320px; resizable: true; sort-state: root.header-state(0); sort-clicked() => { root.sort-changed(0); } }
+                        SortHeaderCell { label: "Race Date"; col-min-width <=> root.col-date-w; default-width: 110px; resizable: false; sort-state: root.header-state(1); sort-clicked() => { root.sort-changed(1); } }
+                        SortHeaderCell { label: "Semantic"; col-min-width <=> root.col-semantic-w; default-width: 320px; resizable: true; sort-state: root.header-state(2); sort-clicked() => { root.sort-changed(2); } }
+                        SortHeaderCell { label: "File"; col-min-width <=> root.col-file-w; default-width: 100px; resizable: false; sort-state: root.header-state(3); sort-clicked() => { root.sort-changed(3); } }
+                        SortHeaderCell { label: "Duplicate"; col-min-width <=> root.col-dup-w; default-width: 105px; resizable: false; sort-state: root.header-state(4); sort-clicked() => { root.sort-changed(4); } }
+                        SortHeaderCell { label: "Process"; col-min-width <=> root.col-proc-w; default-width: 105px; resizable: false; sort-state: root.header-state(5); sort-clicked() => { root.sort-changed(5); } }
+                        SortHeaderCell { label: "Best laps"; col-min-width <=> root.col-best-w; default-width: 140px; flexible: true; resizable: true; sort-state: root.header-state(6); sort-clicked() => { root.sort-changed(6); } }
+                    }
+                        }
+
+                        // Table body — layout-managed like every other page
+                        // (bestlaps/review/diagnostics): the ListView takes
+                        // its viewport from the layout via stretch instead of
+                        // explicit parent bindings, which over-measured the
+                        // viewport and clipped the last row under the Card.
+                        focus-scope := FocusScope {
+                            horizontal-stretch: 1;
+                            vertical-stretch: 1;
+                            key-pressed(event) => {
+                                if event.modifiers.control && event.text == "a" {
+                                    root.select-all();
+                                    accept
+                                } else {
+                                    reject
+                                }
+                            }
+                            init => { self.focus(); }
+                            lv := ListView {
+                                horizontal-stretch: 1;
+                                vertical-stretch: 1;
+                            for item[index] in root.images: TouchArea {
+                                height: Theme.row-h;
+                                width: lv.width;
+                                pointer-event(event) => {
+                                    if event.kind == PointerEventKind.up {
+                                        if event.modifiers.control {
+                                            root.selected-index = index;
+                                            root.selection-toggle(index);
+                                        } else if event.modifiers.shift {
+                                            root.selection-range(index);
+                                        } else {
+                                            root.selected-index = index;
+                                            root.selection-single(index);
+                                            root.selection-changed(index);
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    x: 1px; y: 1px;
+                                    width: parent.width - 2px;
+                                    height: parent.height - 2px;
+                                    border-radius: 4px;
+                                    background: item.selected ? Theme.row-selected
+                                        : (index == root.selected-index ? Theme.selection-bg
+                                        : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent));
+                                    HorizontalLayout {
+                                        TableCell { text: item.name; width-pref: root.col-name-w; }
+                                        TableCell { text: item.race-date; width-pref: root.col-date-w; text-color: Theme.text-muted; }
+                                        TableCell { text: item.semantic; width-pref: root.col-semantic-w; text-color: Theme.text-muted; }
+                                        TableCell { text: item.file-status; width-pref: root.col-file-w;
+                                               text-color: item.file-status == "available" ? Theme.ok : Theme.danger; }
+                                        TableCell { text: item.duplicate; width-pref: root.col-dup-w;
+                                               text-color: item.duplicate == "Canonical" ? Theme.accent : Theme.warn; }
+                                        TableCell { text: root.process-label(item.processing); width-pref: root.col-proc-w;
+                                               text-color: item.processing == "processed_ok" ? Theme.ok :
+                                                      item.processing == "processed_error" ? Theme.danger :
+                                                      item.processing == "processing" ? Theme.warn : Theme.text-muted; }
+                                        TableCell { text: item.best-lap; width-pref: root.col-best-w; flexible: true; text-color: Theme.text-muted; grid-line: false; }
+                                    }
+                                }
+                            }
+                        }
+                        if root.images.length == 0: EmptyState {
+                            text: "No images match the current filters.";
+                        }
+                    }
+                }
+            }
+            }
+
+            // Drag handle: resize table ↔ side panel.
+            SplitterH {
+                split <=> root.table-split;
+                min-split: 420px;
+                max-split: parent.width - 260px;
+            }
+
+            // Selection side panel — absorbs the remaining width.
+            VerticalLayout {
+                horizontal-stretch: 1;
+                min-width: 240px;
+                spacing: 6px;
+                Text { text: root.detail-title; color: Theme.text; font-weight: 700; font-size: Theme.font-md; }
+                Card {
+                    height: root.preview-h;
+                    clip: true;
+                    if root.detail-has-preview: Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: root.detail-preview;
+                        image-fit: contain;
+                    }
+                    if !root.detail-has-preview: Text {
+                        width: parent.width;
+                        height: parent.height;
+                        text: "preview unavailable";
+                        color: Theme.text-faint;
+                        font-size: Theme.font-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                // Drag handle: resize preview ↔ detail text.
+                SplitterV {
+                    split <=> root.preview-h;
+                    min-split: 120px;
+                    max-split: parent.height - 180px;
+                }
+                Card {
+                    vertical-stretch: 1;
+                    clip: true;
+                    Flickable {
+                        width: parent.width;
+                        height: parent.height;
+                        viewport-width: self.width;
+                        viewport-height: detail-text.preferred-height;
+                        detail-text := Text {
+                            x: 10px; y: 8px; width: parent.width - 20px;
+                            text: root.detail-lines; color: Theme.text-muted; wrap: word-wrap; font-size: Theme.font-md;
+                        }
+                    }
+                }
+                if root.confirm-delete: HorizontalLayout {
+                    spacing: 6px;
+                    Text { text: "Delete selected? Files + DB rows (laps, reviews, results)."; color: Theme.danger; font-size: Theme.font-sm; vertical-alignment: center; horizontal-stretch: 1; wrap: word-wrap; }
+                    Button { text: "Confirm"; clicked => { root.confirm-delete = false; root.delete-selected(); } }
+                    Button { text: "Cancel"; clicked => { root.confirm-delete = false; } }
+                }
+                // Fixed-height confirmation card: the plan list scrolls
+                // internally so Confirm/Cancel stay visible no matter how
+                // many files the batch holds (an unbounded Text pushed the
+                // buttons out of the panel and overlapped the rows above).
+                if root.confirm-rename: Card {
+                    height: 300px;
+                    clip: true;
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 4px;
+                        Text { text: "Confirm Metadata Rename"; color: Theme.text; font-weight: 700; font-size: Theme.font-sm; }
+                        Text { text: root.rename-summary; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; max-height: 36px; overflow: elide; }
+                        Flickable {
+                            vertical-stretch: 1;
+                            viewport-width: self.width;
+                            viewport-height: plan-text.preferred-height;
+                            plan-text := Text {
+                                width: parent.width;
+                                text: root.rename-plan-lines;
+                                color: Theme.text-muted;
+                                font-size: Theme.font-sm;
+                                wrap: word-wrap;
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Button { text: "Confirm"; clicked => { root.execute-rename(); } }
+                            Button { text: "Cancel"; clicked => { root.confirm-rename = false; } }
+                        }
+                    }
+                }
+                Button {
+                    text: "Image details";
+                    enabled: root.selected-index >= 0;
+                    clicked => { root.open-image-detail(root.selected-index); }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,624 @@
+// GUI shell: sidebar navigation composing the modular operator pages.
+// Page internals live in ui/pages/*.slint; shared visuals in ui/components;
+// data models in ui/models.slint; palette/typography in ui/theme.slint.
+
+import { Button } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { ImageItem, ReviewItem, BestLapItem, DetailLapItem, DetailReviewItem, DetailResultItem, DetailAttemptItem, SettingItem, DebugCaseItem, DebugResultComboItem, DoctorCheckItem } from "models.slint";
+import { ImagesPage } from "pages/images.slint";
+import { ProcessPage } from "pages/process.slint";
+import { ReviewPage } from "pages/review.slint";
+import { BestLapsPage } from "pages/bestlaps.slint";
+import { DiagnosticsPage } from "pages/diagnostics.slint";
+import { ImageDetailPage } from "pages/image_detail.slint";
+import { SettingsPage } from "pages/settings.slint";
+
+export component MainWindow inherits Window {
+    in-out property <string> app-version;
+    title: "Forza Motorsport Results Extractor — " + root.app-version;
+    min-width: 1240px;
+    min-height: 680px;
+    preferred-width: 1400px;
+    preferred-height: 800px;
+    default-font-size: Theme.font-md;
+    background: Theme.bg;
+
+    callback refresh-requested(string, string, string, string, string, string);
+    callback scan-folder();
+    callback selection-changed(int);
+    callback selection-toggle(int);
+    callback selection-single(int);
+    callback selection-range(int);
+    callback select-all();
+    callback clear-selection();
+    callback export-selected();
+    callback rescan-selected();
+    callback delete-selected();
+    callback sort-changed(int);
+    callback process-selected();
+    callback rename-selected();
+    callback execute-rename();
+    callback reviews-requested();
+    callback review-filter-changed(string, string, string, string);
+    callback review-selected(int);
+    callback review-apply(int, string, string);
+    callback review-reopen(int);
+    callback review-open-detail(int);
+    callback review-preview-requested(string);
+    callback bestlaps-requested();
+    callback bestlaps-filter-changed(string, string, string, string, string, string, string, bool);
+    callback bestlaps-sort-changed(int);
+    callback bestlaps-export-csv();
+    callback bestlaps-generate-pdf();
+    callback bestlaps-open-pdf();
+    callback bestlaps-import();
+    callback bestlaps-detail-requested(string);
+    callback doctor-requested();
+    callback rebuild-requested();
+    callback overview-requested();
+    callback start-run(bool, bool, bool, bool);
+    callback cancel-run();
+    callback toggle-pause();
+    callback open-image-detail(int);
+    callback detail-tab-changed(string);
+    callback detail-prev();
+    callback detail-next();
+    callback detail-close();
+    callback setting-edited(string, string);
+    callback discard-settings();
+    callback save-settings();
+    callback page-changed(string);
+    callback debug-refresh-requested();
+    callback debug-filter-changed(string, string, string, string, string);
+    callback debug-case-selected(int);
+    callback debug-result-selected(string);
+    callback open-image-debug(string);
+    callback debug-open-image-detail();
+    callback logs-reload-requested();
+    callback logs-clear-requested(string);
+    callback logs-open-folder();
+    callback logs-search-changed(string);
+    callback about-requested();
+    callback copy-diagnostics-requested();
+    callback open-repository-requested();
+    callback select-in-images();
+
+    in property <[ImageItem]> images;
+    in property <[ReviewItem]> reviews;
+    in property <[string]> review-reasons;
+    in property <[string]> review-outcomes;
+    in property <[string]> review-runs;
+    in property <[string]> review-tracks;
+    in property <[string]> review-classes;
+    in-out property <int> review-reason-index;
+    in-out property <int> review-outcome-index;
+    in-out property <int> review-run-index;
+    in-out property <int> review-selected-index;
+    in-out property <int> review-track-index;
+    in-out property <int> review-class-index;
+    in-out property <string> review-car-text;
+    in-out property <string> review-driver-text;
+    in property <string> review-detail-title;
+    in property <string> review-detail-lines;
+    in property <string> review-reason-note;
+    in property <string> review-suggestions;
+    in property <image> review-preview;
+    in property <bool> review-has-preview;
+    in property <[BestLapItem]> best-laps;
+    in property <string> status-text;
+    in property <string> best-laps-summary;
+    in property <string> best-laps-gamertag;
+    in-out property <bool> best-laps-only-mine: false;
+    in property <[string]> best-laps-tracks: ["all"];
+    in property <[string]> best-laps-classes: ["all"];
+    in property <[string]> best-laps-weathers: ["all"];
+    in property <[string]> best-laps-drivers: ["all"];
+    in property <[string]> best-laps-cars: ["all"];
+    in property <[string]> best-laps-sources: ["all", "screenshots", "external"];
+    in property <[string]> best-laps-laps: ["all", "clean", "dirty"];
+    in property <int> best-laps-sort-column: 99;
+    in property <bool> best-laps-sort-ascending: true;
+    in property <string> selection-summary;
+    in property <int> sort-column;
+    in property <bool> sort-ascending;
+    in-out property <bool> confirm-delete;
+    in-out property <bool> confirm-rename;
+    in property <string> rename-plan-lines;
+    in property <string> rename-summary;
+    in property <string> detail-title;
+    in property <string> detail-lines;
+    in property <string> doctor-report;
+    in property <string> doctor-overall: "PASS";
+    in property <string> doctor-summary: "Not checked";
+    in property <[DoctorCheckItem]> doctor-checks;
+    in-out property <string> diagnostics-tab: "overview";
+    in property <string> overview-lm-level: "info";
+    in property <string> overview-lm-message: "Not checked";
+    in property <string> overview-endpoint: "—";
+    in property <string> overview-model: "—";
+    in property <string> overview-loaded-instance: "—";
+    in property <string> overview-configured-load: "—";
+    in property <string> overview-configured-request: "—";
+    in property <string> overview-configured-image: "—";
+    in property <string> overview-loaded-runtime: "—";
+    in property <string> overview-capabilities: "—";
+    in property <string> overview-model-info: "—";
+    in property <string> overview-warnings: "—";
+    in property <string> overview-db-status: "Not checked";
+    in property <string> overview-schema: "—";
+    in property <string> overview-inventory: "—";
+    in property <string> overview-review: "—";
+    in property <string> context-db;
+    in property <string> context-gamertag;
+
+    in property <[DetailLapItem]> detail-laps;
+    in property <[DetailReviewItem]> detail-reviews;
+    in property <[DetailResultItem]> detail-results;
+    in property <[DetailAttemptItem]> detail-attempts;
+    in property <image> detail-preview;
+    in property <bool> detail-has-preview;
+    in property <string> detail-meta;
+    in property <string> detail-badges;
+    in property <string> detail-path;
+    in property <string> detail-image-id;
+    in property <string> detail-tab;
+    in property <bool> detail-loaded;
+
+    in property <[SettingItem]> settings-rows;
+    in property <bool> settings-valid;
+    in property <string> settings-validation-text;
+    in property <bool> settings-dirty;
+    in property <string> settings-message;
+
+    in property <[DebugCaseItem]> debug-cases;
+    in property <[DebugResultComboItem]> debug-results;
+    in property <[string]> debug-result-labels;
+    in-out property <int> debug-result-index: 0;
+    in property <string> debug-title;
+    in property <string> debug-selected-image-id;
+    in property <string> debug-selected-result-id;
+    in-out property <string> debug-tab: "overview";
+    in property <string> debug-overview-text;
+    in property <string> debug-metadata-text;
+    in property <string> debug-results-text;
+    in property <string> debug-attempts-text;
+    in property <string> debug-response-text;
+    in property <string> debug-parsed-text;
+    in property <string> debug-laps-reviews-text;
+    in property <string> debug-artifacts-text;
+    in property <string> debug-runtime-text;
+    in property <string> debug-timeline-text;
+    in-out property <string> debug-status-filter: "all";
+    in-out property <string> debug-backend-filter: "all";
+    in-out property <string> debug-model-filter: "all";
+    in-out property <string> debug-prompt-filter: "all";
+    in-out property <string> debug-run-filter: "all";
+    in property <[string]> debug-status-options: ["all", "ok", "error", "pending", "running", "cancelled"];
+    in property <[string]> debug-backend-options: ["all"];
+    in property <[string]> debug-model-options: ["all"];
+    in property <[string]> debug-prompt-options: ["all"];
+    in property <[string]> debug-run-options: ["all"];
+
+    in property <string> app-log-text;
+    in property <string> error-log-text;
+    in-out property <string> logs-tab: "app";
+    in-out property <string> logs-search: "";
+    in property <string> logs-status;
+    in-out property <bool> about-visible: false;
+    in property <string> about-text;
+
+    in property <bool> run-running;
+    in property <bool> run-paused;
+    in property <float> run-percent;
+    in property <int> run-done;
+    in property <int> run-total;
+    in property <string> run-rate;
+    in property <string> run-eta;
+    in property <[string]> run-log;
+    in property <string> run-info;
+
+    in-out property <string> page: "images";
+    in-out property <string> image-file-filter: "all";
+    in-out property <string> image-best-filter: "all";
+    in-out property <string> image-inventory-filter: "all";
+    in-out property <string> image-track-filter: "all";
+    in-out property <string> image-run-filter: "all";
+    in-out property <string> image-process-filter: "all";
+    in property <[string]> image-tracks: ["all"];
+    in property <[string]> image-runs: ["all"];
+    in-out property <int> selected-index: -1;
+    in-out property <int> selected-image-count: 0;
+    in-out property <bool> dry-run-checked: false;
+    in-out property <bool> force-checked: false;
+    in-out property <bool> retry-checked: false;
+    in-out property <bool> debug-checked: false;
+    in-out property <float> ui-scale: 1.0;
+    in-out property <int> ui-min-px: 13;
+    // Persisted layout state (window + splitters)
+    in-out property <length> images-table-split: 780px;
+    in-out property <length> images-preview-h: 300px;
+    in-out property <length> review-main-split: 760px;
+    in-out property <length> review-preview-h: 280px;
+    in-out property <length> detail-preview-split: 460px;
+    in-out property <length> debug-table-h: 300px;
+    in-out property <length> process-progress-h: 90px;
+    // Persisted per-column widths (two-way bound to the pages)
+    in-out property <length> images-col-name-w: 320px;
+    in-out property <length> images-col-semantic-w: 320px;
+    in-out property <length> images-col-best-w: 140px;
+    in-out property <length> review-col-decision-w: 195px;
+    in-out property <length> review-col-driver-w: 150px;
+    in-out property <length> bestlaps-col-driver-w: 150px;
+    in-out property <length> bestlaps-col-car-w: 160px;
+    in-out property <length> bestlaps-col-source-w: 140px;
+    in-out property <length> debug-col-image-w: 220px;
+    in-out property <string> scan-status: "";
+
+    changed ui-scale => { Theme.ui-scale = root.ui-scale; }
+    changed ui-min-px => { Theme.ui-min-px = root.ui-min-px; }
+
+    function nav-color(target: string) -> color {
+        return root.page == target ? Theme.sidebar-active : transparent;
+    }
+
+    HorizontalLayout {
+
+        // ── Sidebar ──
+        Rectangle {
+            width: 238px;
+            background: Theme.sidebar-bg;
+
+            VerticalLayout {
+            padding: 8px;
+            spacing: 4px;
+
+            Text { text: "FM Results"; color: Theme.sidebar-text; font-weight: 800; font-size: Theme.font-lg; }
+            Text { text: "v" + root.app-version; color: Theme.sidebar-muted; font-size: Theme.font-xs; }
+            Rectangle { height: 8px; }
+
+            for entry in [
+                { key: "images", label: "Images" },
+                { key: "process", label: "Process" },
+                { key: "review", label: "Review" },
+                { key: "best-laps", label: "Best Laps" },
+                { key: "diagnostics", label: "Diagnostics" },
+                { key: "settings", label: "Settings" },
+            ]: TouchArea {
+                height: 34px;
+                clicked => {
+                    root.page = entry.key;
+                    root.page-changed(entry.key);
+                }
+                Rectangle {
+                    border-radius: 6px;
+                    background: root.nav-color(entry.key);
+                    Text {
+                        x: 10px;
+                        text: entry.label;
+                        color: root.page == entry.key ? Theme.accent : Theme.sidebar-muted;
+                        vertical-alignment: center;
+                        font-weight: root.page == entry.key ? 700 : 400;
+                    }
+                }
+            }
+
+            Rectangle { vertical-stretch: 1; }
+            TouchArea {
+                height: 34px;
+                clicked => { root.about-requested(); }
+                Rectangle {
+                    border-radius: 6px;
+                    background: transparent;
+                    Text { x: 10px; text: "About"; color: Theme.sidebar-muted; vertical-alignment: center; }
+                }
+            }
+            Text {
+                text: root.context-db;
+                color: Theme.sidebar-muted;
+                font-size: Theme.font-xs;
+                wrap: word-wrap;
+            }
+            }
+        }
+
+        Rectangle { width: 1px; background: Theme.border; }
+
+        // ── Main column ──
+        VerticalLayout {
+            padding: 10px;
+            spacing: 8px;
+
+            Text {
+                text: root.status-text;
+                color: Theme.text-muted;
+                horizontal-alignment: right;
+                height: 22px;
+            }
+
+            // ══ Images page ══
+            if root.page == "images": ImagesPage {
+                selection-summary: root.selection-summary;
+                sort-column: root.sort-column;
+                sort-ascending: root.sort-ascending;
+                confirm-delete <=> root.confirm-delete;
+                confirm-rename <=> root.confirm-rename;
+                rename-plan-lines: root.rename-plan-lines;
+                rename-summary: root.rename-summary;
+                images: root.images;
+                image-tracks: root.image-tracks;
+                image-runs: root.image-runs;
+                image-file-filter <=> root.image-file-filter;
+                image-best-filter <=> root.image-best-filter;
+                image-inventory-filter <=> root.image-inventory-filter;
+                image-track-filter <=> root.image-track-filter;
+                image-run-filter <=> root.image-run-filter;
+                image-process-filter <=> root.image-process-filter;
+                selected-index <=> root.selected-index;
+                selected-image-count <=> root.selected-image-count;
+                run-running: root.run-running;
+                detail-title: root.detail-title;
+                detail-lines: root.detail-lines;
+                detail-preview: root.detail-preview;
+                detail-has-preview: root.detail-has-preview;
+                table-split <=> root.images-table-split;
+                preview-h <=> root.images-preview-h;
+                scan-status <=> root.scan-status;
+                col-name-w <=> root.images-col-name-w;
+                col-semantic-w <=> root.images-col-semantic-w;
+                col-best-w <=> root.images-col-best-w;
+                refresh-requested(a, b, c, d, e, f) => { root.refresh-requested(a, b, c, d, e, f); }
+                scan-folder() => { root.scan-folder(); }
+                selection-changed(i) => { root.selection-changed(i); }
+                selection-toggle(i) => { root.selection-toggle(i); }
+                selection-single(i) => { root.selection-single(i); }
+                selection-range(i) => { root.selection-range(i); }
+                select-all() => { root.select-all(); }
+                clear-selection() => { root.clear-selection(); }
+                process-selected() => { root.process-selected(); }
+                rename-selected() => { root.rename-selected(); }
+                execute-rename() => { root.execute-rename(); }
+                export-selected() => { root.export-selected(); }
+                rescan-selected() => { root.rescan-selected(); }
+                delete-selected() => { root.delete-selected(); }
+                sort-changed(c) => { root.sort-changed(c); }
+                select-in-images() => { root.select-in-images(); }
+                open-image-detail(i) => { root.open-image-detail(i); }
+            }
+
+            // ══ Process page ══
+            if root.page == "process": ProcessPage {
+                run-running: root.run-running;
+                run-paused: root.run-paused;
+                run-percent: root.run-percent;
+                run-done: root.run-done;
+                run-total: root.run-total;
+                run-rate: root.run-rate;
+                run-eta: root.run-eta;
+                run-log: root.run-log;
+                run-info: root.run-info;
+                dry-run-checked <=> root.dry-run-checked;
+                force-checked <=> root.force-checked;
+                retry-checked <=> root.retry-checked;
+                debug-checked <=> root.debug-checked;
+                progress-h <=> root.process-progress-h;
+                start-run(dry, force, retry, debug) => { root.start-run(dry, force, retry, debug); }
+                cancel-run() => { root.cancel-run(); }
+                toggle-pause() => { root.toggle-pause(); }
+                select-in-images() => { root.select-in-images(); }
+            }
+
+            // ══ Review page ══
+            if root.page == "review": ReviewPage {
+                reviews: root.reviews;
+                review-reasons: root.review-reasons;
+                review-outcomes: root.review-outcomes;
+                review-runs: root.review-runs;
+                // Forwarded so Rust can clamp the indexes back into range
+                // whenever the option models are replaced (a stale index
+                // silently dropped that filter dimension).
+                review-reason-index <=> root.review-reason-index;
+                review-outcome-index <=> root.review-outcome-index;
+                review-run-index <=> root.review-run-index;
+                review-tracks: root.review-tracks;
+                review-classes: root.review-classes;
+                review-selected-index <=> root.review-selected-index;
+                review-track-index <=> root.review-track-index;
+                review-class-index <=> root.review-class-index;
+                review-car-text <=> root.review-car-text;
+                review-driver-text <=> root.review-driver-text;
+                review-detail-title: root.review-detail-title;
+                review-detail-lines: root.review-detail-lines;
+                review-reason-note: root.review-reason-note;
+                review-suggestions: root.review-suggestions;
+                review-preview: root.review-preview;
+                review-has-preview: root.review-has-preview;
+                main-split <=> root.review-main-split;
+                preview-h <=> root.review-preview-h;
+                col-decision-w <=> root.review-col-decision-w;
+                col-driver-w <=> root.review-col-driver-w;
+                review-filter-changed(status, reason, outcome, run) => { root.review-filter-changed(status, reason, outcome, run); }
+                review-selected(i) => { root.review-selected(i); }
+                review-apply(n, f, v) => { root.review-apply(n, f, v); }
+                review-reopen(n) => { root.review-reopen(n); }
+                review-open-detail(n) => { root.review-open-detail(n); }
+            }
+
+            // ══ Best Laps page ══
+            if root.page == "best-laps": BestLapsPage {
+                best-laps: root.best-laps;
+                best-laps-summary: root.best-laps-summary;
+                best-laps-gamertag: root.best-laps-gamertag;
+                best-laps-only-mine: root.best-laps-only-mine;
+                filter-tracks: root.best-laps-tracks;
+                filter-classes: root.best-laps-classes;
+                filter-weathers: root.best-laps-weathers;
+                filter-drivers: root.best-laps-drivers;
+                filter-cars: root.best-laps-cars;
+                filter-sources: root.best-laps-sources;
+                filter-laps: root.best-laps-laps;
+                sort-column: root.best-laps-sort-column;
+                sort-ascending: root.best-laps-sort-ascending;
+                bestlaps-requested() => { root.bestlaps-requested(); }
+                rebuild-requested() => { root.rebuild-requested(); }
+                filter-changed(t, c, w, d, ca, l, s, m) => { root.bestlaps-filter-changed(t, c, w, d, ca, l, s, m); }
+                sort-changed(col) => { root.bestlaps-sort-changed(col); }
+                export-csv-requested() => { root.bestlaps-export-csv(); }
+                generate-pdf-requested() => { root.bestlaps-generate-pdf(); }
+                open-pdf-requested() => { root.bestlaps-open-pdf(); }
+                import-requested() => { root.bestlaps-import(); }
+                detail-requested(id) => { root.bestlaps-detail-requested(id); }
+                col-driver-w <=> root.bestlaps-col-driver-w;
+                col-car-w <=> root.bestlaps-col-car-w;
+                col-source-w <=> root.bestlaps-col-source-w;
+            }
+
+            // ══ Diagnostics page ══ (4 tabs parity Python: overview / Image Debug / DB Doctor / Logs)
+            if root.page == "diagnostics": DiagnosticsPage {
+                doctor-report: root.doctor-report;
+                doctor-overall: root.doctor-overall;
+                doctor-summary: root.doctor-summary;
+                doctor-checks: root.doctor-checks;
+                diagnostics-tab <=> root.diagnostics-tab;
+                overview-lm-level: root.overview-lm-level;
+                overview-lm-message: root.overview-lm-message;
+                overview-endpoint: root.overview-endpoint;
+                overview-model: root.overview-model;
+                overview-loaded-instance: root.overview-loaded-instance;
+                overview-configured-load: root.overview-configured-load;
+                overview-configured-request: root.overview-configured-request;
+                overview-configured-image: root.overview-configured-image;
+                overview-loaded-runtime: root.overview-loaded-runtime;
+                overview-capabilities: root.overview-capabilities;
+                overview-model-info: root.overview-model-info;
+                overview-warnings: root.overview-warnings;
+                overview-db-status: root.overview-db-status;
+                overview-schema: root.overview-schema;
+                overview-inventory: root.overview-inventory;
+                overview-review: root.overview-review;
+                debug-cases: root.debug-cases;
+                debug-results: root.debug-results;
+                debug-result-labels: root.debug-result-labels;
+                debug-result-index <=> root.debug-result-index;
+                debug-title: root.debug-title;
+                debug-selected-image-id: root.debug-selected-image-id;
+                debug-selected-result-id: root.debug-selected-result-id;
+                debug-tab <=> root.debug-tab;
+                debug-overview-text: root.debug-overview-text;
+                debug-metadata-text: root.debug-metadata-text;
+                debug-results-text: root.debug-results-text;
+                debug-attempts-text: root.debug-attempts-text;
+                debug-response-text: root.debug-response-text;
+                debug-parsed-text: root.debug-parsed-text;
+                debug-laps-reviews-text: root.debug-laps-reviews-text;
+                debug-artifacts-text: root.debug-artifacts-text;
+                debug-runtime-text: root.debug-runtime-text;
+                debug-timeline-text: root.debug-timeline-text;
+                debug-status-filter <=> root.debug-status-filter;
+                debug-backend-filter <=> root.debug-backend-filter;
+                debug-model-filter <=> root.debug-model-filter;
+                debug-prompt-filter <=> root.debug-prompt-filter;
+                debug-run-filter <=> root.debug-run-filter;
+                debug-status-options: root.debug-status-options;
+                debug-backend-options: root.debug-backend-options;
+                debug-model-options: root.debug-model-options;
+                debug-prompt-options: root.debug-prompt-options;
+                debug-run-options: root.debug-run-options;
+                debug-table-h <=> root.debug-table-h;
+                col-image-w <=> root.debug-col-image-w;
+                app-log-text: root.app-log-text;
+                error-log-text: root.error-log-text;
+                logs-tab <=> root.logs-tab;
+                logs-search <=> root.logs-search;
+                logs-status: root.logs-status;
+                doctor-requested() => { root.doctor-requested(); }
+                rebuild-requested() => { root.rebuild-requested(); }
+                overview-requested() => { root.overview-requested(); }
+                debug-refresh-requested() => { root.debug-refresh-requested(); }
+                debug-case-selected(i) => { root.debug-case-selected(i); }
+                debug-result-selected(id) => { root.debug-result-selected(id); }
+                debug-open-image-detail() => { root.debug-open-image-detail(); }
+                debug-filter-changed(s,b,m,p,r) => { root.debug-filter-changed(s,b,m,p,r); }
+                logs-reload-requested() => { root.logs-reload-requested(); }
+                logs-clear-requested(which) => { root.logs-clear-requested(which); }
+                logs-open-folder() => { root.logs-open-folder(); }
+                logs-search-changed(text) => { root.logs-search-changed(text); }
+            }
+
+            // ══ Image Detail page ══
+            if root.page == "image-detail": ImageDetailPage {
+                detail-title: root.detail-title;
+                detail-badges: root.detail-badges;
+                detail-path: root.detail-path;
+                detail-image-id: root.detail-image-id;
+                detail-meta: root.detail-meta;
+                detail-tab: root.detail-tab;
+                detail-loaded: root.detail-loaded;
+                detail-preview: root.detail-preview;
+                detail-has-preview: root.detail-has-preview;
+                detail-laps: root.detail-laps;
+                detail-reviews: root.detail-reviews;
+                detail-results: root.detail-results;
+                detail-attempts: root.detail-attempts;
+                preview-split <=> root.detail-preview-split;
+                detail-tab-changed(t) => { root.detail-tab-changed(t); }
+                detail-prev() => { root.detail-prev(); }
+                detail-next() => { root.detail-next(); }
+                detail-close() => { root.detail-close(); }
+                open-image-debug(id) => { root.open-image-debug(id); }
+            }
+
+            // ══ Settings page ══
+            if root.page == "settings": SettingsPage {
+                settings-rows: root.settings-rows;
+                settings-valid: root.settings-valid;
+                settings-validation-text: root.settings-validation-text;
+                settings-dirty: root.settings-dirty;
+                settings-message: root.settings-message;
+                setting-edited(k, v) => { root.setting-edited(k, v); }
+                discard-settings() => { root.discard-settings(); }
+                save-settings() => { root.save-settings(); }
+            }
+
+            // ── Status bar (versão · db · schema) ──
+            Rectangle { height: 1px; background: Theme.border; }
+            Rectangle {
+                height: Theme.statusbar-h;
+                background: Theme.header-bg;
+                HorizontalLayout {
+                    padding-left: 8px; padding-right: 8px;
+                    spacing: 8px;
+                    Text { text: root.app-version; color: Theme.text-muted; font-size: Theme.font-xs; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    Text { text: root.context-db; color: Theme.text-muted; font-size: Theme.font-xs; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; horizontal-alignment: right; }
+                    Text { text: root.doctor-summary == "Not checked" ? root.overview-schema : root.doctor-summary; color: Theme.text-muted; font-size: Theme.font-xs; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; horizontal-alignment: right; }
+                }
+            }
+        }
+    }
+
+    // ── About dialog (overlay, outside layout) ──
+    if root.about-visible: Rectangle {
+            x: 0; y: 0; width: root.width; height: root.height;
+            background: #00000060;
+            TouchArea { x: 0; y: 0; width: root.width; height: root.height; clicked => { root.about-visible = false; } }
+            Rectangle {
+                width: 520px; height: 420px;
+                x: (root.width - self.width) / 2;
+                y: (root.height - self.height) / 2;
+                background: Theme.card;
+                border-radius: Theme.radius;
+                border-width: 1px; border-color: Theme.border;
+                VerticalLayout {
+                    padding: 16px; spacing: 8px;
+                    Text { text: "About — Forza Motorsport Results Extractor"; color: Theme.text; font-weight: 700; font-size: Theme.font-lg; }
+                    Text { text: root.about-text; color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; vertical-stretch: 1; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle { horizontal-stretch: 1; }
+                        Button { text: "Copy diagnostics"; clicked => { root.copy-diagnostics-requested(); } }
+                        Button { text: "Open repository"; clicked => { root.open-repository-requested(); } }
+                        Button { text: "Close"; clicked => { root.about-visible = false; } }
+                    }
+                }
+            }
+    }
+}

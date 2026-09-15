@@ -6,13 +6,21 @@ This guide is for testers using the Windows beta bundle.
 ## Scope
 
 - Product: Forza Motorsport Results Extractor.
-- Release: `0.21.0-beta.1`.
+- Release: `0.21.0` (final release of the legacy Python line — no further
+  Python releases planned; current development is Rust `0.1.0` in `forza-rust/`).
 - Target game: Forza Motorsport, 2023 release.
 - Target screenshot type: post-race Results screen.
 - Platform: Windows.
 - Model runtime: user-managed local LM Studio endpoint.
 
 The beta does not support Forza Horizon, older Motorsport layouts, leaderboard screenshots, telemetry overlays, or arbitrary racing-game screenshots.
+
+## Implementation note
+
+This bundle is built from the legacy Python line (`fmre-cli.exe` +
+PyInstaller GUI). Current development happens in Rust (`forza-rust/`:
+`forza.exe` CLI + `forza-gui.exe` desktop app); a Rust-built beta bundle does
+not exist yet. Behavior described below applies to the shipped Python bundle.
 
 ## What is included
 

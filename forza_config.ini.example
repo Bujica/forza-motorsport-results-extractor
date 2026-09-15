@@ -12,6 +12,11 @@ gamertag = Player
 
 [llm]
 workers = 1
+# Max concurrent model requests across workers. 1 serializes inference
+# (required by local servers that fail concurrent vision calls, e.g. LM
+# Studio `mtmd` 500s); raise for servers with parallel slots (llama-server
+# --parallel, vLLM, cloud APIs). Capped at workers.
+inference_concurrency = 1
 
 [prompt]
 active = user_header_shaped_v1
@@ -37,9 +42,6 @@ eval_batch_size   = 1024
 physical_batch_size =
 flash_attention   = true
 offload_kv_cache_to_gpu = true
-performance_tps_floor = 20.0
-performance_reload_elapsed_s = 45.0
-performance_reload_streak = 3
 
 [image]
 # Default extraction image settings. Tune after validating results on your hardware.

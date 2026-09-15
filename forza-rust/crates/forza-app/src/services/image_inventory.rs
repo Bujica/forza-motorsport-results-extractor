@@ -1,0 +1,390 @@
+//! Application-facing image inventory service.
+
+use std::path::{Path, PathBuf};
+
+use forza_db::gui_queries as db;
+use rusqlite::params;
+
+/// One row of the Images list as consumed by the GUI.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageInventoryEntry {
+    pub id: String,
+    pub name: String,
+    pub file_status: String,
+    pub best_lap_status: String,
+    pub processing_status: String,
+    pub size_bytes: Option<i64>,
+    pub race_date: Option<String>,
+    pub semantic_name: Option<String>,
+    pub file_hash: String,
+    pub current_path: Option<String>,
+    /// Canonical's name for group members (own name otherwise): group sort
+    /// key for the Duplicate column (Python `_group_sort_key` parity).
+    pub canonical_name: Option<String>,
+    /// "Duplicate" / "Canonical" / "" display value.
+    pub duplicate_label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ImageInventoryOptions {
+    pub tracks: Vec<String>,
+    pub runs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ImageInventoryFilter {
+    pub file_status: Option<String>,
+    pub processing_status: Option<String>,
+    pub run_id: Option<String>,
+    pub best_lap_status: Option<String>,
+    pub inventory_filter: Option<String>,
+    pub track: Option<String>,
+    pub include_missing_files: bool,
+}
+
+impl ImageInventoryFilter {
+    fn to_db(&self) -> db::ImageInventoryFilter {
+        db::ImageInventoryFilter {
+            file_status: self.file_status.clone(),
+            processing_status: self.processing_status.clone(),
+            run_id: self.run_id.clone(),
+            best_lap_status: self.best_lap_status.clone(),
+            inventory_filter: self.inventory_filter.clone(),
+            track: self.track.clone(),
+            include_missing_files: self.include_missing_files,
+        }
+    }
+}
+
+fn to_entry(row: db::ImageInventoryRow) -> ImageInventoryEntry {
+    ImageInventoryEntry {
+        duplicate_label: match row.duplicate_role {
+            Some(false) => "Duplicate".to_string(),
+            Some(true) => "Canonical".to_string(),
+            None => String::new(),
+        },
+        canonical_name: row.canonical_name.clone(),
+        id: row.id,
+        name: row.current_name,
+        file_status: row.file_status,
+        best_lap_status: row.best_lap_status,
+        processing_status: row.processing_status,
+        size_bytes: row.file_size_bytes,
+        race_date: row.race_date,
+        semantic_name: row.semantic_name,
+        file_hash: row.file_hash,
+        current_path: row.current_path,
+    }
+}
+
+/// Reads the Images inventory through the read facade.
+pub struct ImageInventoryService {
+    database_file: PathBuf,
+}
+
+impl ImageInventoryService {
+    pub fn new(database_file: impl Into<PathBuf>) -> Self {
+        Self {
+            database_file: database_file.into(),
+        }
+    }
+
+    pub fn database_file(&self) -> &Path {
+        &self.database_file
+    }
+
+    /// List the inventory applying the filter. Opens a short-lived
+    /// configured connection per call (WAL keeps readers lock-free).
+    pub fn list(
+        &self,
+        filter: &ImageInventoryFilter,
+    ) -> Result<Vec<ImageInventoryEntry>, forza_db::DbError> {
+        let conn = forza_db::open_connection(&self.database_file)?;
+        Ok(db::image_inventory(&conn, &filter.to_db())?
+            .into_iter()
+            .map(to_entry)
+            .collect())
+    }
+
+    /// Register supported files found in the configured input directory.
+    ///
+    /// This is the GUI equivalent of Python's `sync_input_folder`: it only
+    /// updates the inventory and never contacts the model or creates a run.
+    /// Returns the number of files newly registered.
+    ///
+    /// All writes run in one `BEGIN IMMEDIATE` transaction like the Python
+    /// single-commit: per-statement autocommit paid one fsync per file and
+    /// dominated scan time on large folders.
+    pub fn sync_input_folder(&self, input_dir: &Path) -> Result<usize, forza_db::DbError> {
+        let images = forza_pipeline::find_images(input_dir);
+        let conn = forza_db::open_connection(&self.database_file)?;
+        if !conn.is_autocommit() {
+            return Err(forza_db::DbError::SchemaState {
+                message: "sync_input_folder requires autocommit (no outer transaction)".into(),
+            });
+        }
+        conn.execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| forza_db::DbError::Transaction(format!("BEGIN IMMEDIATE: {e}")))?;
+        let inner = Self::sync_input_folder_inner(&conn, &images);
+        match inner {
+            Ok(inserted) => {
+                conn.execute_batch("COMMIT")
+                    .map_err(|e| forza_db::DbError::Transaction(format!("COMMIT sync: {e}")))?;
+                Ok(inserted)
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                Err(e)
+            }
+        }
+    }
+
+    fn sync_input_folder_inner(
+        conn: &rusqlite::Connection,
+        images: &[PathBuf],
+    ) -> Result<usize, forza_db::DbError> {
+        let mut inserted = 0;
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for path in images {
+            let path_text = path.to_string_lossy().to_string();
+            seen.insert(path_text.clone());
+            let name = path
+                .file_name()
+                .map(|value| value.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            // Fast path: if the file is already known by this exact path and its
+            // size + mtime match the DB, reuse the stored hash without re-reading
+            // the whole file (like Python's plan_images would still hash, but we
+            // avoid the heavy SHA256 for unchanged files).
+            let fs_meta = std::fs::metadata(path).ok();
+            let fs_size = fs_meta.as_ref().map(|m| m.len() as i64);
+            let fs_mtime: Option<String> =
+                fs_meta.as_ref().and_then(|m| m.modified().ok()).map(|t| {
+                    let dt: chrono::DateTime<chrono::Utc> = t.into();
+                    dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                });
+
+            if let (Some(size), Some(mtime)) = (fs_size, fs_mtime.as_deref())
+                && let Ok(Some((id, _hash, db_size, db_mtime))) = conn
+                    .query_row(
+                        "SELECT id, file_hash, size_bytes, file_modified_at FROM image_files WHERE current_path = ?1 LIMIT 1",
+                        [&path_text],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, Option<i64>>(2)?,
+                                row.get::<_, Option<String>>(3)?,
+                            ))
+                        },
+                    )
+                    .optional()
+                && db_size == Some(size)
+                && db_mtime.as_deref() == Some(mtime)
+            {
+                // Unchanged file — just refresh last_seen_at without re-hashing
+                conn.execute(
+                    "UPDATE image_files SET last_seen_at=datetime('now'), updated_at=datetime('now') WHERE id=?1",
+                    params![id],
+                )?;
+                continue;
+            }
+
+            let Ok(file_hash) = forza_pipeline::file_hash(path) else {
+                continue;
+            };
+            let Some(metadata) = forza_pipeline::inspect_metadata(path).ok() else {
+                continue;
+            };
+
+            // A different file now occupying a known path must NOT rewrite the
+            // existing row's identity in place: past extraction_results /
+            // lap_records reference that row id. Retire the old owner
+            // (missing) and fall through to insert a fresh row below —
+            // parity with `upsert_image_for_run`.
+            let existing_path: Option<(String, String)> = conn
+                .query_row(
+                    "SELECT id, file_hash FROM image_files WHERE current_path = ?1 LIMIT 1",
+                    [&path_text],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            if let Some((id, db_hash)) = existing_path {
+                if db_hash == file_hash {
+                    conn.execute(
+                        "UPDATE image_files
+                         SET current_name=?2, file_status='available', missing_at=NULL,
+                             size_bytes=?3, width_px=?4, height_px=?5,
+                             bit_depth=?6, color_mode=?7, image_metadata_json=?8,
+                             file_modified_at=?9, race_datetime=?10, race_date=?11,
+                             race_datetime_source=?12,
+                             last_seen_at=datetime('now'), updated_at=datetime('now')
+                         WHERE id=?1",
+                        params![
+                            id,
+                            name,
+                            metadata.file_size_bytes as i64,
+                            metadata.width_px as i64,
+                            metadata.height_px as i64,
+                            metadata.bit_depth.map(|b| b as i64),
+                            metadata.color_mode,
+                            metadata.image_metadata_json,
+                            metadata.file_modified_at,
+                            metadata.race_datetime,
+                            metadata.race_date,
+                            metadata.race_datetime_source,
+                        ],
+                    )?;
+                    continue;
+                }
+                conn.execute(
+                    "UPDATE image_files SET file_status='missing', missing_at=datetime('now'),
+                            updated_at=datetime('now') WHERE id=?1",
+                    params![id],
+                )?;
+                // Fall through: insert a new row for the new bytes.
+            }
+
+            let canonical_id: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM image_files WHERE file_hash = ?1 ORDER BY created_at, id LIMIT 1",
+                    [&file_hash],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let base_id = format!("img-{file_hash}");
+            let mut id = base_id.clone();
+            let mut suffix = 1;
+            while conn
+                .query_row(
+                    "SELECT 1 FROM image_files WHERE id=?1 LIMIT 1",
+                    [&id],
+                    |_row| Ok(()),
+                )
+                .optional()?
+                .is_some()
+            {
+                id = format!("{base_id}-{suffix}");
+                suffix += 1;
+            }
+            let extension = metadata.image_format.to_lowercase();
+            conn.execute(
+                "INSERT INTO image_files
+                 (id, file_hash, current_name, current_path, size_bytes,
+                  width_px, height_px, image_format, mime_type,
+                  bit_depth, color_mode, image_metadata_json,
+                  file_modified_at, race_datetime, race_date, race_datetime_source,
+                  file_status, best_lap_status, duplicate_of_image_file_id,
+                  first_seen_at, last_seen_at, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,
+                         'available','pending',?17,
+                         datetime('now'),datetime('now'),datetime('now'),datetime('now'))",
+                params![
+                    id,
+                    file_hash,
+                    name,
+                    path_text,
+                    metadata.file_size_bytes as i64,
+                    metadata.width_px as i64,
+                    metadata.height_px as i64,
+                    extension,
+                    metadata.mime_type,
+                    metadata.bit_depth.map(|b| b as i64),
+                    metadata.color_mode,
+                    metadata.image_metadata_json,
+                    metadata.file_modified_at,
+                    metadata.race_datetime,
+                    metadata.race_date,
+                    metadata.race_datetime_source,
+                    canonical_id,
+                ],
+            )?;
+            inserted += 1;
+        }
+
+        // Missing pass (Python `sync_input_folder` parity): rows still
+        // `available` whose file is neither scanned now nor on disk become
+        // `missing`. Without this, deleting files from the input folder left
+        // stale `available` rows until a per-row rescan touched them.
+        let mut missing_stmt = conn.prepare(
+            "SELECT id, current_path FROM image_files
+             WHERE current_path IS NOT NULL AND file_status = 'available'",
+        )?;
+        let missing_ids: Vec<(String, String)> = missing_stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .filter_map(|item| item.ok())
+            .filter(|(_, path)| !seen.contains(path) && !Path::new(path).exists())
+            .collect();
+        drop(missing_stmt);
+        for (id, _) in missing_ids {
+            conn.execute(
+                "UPDATE image_files SET file_status = 'missing',
+                        missing_at = datetime('now'), updated_at = datetime('now')
+                 WHERE id = ?1",
+                params![id],
+            )?;
+        }
+        Ok(inserted)
+    }
+
+    pub fn options(&self) -> Result<ImageInventoryOptions, forza_db::DbError> {
+        let conn = forza_db::open_connection(&self.database_file)?;
+        let (tracks, runs) = db::image_inventory_options(&conn)?;
+        Ok(ImageInventoryOptions { tracks, runs })
+    }
+}
+
+use rusqlite::OptionalExtension;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status_of(conn: &rusqlite::Connection, id: &str) -> String {
+        conn.query_row(
+            "SELECT file_status FROM image_files WHERE id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn sync_marks_deleted_files_missing_like_python() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("inv.sqlite3");
+        forza_db::upgrade(&db).unwrap();
+        let conn = forza_db::open_connection(&db).unwrap();
+        // Two available rows; only b.png exists on disk (content need not
+        // decode: the missing pass only checks existence).
+        let gone = dir.path().join("gone.png");
+        std::fs::write(&gone, "x").unwrap();
+        let kept = dir.path().join("kept.png");
+        std::fs::write(&kept, "x").unwrap();
+        for (id, path) in [("img-gone", &gone), ("img-kept", &kept)] {
+            conn.execute(
+                "INSERT INTO image_files
+                    (id, file_hash, current_name, current_path, file_status,
+                     first_seen_at, last_seen_at, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 'available',
+                         datetime('now'), datetime('now'), datetime('now'), datetime('now'))",
+                rusqlite::params![
+                    id,
+                    format!("h-{id}"),
+                    path.file_name().unwrap().to_string_lossy(),
+                    path.to_string_lossy(),
+                ],
+            )
+            .unwrap();
+        }
+        std::fs::remove_file(&gone).unwrap();
+
+        let service = ImageInventoryService::new(&db);
+        service.sync_input_folder(dir.path()).unwrap();
+
+        assert_eq!(status_of(&conn, "img-gone"), "missing");
+        assert_eq!(status_of(&conn, "img-kept"), "available");
+    }
+}

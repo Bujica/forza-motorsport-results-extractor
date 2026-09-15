@@ -1,0 +1,62 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/forza-domain",
+    "crates/forza-config",
+    "crates/forza-db",
+    "crates/forza-pipeline",
+    "crates/forza-lmstudio",
+    "crates/forza-output",
+    "crates/forza-app",
+    "crates/forza-cli",
+    "crates/forza-gui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# MSRV: edition 2024 + let-chains (`if let ... && ...`) need 1.88+.
+rust-version = "1.88"
+license = "MIT"
+authors = ["Bujica89"]
+repository = "https://github.com/Bujica/forza-motorsport-results-extractor"
+
+# Shared third-party versions: every crate inherits from here so upgrades
+# stay in lockstep (`dep.workspace = true`).
+[workspace.dependencies]
+anyhow = "1"
+base64 = "0.22"
+chrono = "0.4"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+r2d2 = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+tracing = "0.1"
+opener = "0.7"
+proptest = "1"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 3 # Optimize dependencies in dev
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"

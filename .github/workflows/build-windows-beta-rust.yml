@@ -1,0 +1,31 @@
+name: Build Windows Beta (Rust)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows-beta-rust:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate Rust packaging contracts
+        run: pytest tests\test_beta_packaging_rust_static.py
+
+      - name: Build Rust beta bundle
+        run: python packaging\build_windows_beta_rust.py
+
+      - name: Upload Rust beta bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: forza-extractor-windows-beta-rust
+          path: dist\ForzaMotorsportResultsExtractor-rust-*-windows-x64.zip

@@ -1,0 +1,290 @@
+// Diagnostics page: DB doctor full battery + Overview (LM Studio + fast DB report).
+// Parity with Python DbDoctorView + DeveloperOverviewView.
+
+import { Button, ComboBox, LineEdit, ListView, TextEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Card, Badge, EmptyState, TableHeaderCell, TableCell, TabBar } from "../components/common.slint";
+import { DoctorCheckItem, DebugCaseItem, DebugResultComboItem } from "../models.slint";
+import { ImageDebugPage } from "image_debug.slint";
+
+// One compact overview row: fixed height, muted label + value, no stretching
+// (rows pack at the top instead of spreading across the panel).
+component OverviewRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    height: 22px;
+    HorizontalLayout {
+        spacing: 8px;
+        Text { text: root.label; color: Theme.text; font-size: Theme.font-sm; vertical-alignment: center; min-width: 130px; }
+        Text { text: root.value; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; wrap: word-wrap; }
+    }
+}
+
+export component DiagnosticsPage inherits Rectangle {
+    background: transparent;
+
+    in property <string> doctor-report;
+    in property <string> doctor-overall: "PASS";
+    in property <string> doctor-summary: "Not checked";
+    in property <[DoctorCheckItem]> doctor-checks;
+    in-out property <string> diagnostics-tab: "overview";
+
+    // Overview snapshot (LM Studio + DB)
+    in property <string> overview-lm-level: "info";
+    in property <string> overview-lm-message: "Not checked";
+    in property <string> overview-endpoint: "—";
+    in property <string> overview-model: "—";
+    in property <string> overview-loaded-instance: "—";
+    in property <string> overview-configured-load: "—";
+    in property <string> overview-configured-request: "—";
+    in property <string> overview-configured-image: "—";
+    in property <string> overview-loaded-runtime: "—";
+    in property <string> overview-capabilities: "—";
+    in property <string> overview-model-info: "—";
+    in property <string> overview-warnings: "—";
+    in property <string> overview-db-status: "Not checked";
+    in property <string> overview-schema: "—";
+    in property <string> overview-inventory: "—";
+    in property <string> overview-review: "—";
+
+    // Image Debug (embedded — full ImageDebugPage parity, not simplified table)
+    in property <[DebugCaseItem]> debug-cases;
+    in property <[DebugResultComboItem]> debug-results;
+    in property <[string]> debug-result-labels;
+    in-out property <int> debug-result-index: 0;
+    in property <string> debug-title;
+    in property <string> debug-selected-image-id;
+    in property <string> debug-selected-result-id;
+    in-out property <string> debug-tab: "overview";
+    in property <string> debug-overview-text;
+    in property <string> debug-metadata-text;
+    in property <string> debug-results-text;
+    in property <string> debug-attempts-text;
+    in property <string> debug-response-text;
+    in property <string> debug-parsed-text;
+    in property <string> debug-laps-reviews-text;
+    in property <string> debug-artifacts-text;
+    in property <string> debug-runtime-text;
+    in property <string> debug-timeline-text;
+    in-out property <string> debug-status-filter: "all";
+    in-out property <string> debug-backend-filter: "all";
+    in-out property <string> debug-model-filter: "all";
+    in-out property <string> debug-prompt-filter: "all";
+    in-out property <string> debug-run-filter: "all";
+    in property <[string]> debug-status-options: ["all", "ok", "error", "pending", "running", "cancelled"];
+    in property <[string]> debug-backend-options: ["all"];
+    in property <[string]> debug-model-options: ["all"];
+    in property <[string]> debug-prompt-options: ["all"];
+    in property <[string]> debug-run-options: ["all"];
+    in-out property <length> col-image-w: 280px;
+    in-out property <length> debug-table-h: 300px;
+    in property <string> logs-status;
+
+    // Logs (embedded)
+    in property <string> app-log-text;
+    in property <string> error-log-text;
+    in-out property <string> logs-tab: "app";
+    in-out property <string> logs-search: "";
+
+    callback doctor-requested();
+    callback rebuild-requested();
+    callback overview-requested();
+    callback debug-refresh-requested();
+    callback debug-filter-changed(string, string, string, string, string);
+    callback debug-case-selected(int);
+    callback debug-result-selected(string);
+    callback debug-open-image-detail();
+    callback logs-reload-requested();
+    callback logs-clear-requested(string);
+    callback logs-open-folder();
+    callback logs-search-changed(string);
+
+    // Doctor/badge colors live in Theme (doctor-badge-*, doctor-row-*) —
+    // single source shared with the DB Doctor table below.
+
+    VerticalLayout {
+        spacing: 8px;
+
+        HorizontalLayout {
+            height: 32px;
+            spacing: 8px;
+            Text { text: "Diagnostics"; color: Theme.text; font-weight: 700; min-width: 90px; vertical-alignment: center; }
+            Button { text: "Refresh Overview"; clicked => { root.overview-requested(); } }
+            Button { text: "Run DB Doctor (63 checks)"; clicked => { root.doctor-requested(); } }
+            Button { text: "Rebuild derived state"; clicked => { root.rebuild-requested(); } }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        // Tab bar — 4 tabs parity Python (overview / Image Debug / DB Doctor / Logs) — shared TabBar (F4)
+        TabBar {
+            tabs: [{key: "overview", label: "Overview"}, {key: "debug", label: "Image Debug"}, {key: "doctor", label: "DB Doctor"}, {key: "logs", label: "Logs"}];
+            current <=> root.diagnostics-tab;
+            tab-clicked(key) => { root.diagnostics-tab = key; }
+        }
+
+        if root.diagnostics-tab == "overview": Card {
+            vertical-stretch: 1;
+            clip: true;
+            Flickable {
+                width: parent.width;
+                height: parent.height;
+                viewport-width: self.width;
+                viewport-height: content-layout.preferred-height;
+                content-layout := VerticalLayout {
+                    padding: 12px;
+                    spacing: 2px;
+                    alignment: start;
+                    // Summary badges row
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 22px;
+                        Text { text: "LM Studio"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; min-width: 70px; }
+                        Badge { label: root.overview-lm-level; bg: Theme.doctor-badge-bg(root.overview-lm-level); fg: Theme.doctor-badge-fg(root.overview-lm-level); }
+                        Text { text: root.overview-lm-message; color: Theme.text; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 22px;
+                        Text { text: "Database"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; min-width: 70px; }
+                        Badge { label: root.overview-db-status == "ok" ? "PASS" : root.overview-db-status; bg: Theme.doctor-badge-bg(root.overview-db-status == "ok" ? "PASS" : "WARN"); fg: Theme.doctor-badge-fg(root.overview-db-status == "ok" ? "PASS" : "WARN"); }
+                        Text { text: root.overview-schema + " · " + root.overview-inventory + " · " + root.overview-review; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    }
+                    Rectangle { height: 8px; }
+                    // Detail grid (two columns label/value), compact rows
+                    // packed at the top like the Python overview.
+                    OverviewRow { label: "Endpoint"; value: root.overview-endpoint; }
+                    OverviewRow { label: "Configured model"; value: root.overview-model; }
+                    OverviewRow { label: "Loaded instance"; value: root.overview-loaded-instance; }
+                    OverviewRow { label: "Configured load"; value: root.overview-configured-load; }
+                    OverviewRow { label: "Configured request"; value: root.overview-configured-request; }
+                    OverviewRow { label: "Image request"; value: root.overview-configured-image; }
+                    OverviewRow { label: "Loaded runtime"; value: root.overview-loaded-runtime; }
+                    OverviewRow { label: "Capabilities"; value: root.overview-capabilities; }
+                    OverviewRow { label: "Model info"; value: root.overview-model-info; }
+                    OverviewRow { label: "Warnings"; value: root.overview-warnings; }
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+        }
+
+        if root.diagnostics-tab == "debug": ImageDebugPage {
+            debug-cases: root.debug-cases;
+            debug-results: root.debug-results;
+            debug-result-labels: root.debug-result-labels;
+            debug-result-index <=> root.debug-result-index;
+            debug-title: root.debug-title;
+            debug-selected-image-id: root.debug-selected-image-id;
+            debug-selected-result-id: root.debug-selected-result-id;
+            debug-tab <=> root.debug-tab;
+            debug-overview-text: root.debug-overview-text;
+            debug-metadata-text: root.debug-metadata-text;
+            debug-results-text: root.debug-results-text;
+            debug-attempts-text: root.debug-attempts-text;
+            debug-response-text: root.debug-response-text;
+            debug-parsed-text: root.debug-parsed-text;
+            debug-laps-reviews-text: root.debug-laps-reviews-text;
+            debug-artifacts-text: root.debug-artifacts-text;
+            debug-runtime-text: root.debug-runtime-text;
+            debug-timeline-text: root.debug-timeline-text;
+            debug-status-filter <=> root.debug-status-filter;
+            debug-backend-filter <=> root.debug-backend-filter;
+            debug-model-filter <=> root.debug-model-filter;
+            debug-prompt-filter <=> root.debug-prompt-filter;
+            debug-run-filter <=> root.debug-run-filter;
+            debug-status-options: root.debug-status-options;
+            debug-backend-options: root.debug-backend-options;
+            debug-model-options: root.debug-model-options;
+            debug-prompt-options: root.debug-prompt-options;
+            debug-run-options: root.debug-run-options;
+            table-h <=> root.debug-table-h;
+            col-image-w <=> root.col-image-w;
+            debug-refresh-requested() => { root.debug-refresh-requested(); }
+            debug-filter-changed(s,b,m,p,r) => { root.debug-filter-changed(s,b,m,p,r); }
+            debug-case-selected(i) => { root.debug-case-selected(i); }
+            debug-result-selected(id) => { root.debug-result-selected(id); }
+            debug-open-image-detail() => { root.debug-open-image-detail(); }
+        }
+
+        if root.diagnostics-tab == "doctor": VerticalLayout {
+            spacing: 6px;
+            Card {
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 8px;
+                    height: 36px;
+                    Text { text: "Database Doctor"; color: Theme.text; font-weight: 700; vertical-alignment: center; }
+                    Badge { label: root.doctor-overall; bg: Theme.doctor-badge-bg(root.doctor-overall); fg: Theme.doctor-badge-fg(root.doctor-overall); }
+                    Text { text: root.doctor-summary; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                }
+            }
+            Card {
+                vertical-stretch: 1;
+                clip: true;
+                if root.doctor-checks.length == 0: EmptyState { width: parent.width - 24px; text: "Run DB Doctor to check the relational database integrity (63 checks)."; }
+                if root.doctor-checks.length > 0: VerticalLayout {
+                    padding: 4px;
+                    spacing: 0;
+                    // Header — Python 80/65/200 + ResizeToContents (≈ Stretch)
+                    Rectangle {
+                        height: 26px;
+                        background: Theme.header-bg;
+                        border-radius: 4px;
+                        clip: true;
+                        HorizontalLayout {
+                            TableHeaderCell { label: "Result"; width-pref: 80px; }
+                            TableHeaderCell { label: "Count"; width-pref: 65px; }
+                            TableHeaderCell { label: "Check"; width-pref: 200px; }
+                            TableHeaderCell { label: "Description"; width-pref: 220px; flexible: true; resizable: true; }
+                        }
+                    }
+                    ListView {
+                        vertical-stretch: 1;
+                        for chk in root.doctor-checks: Rectangle {
+                            height: 26px;
+                            background: Theme.doctor-row-bg(chk.result);
+                            HorizontalLayout {
+                                TableCell { text: chk.result; width-pref: 80px; bold: true; text-color: Theme.doctor-row-fg(chk.result); }
+                                TableCell { text: chk.count; width-pref: 65px; text-color: Theme.text-muted; }
+                                TableCell { text: chk.check; width-pref: 200px; }
+                                TableCell { text: chk.description; width-pref: 220px; flexible: true; text-color: Theme.text-muted; grid-line: false; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.diagnostics-tab == "logs": VerticalLayout {
+            spacing: 6px;
+            HorizontalLayout {
+                height: 30px;
+                spacing: 8px;
+                Text { text: "Technical Logs"; color: Theme.text; font-weight: 700; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                Button { text: "Reload"; clicked => { root.logs-reload-requested(); } }
+                Button { text: "Clear"; clicked => { root.logs-clear-requested(root.logs-tab); } }
+                Button { text: "Open folder"; clicked => { root.logs-open-folder(); } }
+            }
+            HorizontalLayout {
+                height: 28px;
+                spacing: 8px;
+                ComboBox { model: ["app","errors"]; current-value: root.logs-tab; min-width: 130px; height: 28px; selected(v) => { root.logs-tab = v; } }
+                LineEdit { placeholder-text: "Search…"; text <=> root.logs-search; horizontal-stretch: 1; edited(v) => { root.logs-search-changed(v); } }
+                Text { text: root.logs-status; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+            }
+            Card {
+                vertical-stretch: 1;
+                clip: true;
+                TextEdit {
+                    x: 10px; y: 8px;
+                    width: parent.width - 20px;
+                    height: parent.height - 16px;
+                    read-only: true;
+                    font-size: Theme.font-sm;
+                    wrap: word-wrap;
+                    text: root.logs-tab == "app" ? root.app-log-text : root.error-log-text;
+                }
+            }
+        }
+    }
+}

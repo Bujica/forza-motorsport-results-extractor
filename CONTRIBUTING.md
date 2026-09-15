@@ -4,6 +4,17 @@ This project is preparing for a public beta. Contributions should be small, scop
 
 ## Development setup
 
+Current work happens in Rust (`forza-rust/`):
+
+```cmd
+cd forza-rust
+cargo build -p forza-cli -p forza-gui
+.\target\debug\forza.exe maintenance db-upgrade
+.\target\debug\forza.exe maintenance db-doctor
+```
+
+Legacy Python reference (`forza/`, frozen):
+
 ```bash
 python install.py
 pip install -e .[dev,gui]
@@ -13,7 +24,16 @@ python -m forza maintenance db-doctor --json
 
 ## Local validation
 
-Run before opening a pull request:
+Run before opening a pull request (Rust):
+
+```cmd
+cd forza-rust
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+Legacy Python validation:
 
 ```bash
 python -m compileall -q forza
@@ -21,9 +41,15 @@ pytest
 python -m forza maintenance db-doctor --json
 ```
 
-For GUI changes, also smoke-launch:
+For GUI changes, also smoke-launch the Rust app:
 
-```bash
+```cmd
+.\target\debug\forza-gui.exe
+```
+
+Legacy Python smoke-launch (reference only):
+
+```cmd
 python -m forza gui
 ```
 

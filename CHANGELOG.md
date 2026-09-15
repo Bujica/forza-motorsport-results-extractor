@@ -8,9 +8,176 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-- Nothing yet. The Python line is feature-frozen at 0.21.0-beta.1; only
-  regression fixes are accepted. New development continues in the Rust
-  migration plan.
+### Added
+
+- GUI recovery for incompatible databases: instead of exiting silently
+  (a bare `Err` is invisible on a console-less Windows launch), startup now
+  offers a native dialog — migrate in place (keeps data, backup made first),
+  back up and recreate from zero, or quit untouched. `forza-db` gains a
+  `migrate()` path (currently v2 → v3: drop the removed `performance_*`
+  columns) plus timestamped `backup_database()`; unknown versions still
+  refuse with `db-reset` guidance.
+- `ExtractionStatus` now models the full result lifecycle
+  (`pending`/`running`/`ok`/`error`/`cancelled`, matching
+  `ck_extraction_results_status_vocab`, tripwired by test), and
+  `insert_input_and_result` takes the enum instead of free text; the live
+  `protocol::AttemptStatus` gains the missing `Cancelled` variant.
+
+- GUI creates the database from zero when none is found (`ensure_database`:
+  missing/empty schema is built via `upgrade()`, incompatible schemas refuse
+  with `db-reset` guidance instead of failing at startup).
+- `forza_config.ini [llm] inference_concurrency` (default 1): max concurrent
+  model requests across parallel workers, editable in Settings and validated
+  (`>= 1`). `1` serializes inference for local servers that fail concurrent
+  vision calls (LM Studio `mtmd` HTTP 500s); raise for servers with parallel
+  slots (llama-server `--parallel`, vLLM, cloud APIs). The run log records
+  `workers=` and `inference=` on `[start]`.
+- Operator-confirmed novel cars are appended to the shipped `cars.txt`
+  assets (sorted, deduplicated) in addition to the `reference_cars` catalog,
+  so regenerated databases stop redetecting them. Best-effort: never fails
+  the decision.
+- Rust Windows beta bundle: `packaging/build_windows_beta_rust.py` builds a
+  one-folder distribution (`forza.exe` + `forza-gui.exe` release binaries,
+  INI template, reference data, empty runtime folders, launch `.bat`
+  helpers, generated `build_info.json`) under the same exclusion policy as
+  the Python bundle (forbidden lists imported from
+  `tools/build_windows_beta.py`); released by the manual
+  `Build Windows Beta (Rust)` workflow as
+  `ForzaMotorsportResultsExtractor-rust-0.1.0-beta.1-windows-x64.zip`.
+  Guarded by `tests/test_beta_packaging_rust_static.py`.
+- Review outcome filter understands `auto_resolved` (and `pending` now means
+  actionable `open` rows); the outcome column and detail panel show the
+  lifecycle truth for system-resolved cases.
+
+### Changed
+
+- Run page checkbox renamed `Debug` → `Verbose log`: it gates per-image
+  diagnostic lines, now detailed (model, attempts, duration, tokens/tps,
+  encoded payload, DB ids) from one shared builder for both run paths.
+- Dead code removed: the `--debug` CLI flag (parsed and discarded),
+  `run_doctor`/`fast_db_report` wrappers, the `RunDoctor` worker request
+  (production uses `RunFullDoctor`), and test/example dummies.
+- Duplication unified, no behavior change (goldens byte-identical):
+  single `int_or_none` (huge `u64` saturates, padded strings parse), one
+  `placeholders(n)` SQL helper, one `LapRow` projection trait with a
+  blanket `&T` impl, one export-row constructor per direction, shared
+  latest-row tiebreak/lap-list/current-path SQL fragments, one
+  `{sha256}_{size}` file-hash formatter (writer and doctor verifier),
+  one chat-retry backoff helper (the 5000ms ceiling documented as
+  unreachable: the shift cap bounds the series at 3200ms), and one
+  Windows filename sanitizer with explicit per-caller options (inventory
+  parts vs. on-disk renames keep their caps/behavior).
+- Dead code removed: uncalled `PerformanceTracker::take_reload_before_next`
+  path (see below), the never-wired `best_laps::csv_row` Python-port
+  leftover (real export lives in `forza-output::csv`).
+- Image Detail laps table matches Best Laps: dirty signal is time-red-only,
+  no red row band.
+- Image Detail and Image Debug keep the selected tab when switching images
+  (metadata/overview defaults apply to first load only).
+- Best Laps table: dirty rows no longer paint the whole row red; only the
+  lap time stays red (row keeps the normal zebra/mine/external band).
+- Maintenance hardening, no behavior change (goldens byte-identical):
+  single dirty-symbol set shared by parser and doctor (the doctor now
+  also covers `!`/`△`); dead backend request-hash implementation removed
+  (canonical evidence hash is the only one); single °F→°C formula with
+  one default window; `normalize_weather` returns `WeatherType`; one
+  SHA-256 helper pair; dotted config keys centralized with a snapshot
+  key-set test.
+- Race classes unified on the `RaceClass` enum (order, color, CSV parsing
+  as exhaustive methods — a new class is a compile error, not a silent
+  black fallback); division rosters collapsed into one table;
+  `BestLapRow`/filters, review validation, and GUI options derive from it.
+  No behavior change (goldens byte-identical).
+- Error diagnostics carry context and chains: encode/model-load/DB-path
+  context at the `String` boundaries, `anyhow` context in CLI open paths,
+  source-preserving `DbError::Pool`, `EncodeError::Io/Image`, and
+  `LlmError::Transport` variants (`Transaction` keeps the phase-labeled
+  message form), plus `# Errors` sections on the key fallible APIs.
+  Display strings unchanged.
+- Row identities on the attempt/result path are newtypes (`RunId`,
+  `ImageFileId`, `ExtractionResultId`, `AttemptId`, `RunInputId`); swapped
+  ids no longer compile. Storage stays text/integer.
+- Workspace build policy: shared versions inherited from
+  `[workspace.dependencies]`, `rust-version = "1.88"`, release profile
+  (`lto = "fat"`, `codegen-units = 1`, `strip`); clippy `correctness`
+  denied and `suspicious/style/complexity/perf` warned workspace-wide;
+  INI-boundary integer casts saturate instead of wrapping.
+- Review system refined beyond Python parity: `ignore case` removed end to
+  end (write path, UI, filter bucket, CHECK vocabularies — `ImageFlagStatus`
+  untouched); `decide` classifies `confirmed` vs `model_error` with
+  `error_type` taxonomy and `decision:` notes (the `model_error_*` doctor
+  checks are live); returning conditions reopen `auto_resolved` cases;
+  auto-resolve stamps `resolved_at`/`resolution_note`.
+- Parallel extraction serializes only the model HTTP calls (per-run
+  semaphore, capped at workers); encode/persist/derive/finalize stay
+  parallel. Every image failure now logs `error_type: message` (was silent
+  for most error kinds).
+- GUI worker: fixed 4-thread pool sharing one r2d2 connection pool instead
+  of a thread + connection per request; poisoned locks recover instead of
+  wedging the UI.
+- `forza-db/src/doctor.rs` (2234 lines) split into `doctor/` submodules by
+  Python-parity boundary; `forza-gui/src/lib.rs` (2799 lines) split into
+  `ui_state` thread-locals, `handle_response` dispatcher, and `callbacks/`
+  page modules (`lib.rs` is now ~420 lines); `forza-cli/src/main.rs` split
+  into `commands/` modules (parse + dispatch only).
+- Discovery planning unified: CLI dry-run and the runner share
+  `build_discovery_plan` (re-hash failures skip loudly everywhere instead
+  of planning under a stale hash in one path).
+- Hot path: class colors are a plain `match`, frontier hoists
+  per-row lowercase, ordering binds the lowered key once (bench-gated;
+  `difflib` sharing measured ~0% and was reverted).
+- Spreadsheet imports no longer seed the car catalog: `cars.txt` is
+  considered complete, and genuinely new cars surface through the review
+  queue as they appear in images. Detections stay visible as `new_car`
+  issues for manual curation.
+
+### Fixed
+
+- Auto-resolved review rows showed a stale `pending` outcome; resolved rows
+  always recorded `confirmed` even for genuine corrections.
+- Negative selection/sort indexes guarded (`usize::try_from`); shared
+  pragma helper for single vs pooled SQLite connections.
+- Review class-correction ComboBox stretched to match the track one
+  (was cramped at a fixed 110px).
+- GT2/GT3 spec divisions recognized like TCR (roster + 30% share rule):
+  new `GT2`/`GT3` classes with order, colors (incl. Slint theme palette),
+  review vocabulary, GUI options and import normalization; `Mixed` now
+  only means genuinely mixed grids or mixed PI letters.
+- Review queue follows grid order within each image (image-level cases
+  first, then `lap_index` top-to-bottom); images keep first-seen order
+  instead of interleaving.
+
+- The Rust workspace (`forza-rust/`) is now the current implementation:
+  extraction runner (sequential + multi-worker), Slint GUI, review/flag
+  lifecycle, CSV/PDF export, DB doctor, and maintenance CLI are ported and
+  verified against the Python baseline. The Python line stays frozen at
+  0.21.0 (final, reference only).
+- Database schema v2 (`run_inputs.id` autoincrement); test databases must be
+  recreated via `forza.exe maintenance db-upgrade`.
+- Developer docs for the Rust implementation live in `forza-rust/docs/`
+  (entry point: `forza-rust/docs/architecture-visual.html`, which also links
+  every crate's rustdoc page);
+  root `docs/` remains the frozen Python-era reference.
+
+---
+
+## [0.21.0] - 2026-09-15
+
+Final release of the Python line. The Python implementation (`forza/`,
+`tests/`, PyInstaller packaging, `pyproject.toml` version `0.21.0`) is
+frozen as legacy reference from this point on; active development
+continues in Rust (`forza-rust/`, workspace version `0.1.0`). No further
+Python releases are planned — changes since `0.21.0-beta.1`:
+
+### Fixed
+
+- Duplicate workflow in the image browser: the duplicate filter emitted the
+  bound method instead of its value, sorts were not group-aware, and the
+  images table viewport could clip (`forza/gui/models/image_table_model.py`,
+  `forza/gui/views/image_browser_view.py`, covered by
+  `tests/test_gui_duplicate_filter_flow.py`).
+- Operator-confirmed novel cars appended to the shipped `cars.txt`
+  (mirrored in `forza-rust/assets/cars.txt`).
 
 ---
 

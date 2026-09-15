@@ -1,0 +1,2056 @@
+//! Live extraction runner: full pipeline on a dedicated thread with
+//! cooperative cancellation — discovery → plan → encode → LM Studio →
+//! persist attempts/result/laps → run counters. Emits typed events for the
+//! GUI (progress, per-image outcomes, log lines).
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::mpsc::channel;
+use std::time::Instant;
+
+use rusqlite::Connection;
+use rusqlite::OptionalExtension;
+
+/// Inference permits for one run: at most `concurrency` model calls in
+/// flight across all workers (never more than workers, at least one).
+/// Pure so the sizing rule is unit-testable.
+#[must_use]
+fn inference_permits(workers: u32, concurrency: u32) -> usize {
+    usize::try_from(workers.min(concurrency).max(1)).unwrap_or(usize::MAX)
+}
+
+/// Saturating `i64` (INI-validated, lower-bounded) to `u32`: absurd upper
+/// values saturate instead of wrapping around through `as`.
+#[must_use]
+fn sat_u32(v: i64) -> u32 {
+    u32::try_from(v).unwrap_or(u32::MAX)
+}
+
+/// Saturating `i64` to `u64` for timeouts (same rationale as [`sat_u32`]).
+#[must_use]
+fn sat_u64(v: i64) -> u64 {
+    u64::try_from(v).unwrap_or(u64::MAX)
+}
+
+/// Runs `work` holding one inference permit. The unit under test for the
+/// wiring in `worker_loop`: with one permit, gated sections never overlap,
+/// no matter how many tasks race for the semaphore.
+///
+/// # Panics
+///
+/// Never in practice: `acquire_owned` only fails on a closed semaphore,
+/// which requires all `Arc`s dropped — the caller holds one across the
+/// call, so `unreachable!` documents an invariant, not an error path.
+async fn with_inference_permit<Fut, T>(inference: Arc<tokio::sync::Semaphore>, work: Fut) -> T
+where
+    Fut: std::future::Future<Output = T>,
+{
+    // `acquire_owned` only fails on a closed semaphore, which requires all
+    // `Arc`s dropped — the caller holds one across this call, so this is
+    // unreachable (and `unreachable!` keeps `-D warnings` green, unlike
+    // `expect`, which the pre-push hook rejects).
+    let _permit = match inference.acquire_owned().await {
+        Ok(permit) => permit,
+        Err(_) => unreachable!("inference semaphore closed while Arc is held"),
+    };
+    work.await
+}
+
+/// Verbose per-image summary line (gated by `RunParams.verbose`): model,
+/// attempts, timing/tokens, encoded payload, and DB ids. Single owner so
+/// the sequential and worker paths log the same detail.
+struct VerboseImage<'a> {
+    name: &'a str,
+    result_id: &'a forza_db::ExtractionResultId,
+    file_hash: &'a str,
+    stats: &'a forza_db::repositories::runs::ResultStats<'a>,
+    encoded: &'a forza_pipeline::EncodedImage,
+    attempt_count: i64,
+    attempt_row: Option<&'a str>,
+    laps: usize,
+    worker: bool,
+}
+
+fn verbose_image_line(v: &VerboseImage<'_>) -> String {
+    let opt = |v: Option<i64>| v.map(|n| n.to_string()).unwrap_or_else(|| "?".to_string());
+    let tps = v
+        .stats
+        .tokens_per_second
+        .map(|t| format!("{t:.1}"))
+        .unwrap_or_else(|| "?".to_string());
+    format!(
+        "[debug] {name} model={} attempts={attempt_count} duration_ms={} tokens={} tps={} {}x{} {} result={result_id} hash={file_hash} attempt={} laps={laps}{}",
+        v.stats.model.unwrap_or("?"),
+        v.stats.duration_ms,
+        opt(v.stats.total_tokens),
+        tps,
+        v.encoded.width_px,
+        v.encoded.height_px,
+        v.encoded.mime_type,
+        v.attempt_row.unwrap_or("?"),
+        if v.worker { " (worker)" } else { "" },
+        name = v.name,
+        attempt_count = v.attempt_count,
+        result_id = v.result_id,
+        file_hash = v.file_hash,
+        laps = v.laps,
+    )
+}
+
+/// Encode one image for the model request. Thin shared wrapper so both
+/// paths report the same error text; any retry/downscale policy around the
+/// encode lives here, not in two loops. Callers own fail/progress
+/// bookkeeping (counters vs channel differ by path).
+fn encode_stage(image_path: &Path, params: &RunParams) -> Result<EncodedImage, String> {
+    forza_pipeline::encode_image_payload(
+        image_path,
+        params.max_width,
+        params.encode_quality,
+        &params.image_format,
+        params.grayscale,
+    )
+    .map_err(|e| format!("encode {}: {e}", image_path.display()))
+}
+
+/// Ensure the model is loaded before inference. Single owner so
+/// retry/backoff policy around `ensure_loaded` cannot diverge between the
+/// sequential and worker paths; callers own fail/progress bookkeeping.
+async fn ensure_loaded_stage(
+    backend: &mut LMStudioBackend,
+    desired: &DesiredLoadConfig,
+) -> Result<(), String> {
+    backend
+        .ensure_loaded(desired)
+        .await
+        .map_err(|e| format!("model load: {e}"))
+}
+
+/// Outcome of the gated model section in `worker_loop`: computed under one
+/// inference permit; the caller only handles DB/events afterwards.
+enum GatedModelOutcome {
+    /// Cancel arrived while waiting for (or just after acquiring) the permit.
+    Cancelled,
+    LoadFailed(String),
+    Extracted(Box<GatedExtracted>),
+}
+
+/// Successful gated section payload, boxed: `ModelExtractionResult` dwarfs
+/// the other variants (clippy `large_enum_variant`).
+struct GatedExtracted {
+    result: Result<ModelExtractionResult, String>,
+    attempt_count: i64,
+    accepted_row: Option<forza_db::AttemptId>,
+}
+
+/// Owned image data for worker threads (avoids borrowing `plan` across threads).
+///
+/// `result_id`/`input_id`/`input_order` are pre-allocated on the main thread:
+/// per-worker `done+1` counters are NOT unique per run, so workers must never
+/// compute `input_order` themselves nor stamp metadata with
+/// `WHERE run_id AND input_order` (that overwrites other workers' rows).
+#[derive(Debug, Clone)]
+struct WorkerImage {
+    path: PathBuf,
+    file_hash: String,
+    result_id: forza_db::ExtractionResultId,
+    input_id: forza_db::RunInputId,
+    input_order: i64,
+}
+
+use crate::services::run_control::RunControl;
+use forza_config::AppConfig;
+use forza_db::repositories::runs::{
+    RunInputOnly, RunInsert, RunMetadata, RuntimeSnapshotInsert, complete_run,
+    find_image_id_by_hash, insert_processed_input_full, insert_prompt_snapshot, insert_run,
+    insert_run_input_full, insert_run_input_only, insert_runtime_snapshot,
+    link_run_prompt_snapshot, mark_run_running, reconcile_abandoned_runs, update_run_metadata,
+};
+use forza_lmstudio::backend::{BackendConfig, LMStudioBackend};
+use forza_lmstudio::load_config::DesiredLoadConfig;
+use forza_lmstudio::prompts;
+use forza_lmstudio::protocol::{ModelAttemptRecord, ModelExtractionResult};
+use forza_pipeline::EncodedImage;
+
+/// Events streamed back to the UI thread (plain data — widget-free).
+#[derive(Debug, Clone)]
+pub enum RunEvent {
+    Started {
+        run_id: String,
+        total: usize,
+    },
+    Plan {
+        new: usize,
+        cached: usize,
+        batch: usize,
+        existing: usize,
+        skipped: usize,
+    },
+    ImageStarted {
+        name: String,
+    },
+    ImageDone {
+        name: String,
+        ok: bool,
+        laps: usize,
+    },
+    Progress {
+        done: usize,
+        total: usize,
+    },
+    Log(String),
+    Finished {
+        cancelled: bool,
+        processed: usize,
+        succeeded: usize,
+        failed: usize,
+        elapsed_s: f64,
+    },
+    Failed(String),
+}
+
+/// Everything the runner needs, built from the loaded AppConfig.
+#[derive(Debug, Clone)]
+pub struct RunParams {
+    pub database_file: PathBuf,
+    pub input_dir: PathBuf,
+    pub gamertag: String,
+    pub force: bool,
+    /// Retry only images whose latest extraction result is `error`.
+    /// Mutually exclusive with `force` (Python run contract).
+    pub retry_errors: bool,
+    /// When present, process only these image-file IDs from the inventory.
+    pub selected_image_file_ids: Option<Vec<String>>,
+    /// Optional CLI cap for the number of images sent to extraction.
+    pub max_images: Option<usize>,
+    /// Number of parallel extraction workers (1 = sequential).
+    pub workers: u32,
+    /// Max concurrent model requests across workers. `1` serializes
+    /// inference (required by servers that fail concurrent vision calls);
+    /// raise for servers with parallel slots. Capped at `workers`.
+    pub inference_concurrency: u32,
+    // LLM
+    pub url: String,
+    pub model: String,
+    pub max_tokens: i64,
+    pub temperature: f64,
+    pub timeout_connect: u64,
+    pub timeout_read: u64,
+    pub max_retries: u32,
+    pub prompt_id: String,
+    pub context_length: i64,
+    pub reasoning_mode: Option<String>,
+    pub eval_batch_size: Option<i64>,
+    pub physical_batch_size: Option<i64>,
+    pub flash_attention: bool,
+    pub offload_kv_cache_to_gpu: bool,
+    pub temp_min_f: f64,
+    pub temp_max_f: f64,
+    /// Debug verbosity (Python per-run `debug` parity): extra per-image
+    /// diagnostic lines in the run log (hashes, ids, attempt counts).
+    pub verbose: bool,
+    /// Run log file (Python `logging_setup` parity): front-ends append run
+    /// events here; without it the Logs page stays empty forever.
+    pub log_file: PathBuf,
+    // image pipeline
+    pub max_width: u32,
+    pub encode_quality: u8,
+    pub image_format: String,
+    pub grayscale: bool,
+    /// Build identity of the calling binary, persisted on the run row.
+    pub app_version: String,
+}
+
+impl RunParams {
+    pub fn from_config(cfg: &AppConfig, force: bool) -> Self {
+        Self {
+            database_file: cfg.database_file.clone(),
+            input_dir: cfg.input_dir.clone(),
+            gamertag: cfg.gamertag.clone(),
+            force,
+            app_version: crate::APP_VERSION.to_string(),
+            retry_errors: false,
+            selected_image_file_ids: None,
+            max_images: None,
+            workers: sat_u32(cfg.workers.max(1)),
+            inference_concurrency: sat_u32(cfg.inference_concurrency.max(1)),
+            url: cfg.llm.url.clone(),
+            model: cfg.llm.model.clone(),
+            max_tokens: cfg.llm.max_completion_tokens,
+            temperature: cfg.llm.temperature,
+            timeout_connect: sat_u64(cfg.llm.timeout_connect.max(1)),
+            timeout_read: sat_u64(cfg.llm.timeout_read.max(1)),
+            max_retries: sat_u32(cfg.llm.max_retries.max(1)),
+            prompt_id: cfg.prompt.active.clone(),
+            context_length: cfg.llm.context_length.unwrap_or(5000),
+            reasoning_mode: cfg.llm.reasoning_mode.clone(),
+            eval_batch_size: cfg.llm.eval_batch_size,
+            physical_batch_size: cfg.llm.physical_batch_size,
+            flash_attention: cfg.llm.flash_attention,
+            offload_kv_cache_to_gpu: cfg.llm.offload_kv_cache_to_gpu,
+            temp_min_f: cfg.validation.temp_min_f,
+            temp_max_f: cfg.validation.temp_max_f,
+            verbose: false,
+            log_file: cfg.log_file.clone(),
+            max_width: sat_u32(cfg.image.max_width.clamp(1, u32::MAX as i64)),
+            encode_quality: cfg.image.encode_quality.clamp(1, 100) as u8,
+            image_format: cfg.llm.image_format.clone(),
+            grayscale: cfg.image.grayscale,
+        }
+    }
+
+    fn desired_load_config(&self) -> DesiredLoadConfig {
+        DesiredLoadConfig {
+            context_length: self.context_length,
+            eval_batch_size: self.eval_batch_size,
+            physical_batch_size: self.physical_batch_size,
+            flash_attention: self.flash_attention,
+            offload_kv_cache_to_gpu: self.offload_kv_cache_to_gpu,
+        }
+    }
+
+    fn backend_config(&self) -> BackendConfig {
+        BackendConfig {
+            url: self.url.clone(),
+            model: self.model.clone(),
+            max_tokens: self.max_tokens,
+            temperature: self.temperature,
+            timeout_connect_secs: self.timeout_connect,
+            timeout_read_secs: self.timeout_read,
+            max_retries: self.max_retries,
+            system_prompt: prompts::get_system_prompt(&self.prompt_id)
+                .unwrap_or_default()
+                .to_string(),
+            context_length: self.context_length,
+            reasoning_mode: self.reasoning_mode.clone(),
+        }
+    }
+}
+
+fn now_run_id() -> String {
+    // Timestamp-prefixed like the Python run ids (YYYYMMDD_HHMMSS_xxxx):
+    // lexicographic order equals chronological order (frontier relies on it).
+    // Sub-second + pid suffix: two runs started within the same second must
+    // not collide on the run-id PK (bare `{ts}_rust` did).
+    let now = chrono_like_now();
+    let subsec = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_micros())
+        .unwrap_or(0);
+    format!("{now}_{subsec:06}_{}_rust", std::process::id())
+}
+
+fn chrono_like_now() -> String {
+    // Local wall-clock in run-id format (YYYYMMDD_HHMMSS). Previously a
+    // hand-rolled civil-from-days copy of `build.rs`; chrono is already a
+    // dependency (see `run_log`), so use it instead of a second copy.
+    // (`build.rs` keeps its own copy: build scripts cannot use crate deps.)
+    chrono::Local::now().format("%Y%m%d_%H%M%S").to_string()
+}
+
+fn upsert_image_for_run(
+    conn: &Connection,
+    path: &std::path::Path,
+    file_hash: &str,
+) -> Result<(String, Option<(i64, i64)>), String> {
+    if let Some(existing) = find_image_id_by_hash(conn, file_hash).map_err(|e| e.to_string())? {
+        // Refresh current path/name so the inventory reflects reality.
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        conn.execute(
+            "UPDATE image_files SET current_path=?2, current_name=?3 WHERE id=?1",
+            rusqlite::params![existing, path.to_string_lossy(), name],
+        )
+        .map_err(|e| e.to_string())?;
+        let dims = conn
+            .query_row(
+                "SELECT width_px, height_px FROM image_files WHERE id=?1",
+                rusqlite::params![existing],
+                |r| {
+                    Ok((
+                        r.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                        r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                    ))
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        return Ok((existing, Some(dims)));
+    }
+
+    // A stale non-available row with the same hash (e.g. retired by a
+    // path-conflict) still owns the deterministic `img-{hash}` PK:
+    // reactivate it instead of INSERT-colliding and aborting the whole run.
+    let id = format!("img-{file_hash}");
+    let stale: Option<String> = conn
+        .query_row(
+            "SELECT id FROM image_files WHERE id = ?1 LIMIT 1",
+            rusqlite::params![id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if let Some(stale_id) = stale {
+        let name0 = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        conn.execute(
+            "UPDATE image_files SET current_path=?2, current_name=?3, file_status='available',
+                    missing_at=NULL, last_seen_at=datetime('now'), updated_at=datetime('now')
+              WHERE id=?1",
+            rusqlite::params![stale_id, path.to_string_lossy(), name0],
+        )
+        .map_err(|e| e.to_string())?;
+        let dims = conn
+            .query_row(
+                "SELECT width_px, height_px FROM image_files WHERE id=?1",
+                rusqlite::params![stale_id],
+                |r| {
+                    Ok((
+                        r.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                        r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                    ))
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        return Ok((stale_id, Some(dims)));
+    }
+
+    let meta = forza_pipeline::inspect_metadata(path).ok();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    // A different file arriving at an existing path retires the previous
+    // available owner first (Python upsert path-conflict handling), so two
+    // available rows never share one current_path.
+    conn.execute(
+        "UPDATE image_files
+         SET file_status='missing', missing_at=datetime('now'), updated_at=datetime('now')
+         WHERE current_path=?1 AND file_hash!=?2 AND file_status='available'",
+        rusqlite::params![path.to_string_lossy(), file_hash],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO image_files
+            (id, file_hash, current_name, current_path, size_bytes,
+             width_px, height_px, image_format, mime_type,
+             bit_depth, color_mode, image_metadata_json,
+             file_modified_at, race_datetime, race_date, race_datetime_source,
+             file_status, best_lap_status, first_seen_at, last_seen_at,
+             created_at, updated_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,
+                 'available','pending',
+                 datetime('now'),datetime('now'),datetime('now'),datetime('now'))",
+        rusqlite::params![
+            id,
+            file_hash,
+            name,
+            path.to_string_lossy(),
+            std::fs::metadata(path)
+                .map(|m| i64::try_from(m.len()).unwrap_or(i64::MAX))
+                .unwrap_or(0),
+            meta.as_ref().map(|m| i64::from(m.width_px)).unwrap_or(0),
+            meta.as_ref().map(|m| i64::from(m.height_px)).unwrap_or(0),
+            meta.as_ref()
+                .map(|m| m.image_format.to_lowercase())
+                .unwrap_or_else(|| "png".into()),
+            meta.as_ref()
+                .and_then(|m| m.mime_type.clone())
+                .unwrap_or_else(|| "image/png".into()),
+            meta.as_ref().and_then(|m| m.bit_depth.map(i64::from)),
+            meta.as_ref().map(|m| m.color_mode.clone()),
+            meta.as_ref().map(|m| m.image_metadata_json.clone()),
+            meta.as_ref().and_then(|m| m.file_modified_at.clone()),
+            meta.as_ref().and_then(|m| m.race_datetime.clone()),
+            meta.as_ref().and_then(|m| m.race_date.clone()),
+            meta.as_ref()
+                .map(|m| m.race_datetime_source.clone())
+                .unwrap_or_else(|| "file_modified_at".into()),
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok((id, None))
+}
+
+/// Spawn the extraction run on a dedicated thread. `control` is honoured
+/// cooperatively at safe checkpoints (between images); the current image
+/// finishes first. When `params.workers > 1` images are processed in
+/// parallel across that many Tokio worker tasks.
+///
+/// Thread-spawn failure is reported as `Err` (never a panic): spawning only
+/// fails on resource exhaustion, and killing the host process would hide
+/// the cause from the CLI/GUI event stream.
+pub fn spawn_extraction<F>(
+    params: RunParams,
+    control: RunControl,
+    on_event: F,
+) -> Result<std::thread::JoinHandle<()>, String>
+where
+    F: Fn(RunEvent) + Send + 'static,
+{
+    std::thread::Builder::new()
+        .name("forza-extraction".into())
+        .spawn(move || run_blocking(params, control, on_event))
+        .map_err(|e| format!("extraction thread: {e}"))
+}
+
+fn run_blocking<F>(params: RunParams, control: RunControl, on_event: F)
+where
+    F: Fn(RunEvent),
+{
+    let started = Instant::now();
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            on_event(RunEvent::Failed(format!("tokio runtime: {e}")));
+            return;
+        }
+    };
+
+    let outcome: Result<(usize, usize, usize, usize, usize), String> =
+        runtime.block_on(async { run_async(&params, &control, &on_event).await });
+
+    match outcome {
+        Ok((processed, succeeded, failed, skipped, dupes)) => {
+            on_event(RunEvent::Finished {
+                cancelled: control.is_cancelled(),
+                processed,
+                succeeded,
+                failed,
+                elapsed_s: started.elapsed().as_secs_f64(),
+            });
+            let _ = (skipped, dupes);
+        }
+        Err(message) => on_event(RunEvent::Failed(message)),
+    }
+}
+
+async fn run_async<F>(
+    params: &RunParams,
+    control: &RunControl,
+    on_event: &F,
+) -> Result<(usize, usize, usize, usize, usize), String>
+where
+    F: Fn(RunEvent),
+{
+    if params.force && params.retry_errors {
+        return Err("--force and --retry-errors cannot be combined.".into());
+    }
+    let conn = forza_db::open_connection(&params.database_file).map_err(|e| e.to_string())?;
+
+    // ── Abandoned run reconciliation ──────────────────────────────────────
+    let abandoned = reconcile_abandoned_runs(&conn).map_err(|e| e.to_string())?;
+    if abandoned > 0 {
+        on_event(RunEvent::Log(format!(
+            "reconciled {abandoned} abandoned run(s)"
+        )));
+    }
+
+    // ── Discovery + plan (single owner: discovery_plan) ────────────────────
+    let had_selection = params.selected_image_file_ids.is_some();
+    let discovery = super::discovery_plan::build_discovery_plan(
+        super::discovery_plan::DiscoveryInput {
+            conn: &conn,
+            input_dir: &params.input_dir,
+            force: params.force,
+            retry_errors: params.retry_errors,
+            limit: params.max_images,
+            selected_image_file_ids: params.selected_image_file_ids.as_deref(),
+        },
+        &mut |line| on_event(RunEvent::Log(line)),
+    )?;
+    let plan = discovery.plan;
+    if params.retry_errors {
+        if plan.new_images.is_empty() {
+            on_event(RunEvent::Log("No failed images to retry.".into()));
+        } else {
+            on_event(RunEvent::Log(format!(
+                "retry: {} failed image(s) selected{}",
+                plan.new_images.len(),
+                if discovery.missing_retry > 0 {
+                    format!(" ({} missing on disk ignored)", discovery.missing_retry)
+                } else {
+                    String::new()
+                }
+            )));
+        }
+    } else {
+        if had_selection {
+            on_event(RunEvent::Log(format!(
+                "selected run: {} image(s) from Images",
+                plan.process_count()
+                    + plan.duplicates.len()
+                    + plan.existing_images.len()
+                    + plan.skipped_images.len(),
+            )));
+        }
+        if plan.total == 0 {
+            on_event(RunEvent::Log("no supported images in input folder".into()));
+        }
+    }
+
+    let cached = plan
+        .duplicates
+        .iter()
+        .filter(|d| d.reason == "cached")
+        .count();
+    let batch = plan
+        .duplicates
+        .iter()
+        .filter(|d| d.reason == "batch")
+        .count();
+    on_event(RunEvent::Plan {
+        new: plan.process_count(),
+        cached,
+        batch,
+        existing: plan.existing_images.len(),
+        skipped: plan.skipped_images.len(),
+    });
+
+    // ── Run row ──────────────────────────────────────────────────────────
+    // ── Run row ──────────────────────────────────────────────────────────
+    // Phase checkpoint (Python honours pause/cancel between phases too):
+    // blocks while paused, before any run evidence or events are produced.
+    if !control.checkpoint() {
+        on_event(RunEvent::Log(
+            "cancellation requested — stopping before extraction".into(),
+        ));
+        // Actually stop: falling through would create the run row, prompt
+        // snapshot and Started event despite the log claiming otherwise.
+        return Ok((0, 0, 0, 0, 0));
+    }
+    let run_id = now_run_id();
+    insert_run(
+        &conn,
+        &RunInsert {
+            id: run_id.clone(),
+            status: "pending".into(),
+            mode: "normal".into(),
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    let input_dir = params.input_dir.to_string_lossy().into_owned();
+    let system_prompt = prompts::get_system_prompt(&params.prompt_id).unwrap_or_default();
+    let prompt_hash = prompts::payload_hash(system_prompt);
+    let prompt_snapshot_id = prompts::snapshot_id(&params.prompt_id);
+    insert_prompt_snapshot(
+        &conn,
+        &prompt_snapshot_id,
+        &params.prompt_id,
+        &prompt_hash,
+        system_prompt,
+    )
+    .map_err(|e| e.to_string())?;
+    link_run_prompt_snapshot(&conn, &run_id, &prompt_snapshot_id, &prompt_hash)
+        .map_err(|e| e.to_string())?;
+    update_run_metadata(
+        &conn,
+        &run_id,
+        &RunMetadata {
+            backend: "lmstudio",
+            model: &params.model,
+            input_dir: &input_dir,
+            prompt_name: &params.prompt_id,
+            prompt_hash: Some(&prompt_hash),
+            workers: i64::from(params.workers),
+            image_format: &params.image_format,
+            max_width: i64::from(params.max_width),
+            encode_quality: i64::from(params.encode_quality),
+            grayscale: params.grayscale,
+            context_length: params.context_length,
+            reasoning_mode: params.reasoning_mode.as_deref(),
+            max_completion_tokens: params.max_tokens,
+            temperature: params.temperature,
+            max_retries: i64::from(params.max_retries),
+            timeout_connect: i64::try_from(params.timeout_connect).unwrap_or(i64::MAX),
+            timeout_read: i64::try_from(params.timeout_read).unwrap_or(i64::MAX),
+            config_extra_json: Some(&params.app_version),
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    mark_run_running(&conn, &run_id).map_err(|e| e.to_string())?;
+    on_event(RunEvent::Started {
+        run_id: run_id.clone(),
+        total: plan.total,
+    });
+
+    let mut input_order = 0i64;
+    let _processed = 0usize;
+    let _succeeded = 0usize;
+    let _failed = 0usize;
+
+    // Inventory decisions for everything the run considered.
+    for existing in &plan.existing_images {
+        input_order += 1;
+        let image_id = find_image_id_by_hash(&conn, &existing.file_hash)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        insert_run_input_only(
+            &conn,
+            &run_id,
+            Some(&image_id),
+            "skip",
+            input_order,
+            &existing.path.to_string_lossy(),
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    // Batch-duplicate linkage: the doctor requires `duplicate_of_input_id`
+    // for `batch` duplicates pointing at the earlier same-run input row.
+    use std::collections::HashMap as _DupMap;
+    let mut canonical_input: _DupMap<String, i64> = _DupMap::new();
+    for dup in &plan.duplicates {
+        input_order += 1;
+        let kind = if dup.reason == "batch" {
+            "batch"
+        } else {
+            "hash"
+        };
+        let hash = dup
+            .duplicate_of_hash
+            .clone()
+            .unwrap_or_else(|| dup.file_hash.clone());
+        // For batch duplicates the canonical input was already recorded in
+        // this run (first occurrence wins in planning order); for hash
+        // duplicates there is no same-run canonical row.
+        let duplicate_of_input_id: Option<i64> = if kind == "batch" {
+            canonical_input.get(&hash).copied()
+        } else {
+            None
+        };
+        // The duplicate input references its own image row (Python parity:
+        // `discovery_input` upserts/links the dup image). Without this the
+        // row is orphaned on day one: deleting the image later leaves a
+        // NULL-image leftover no flow ever cleans, and its link breaks the
+        // doctor the moment the canonical input is deleted. Fall back to
+        // NULL only when the image row is genuinely absent.
+        let dup_image_id: Option<String> = conn
+            .query_row(
+                "SELECT id FROM image_files WHERE current_path = ?1 AND file_hash = ?2 LIMIT 1",
+                rusqlite::params![dup.path.to_string_lossy(), dup.file_hash],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        // Record the canonical hash itself so later batch rows can link.
+        // (The canonical *image* row keeps its own process/skip input.)
+        insert_run_input_full(
+            &conn,
+            &run_id,
+            &RunInputOnly {
+                image_file_id: dup_image_id.as_deref(),
+                decision: "duplicate",
+                input_order,
+                input_path: &dup.path.to_string_lossy(),
+                file_hash: Some(&dup.file_hash),
+                duplicate_kind: Some(kind),
+                duplicate_of_hash: Some(&hash),
+                duplicate_of_input_id,
+            },
+        )
+        .map_err(|e| e.to_string())
+        .inspect(|&id| {
+            canonical_input.entry(hash.clone()).or_insert(id);
+        })?;
+    }
+    for skipped in &plan.skipped_images {
+        input_order += 1;
+        insert_run_input_only(
+            &conn,
+            &run_id,
+            None,
+            "hash_failed",
+            input_order,
+            &skipped.path.to_string_lossy(),
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    let total_new = plan.new_images.len();
+    let process_reason = if params.retry_errors {
+        "retry_errors"
+    } else if params.force {
+        "force"
+    } else {
+        "full_run"
+    };
+
+    let (processed, succeeded, failed) = if params.workers > 1 && total_new > 0 {
+        // ── Multi-worker parallel extraction ────────────────────────────
+        let workers = usize::try_from(params.workers).unwrap_or(usize::MAX);
+        let (event_tx, event_rx) = channel();
+        let control = Arc::new(control.clone());
+        // Run-shared inference semaphore: at most `inference_concurrency`
+        // model calls in flight (see `inference_permits`).
+        let inference = Arc::new(tokio::sync::Semaphore::new(inference_permits(
+            params.workers,
+            params.inference_concurrency,
+        )));
+
+        // Pre-allocate ALL inputs/results/metadata on the main connection:
+        // per-worker `done+1` counters are not unique per run, and concurrent
+        // `MAX(id)+1` inserts race — so workers never insert inputs, they only
+        // process pre-created (result_id, input_id) pairs.
+        let mut ready: Vec<WorkerImage> = Vec::with_capacity(total_new);
+        let mut pre_failed = 0usize;
+        for image in &plan.new_images {
+            input_order += 1;
+            let name = image
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let (image_file_id, _) =
+                match upsert_image_for_run(&conn, &image.path, &image.file_hash) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let _ = event_tx.send(RunEvent::ImageDone {
+                            name,
+                            ok: false,
+                            laps: 0,
+                        });
+                        let _ = event_tx.send(RunEvent::Log(format!("upsert: {e}")));
+                        pre_failed += 1;
+                        continue;
+                    }
+                };
+            let (result_id, input_id) = match insert_processed_input_full(
+                &conn,
+                &forza_db::RunId::new(&run_id),
+                &forza_db::ImageFileId::new(&image_file_id),
+                &image.path.to_string_lossy(),
+                process_reason,
+                input_order,
+            ) {
+                Ok(v) => v,
+                Err(e) => {
+                    let _ = event_tx.send(RunEvent::ImageDone {
+                        name,
+                        ok: false,
+                        laps: 0,
+                    });
+                    let _ = event_tx.send(RunEvent::Log(format!("insert result: {e}")));
+                    pre_failed += 1;
+                    continue;
+                }
+            };
+            stamp_result_prompt(&conn, &result_id, &prompt_snapshot_id);
+            stamp_input_metadata(
+                &conn,
+                &forza_db::RunId::new(&run_id),
+                input_id,
+                &image.file_hash,
+                &name,
+                &image.path,
+            );
+            // Link batch duplicates to their canonical same-run input.
+            canonical_input
+                .entry(image.file_hash.clone())
+                .or_insert(input_id.as_i64());
+            ready.push(WorkerImage {
+                path: image.path.clone(),
+                file_hash: image.file_hash.clone(),
+                result_id,
+                input_id,
+                input_order,
+            });
+        }
+
+        // Split images into worker batches (round-robin for fairness).
+        let mut batches: Vec<Vec<WorkerImage>> = vec![Vec::new(); workers];
+        for (idx, item) in ready.into_iter().enumerate() {
+            batches[idx % workers].push(item);
+        }
+
+        // Spawn preflight snapshot on the main connection (single call).
+        let snapshot = {
+            let backend = LMStudioBackend::new(params.backend_config())
+                .map_err(|e| fail_run_preflight(&conn, &run_id, &e.to_string()))?;
+            let desired = params.desired_load_config();
+            backend
+                .preflight_snapshot(&desired)
+                .await
+                .map_err(|_| {
+                    fail_run_preflight(
+                        &conn,
+                        &run_id,
+                        "LM Studio is not reachable — start LM Studio (with the server on) and try again",
+                    )
+                })?
+        };
+        let snapshot_id = format!("runtime-{run_id}-preflight");
+        let insert = RuntimeSnapshotInsert {
+            endpoint: &snapshot.endpoint,
+            configured_model: &snapshot.configured_model,
+            matched_model: snapshot.matched_model.as_deref(),
+            loaded_model: snapshot.loaded_model.as_deref(),
+            instance_id: snapshot.instance_id.as_deref(),
+            display_name: snapshot.display_name.as_deref(),
+            publisher: snapshot.publisher.as_deref(),
+            architecture: snapshot.architecture.as_deref(),
+            format: snapshot.format.as_deref(),
+            params_string: snapshot.params_string.as_deref(),
+            quantization: snapshot.quantization.as_deref(),
+            selected_variant: snapshot.selected_variant.as_deref(),
+            size_bytes: snapshot.size_bytes,
+            max_context_length: snapshot.max_context_length,
+            capabilities_json: snapshot.capabilities_json.as_deref(),
+            desired_load_config_json: &snapshot.desired_load_config_json,
+            effective_load_config_json: snapshot.effective_load_config_json.as_deref(),
+            health_ok: snapshot.health_ok,
+            health_message: &snapshot.health_message,
+            model_matches_config: snapshot.model_matches_config,
+        };
+        insert_runtime_snapshot(&conn, &run_id, &snapshot_id, &insert)
+            .map_err(|e| e.to_string())?;
+
+        // Spawn worker threads (each owns its own Connection + single-thread rt).
+        let mut handles = Vec::new();
+        let mut spawn_error: Option<String> = None;
+        for (w_idx, batch) in batches.into_iter().enumerate() {
+            let params_clone = params.clone();
+            let conn_path = params.database_file.clone();
+            let run_id_clone = run_id.clone();
+            let control_clone = Arc::clone(&control);
+            let event_tx_clone = event_tx.clone();
+            let process_reason_clone = process_reason.to_string();
+            let prompt_id_clone = prompt_snapshot_id.clone();
+            let snapshot_id_clone = snapshot_id.clone();
+            let inference_clone = Arc::clone(&inference);
+
+            match std::thread::Builder::new()
+                .name(format!("forza-worker-{w_idx}"))
+                .spawn(move || {
+                    let rt = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(rt) => rt,
+                        // Same graceful pattern as everywhere else in this
+                        // file: report through the event channel and stop
+                        // this worker instead of panicking the process.
+                        // The orphan-marking safety net below finalizes the
+                        // batch's rows as `error`.
+                        Err(e) => {
+                            let _ = event_tx_clone.send(RunEvent::Failed(format!(
+                                "worker {w_idx} tokio runtime: {e}"
+                            )));
+                            return;
+                        }
+                    };
+                    rt.block_on(async {
+                        worker_loop(
+                            w_idx,
+                            conn_path,
+                            &forza_db::RunId::new(&run_id_clone),
+                            batch,
+                            &params_clone,
+                            control_clone,
+                            event_tx_clone,
+                            &process_reason_clone,
+                            &prompt_id_clone,
+                            &snapshot_id_clone,
+                            inference_clone,
+                        )
+                        .await
+                    });
+                }) {
+                Ok(handle) => handles.push(handle),
+                // Resource exhaustion: keep the workers that did spawn
+                // (their work is collected and joined below) and fail the
+                // run after finalizing partial results.
+                Err(e) => {
+                    spawn_error = Some(format!("worker {w_idx} thread spawn: {e}"));
+                    break;
+                }
+            }
+        }
+        drop(event_tx);
+
+        // Collect worker results and events.
+        let mut w_done = 0usize;
+        let mut w_succeeded = 0usize;
+        let mut w_failed = 0usize;
+
+        while let Ok(event) = event_rx.recv() {
+            match event {
+                // Worker progress counters are per-batch; the aggregated
+                // monotonic counter is emitted on every ImageDone so the UI
+                // never sees a worker-local (e.g. 2/6 twice) number.
+                RunEvent::Progress { .. } => {}
+                RunEvent::ImageStarted { name: _ } => {
+                    on_event(event);
+                }
+                RunEvent::ImageDone {
+                    name: _,
+                    ok,
+                    laps: _,
+                } => {
+                    on_event(event);
+                    w_done += 1;
+                    on_event(RunEvent::Progress {
+                        done: w_done,
+                        total: total_new,
+                    });
+                    if ok {
+                        w_succeeded += 1;
+                    } else {
+                        w_failed += 1;
+                    }
+                }
+                RunEvent::Log(line) => {
+                    on_event(RunEvent::Log(line));
+                }
+                _ => {}
+            }
+        }
+
+        // Wait for all workers to finish. A panicking worker must not be
+        // swallowed: its batch was pre-allocated, so mark those results
+        // `error` instead of finalizing `completed` with eternal `running`.
+        let mut join_failed = 0usize;
+        for handle in handles {
+            if handle.join().is_err() {
+                join_failed += 1;
+            }
+        }
+        if join_failed > 0 {
+            on_event(RunEvent::Log(format!(
+                "{join_failed} worker thread(s) panicked; affected results marked error"
+            )));
+        }
+        // Safety net: any result still `running` after all workers joined is
+        // orphaned (dead worker / early return). Leaving it `running` in a
+        // `completed` run hides it from retry_errors forever — mark it error.
+        let _ = conn.execute(
+            "UPDATE extraction_results SET status='error', error_type='worker_lost',
+                    error_message='worker finished without reporting', updated_at=datetime('now')
+              WHERE run_id=?1 AND status IN ('pending','running')",
+            rusqlite::params![run_id],
+        );
+        // Pre-insert failures already emitted ImageDone but bypassed the
+        // channel counter (channel was cloned per worker set after); count
+        // them via pre_failed captured through the event stream instead.
+        // (pre_failed events flowed through event_tx above, so w_failed
+        // already includes them.)
+        let _ = pre_failed;
+        backfill_batch_duplicate_links(&conn, &run_id);
+
+        // A worker that never spawned leaves its batch to the orphan-marking
+        // safety net above; fail the run after partial results are final so
+        // the CLI/GUI reports the cause instead of a successful partial run.
+        if let Some(message) = spawn_error {
+            return Err(message);
+        }
+
+        let w_processed = w_succeeded + w_failed;
+        (w_processed, w_succeeded, w_failed)
+    } else {
+        // ── Sequential (single-worker) extraction ───────────────────────
+        let mut backend =
+            LMStudioBackend::new(params.backend_config()).map_err(|e| e.to_string())?;
+        let desired = params.desired_load_config();
+
+        // Deterministic preflight snapshot id — the row itself is only
+        // created when the run actually reaches the model.
+        let snapshot_id = format!("runtime-{run_id}-preflight");
+        if total_new > 0 {
+            let snapshot = backend
+                .preflight_snapshot(&desired)
+                .await
+                .map_err(|_| {
+                    fail_run_preflight(
+                        &conn,
+                        &run_id,
+                        "LM Studio is not reachable — start LM Studio (with the server on) and try again",
+                    )
+                })?;
+            let insert = RuntimeSnapshotInsert {
+                endpoint: &snapshot.endpoint,
+                configured_model: &snapshot.configured_model,
+                matched_model: snapshot.matched_model.as_deref(),
+                loaded_model: snapshot.loaded_model.as_deref(),
+                instance_id: snapshot.instance_id.as_deref(),
+                display_name: snapshot.display_name.as_deref(),
+                publisher: snapshot.publisher.as_deref(),
+                architecture: snapshot.architecture.as_deref(),
+                format: snapshot.format.as_deref(),
+                params_string: snapshot.params_string.as_deref(),
+                quantization: snapshot.quantization.as_deref(),
+                selected_variant: snapshot.selected_variant.as_deref(),
+                size_bytes: snapshot.size_bytes,
+                max_context_length: snapshot.max_context_length,
+                capabilities_json: snapshot.capabilities_json.as_deref(),
+                desired_load_config_json: &snapshot.desired_load_config_json,
+                effective_load_config_json: snapshot.effective_load_config_json.as_deref(),
+                health_ok: snapshot.health_ok,
+                health_message: &snapshot.health_message,
+                model_matches_config: snapshot.model_matches_config,
+            };
+            insert_runtime_snapshot(&conn, &run_id, &snapshot_id, &insert)
+                .map_err(|e| e.to_string())?;
+        }
+        let mut done = 0usize;
+        let mut processed = 0usize;
+        let mut succeeded = 0usize;
+        let mut failed = 0usize;
+        for image in &plan.new_images {
+            // Safe checkpoint: pause blocks here; cancel stops between images.
+            if !control.checkpoint() {
+                on_event(RunEvent::Log(
+                    "cancellation requested — stopping between images".into(),
+                ));
+                break;
+            }
+            input_order += 1;
+            processed += 1;
+            let name = image
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            on_event(RunEvent::ImageStarted { name: name.clone() });
+
+            // Inventory row for this processed image.
+            let (image_file_id, _) = upsert_image_for_run(&conn, &image.path, &image.file_hash)
+                .map_err(|e| e.to_string())?;
+
+            // Pending result row before the call (status running).
+            let (result_id, input_id) = insert_processed_input_full(
+                &conn,
+                &forza_db::RunId::new(&run_id),
+                &forza_db::ImageFileId::new(&image_file_id),
+                &image.path.to_string_lossy(),
+                process_reason,
+                input_order,
+            )
+            .map_err(|e| e.to_string())?;
+            stamp_result_prompt(&conn, &result_id, &prompt_snapshot_id);
+            stamp_input_metadata(
+                &conn,
+                &forza_db::RunId::new(&run_id),
+                input_id,
+                &image.file_hash,
+                &name,
+                &image.path,
+            );
+
+            // Encode.
+            let encoded = match encode_stage(&image.path, params) {
+                Ok(payload) => payload,
+                Err(msg) => {
+                    failed += 1;
+                    fail_result(&conn, &result_id, "encode", &msg, None, &name, on_event);
+                    done += 1;
+                    on_event(RunEvent::Progress {
+                        done,
+                        total: total_new,
+                    });
+                    continue;
+                }
+            };
+
+            // Ensure the model is loaded (first image or after config change).
+            // Per-image error, not a whole-run abort: `?` here used to leave
+            // the run and all remaining results stuck in `running`.
+            if let Err(msg) = ensure_loaded_stage(&mut backend, &desired).await {
+                failed += 1;
+                fail_result(&conn, &result_id, "model_load", &msg, None, &name, on_event);
+                done += 1;
+                on_event(RunEvent::Progress {
+                    done,
+                    total: total_new,
+                });
+                continue;
+            }
+
+            // Extract with attempt persistence.
+            let mut attempt_count = 0i64;
+            let mut accepted_row: Option<forza_db::AttemptId> = None;
+            let run_id_typed = forza_db::RunId::new(&run_id);
+            let image_id_typed = forza_db::ImageFileId::new(&image_file_id);
+            let extract_result = {
+                let conn_ref = &conn;
+                let run_id_ref = run_id_typed.clone();
+                let image_id = image_id_typed.clone();
+                let result_id_ref = result_id.clone();
+                let model_name = params.model.clone();
+                backend
+                    .extract(
+                        &encoded.data_b64,
+                        &encoded.mime_type,
+                        &name,
+                        &mut |record: &ModelAttemptRecord| {
+                            attempt_count += 1;
+                            if let Some(row_id) = persist_attempt_with_evidence(
+                                conn_ref,
+                                &run_id_ref,
+                                &image_id,
+                                &result_id_ref,
+                                record,
+                                &encoded,
+                                &prompt_snapshot_id,
+                                &snapshot_id,
+                                &image.file_hash,
+                                &model_name,
+                                Some(params.context_length),
+                                params.reasoning_mode.as_deref(),
+                            ) {
+                                accepted_row = Some(row_id);
+                            }
+                        },
+                    )
+                    .await
+            };
+
+            match extract_result {
+                Ok(result) => {
+                    let laps = match crate::services::extraction_replay::derive_and_insert_laps(
+                        &conn,
+                        &run_id_typed,
+                        &image_id_typed,
+                        &result_id,
+                        &result.parsed,
+                        Some(&name),
+                        Some((params.temp_min_f, params.temp_max_f)),
+                    ) {
+                        Ok(l) => l,
+                        Err(e) => {
+                            failed += 1;
+                            fail_result(
+                                &conn,
+                                &result_id,
+                                "laps",
+                                &e.to_string(),
+                                Some(attempt_count),
+                                &name,
+                                on_event,
+                            );
+                            done += 1;
+                            on_event(RunEvent::Progress {
+                                done,
+                                total: total_new,
+                            });
+                            continue;
+                        }
+                    };
+                    let stats = build_result_stats(&params.model, &result.accepted_attempt);
+                    let Some(row_id) = accepted_row else {
+                        failed += 1;
+                        fail_result(
+                            &conn,
+                            &result_id,
+                            "attempt",
+                            "accepted attempt row missing",
+                            Some(attempt_count),
+                            &name,
+                            on_event,
+                        );
+                        done += 1;
+                        on_event(RunEvent::Progress {
+                            done,
+                            total: total_new,
+                        });
+                        continue;
+                    };
+                    finalize_ok_stage(
+                        &conn,
+                        &result_id,
+                        &row_id,
+                        attempt_count,
+                        &stats,
+                        &encoded,
+                        &image_id_typed,
+                        &image.path,
+                    )?;
+                    succeeded += 1;
+                    if params.verbose {
+                        on_event(RunEvent::Log(verbose_image_line(&VerboseImage {
+                            name: &name,
+                            result_id: &result_id,
+                            file_hash: &image.file_hash,
+                            stats: &stats,
+                            encoded: &encoded,
+                            attempt_count,
+                            attempt_row: Some(row_id.as_str()),
+                            laps,
+                            worker: false,
+                        })));
+                    }
+                    on_event(RunEvent::ImageDone {
+                        name: name.clone(),
+                        ok: true,
+                        laps,
+                    });
+                }
+                Err(err) => {
+                    failed += 1;
+                    fail_result(
+                        &conn,
+                        &result_id,
+                        "extraction",
+                        &err.to_string(),
+                        Some(attempt_count),
+                        &name,
+                        on_event,
+                    );
+                }
+            }
+
+            done += 1;
+            on_event(RunEvent::Progress {
+                done,
+                total: total_new,
+            });
+        }
+        (processed, succeeded, failed)
+    };
+
+    // ── Run counters + derived refresh ────────────────────────────────────
+    backfill_batch_duplicate_links(&conn, &run_id);
+    let cancelled = control.is_cancelled();
+    let final_status = if cancelled { "cancelled" } else { "completed" };
+    complete_run(&conn, &run_id, final_status).map_err(|e| e.to_string())?;
+
+    // Derived refresh parity with Python `_complete_run → rebuild_outputs`:
+    // best laps, review cases AND their system flags are recomputed at the
+    // end of every run — never requiring a manual Rebuild for reviews to
+    // appear. (`rebuild` re-runs `mark_best_laps` idempotently; cheap.)
+    match crate::services::rebuild::rebuild(&conn, &params.gamertag) {
+        Ok(outcome) => {
+            on_event(RunEvent::Log(format!(
+                "derived refresh: {} best-lap winner(s), reviews +{} kept {} auto-resolved {} (flags +{}/{})",
+                outcome.best_lap_winners,
+                outcome.review_inserted,
+                outcome.review_kept,
+                outcome.review_auto_resolved,
+                outcome.flags_ensured,
+                outcome.flags_resolved,
+            )));
+        }
+        Err(e) => {
+            on_event(RunEvent::Log(format!("derived refresh failed: {e}")));
+        }
+    }
+
+    Ok((processed, succeeded, failed, 0, 0))
+}
+
+/// Mark one result failed, emit its outcome, and always log the error detail.
+///
+/// Single owner for every per-image `status='error'` write in both the
+/// sequential loop and the parallel workers, so the `error_type` vocabulary,
+/// the `ImageDone{ok:false}` event, and the log line cannot diverge between
+/// the paths. (The bulk `worker_lost` safety net stays separate: one UPDATE
+/// with no per-image event. The worker image-lookup DB-error branch also
+/// stays: it emits without a DB write.)
+/// DB write failures are ignored here, like the majority of the previous
+/// call sites: failing to record a failure must not abort the run.
+fn fail_result(
+    conn: &Connection,
+    result_id: &forza_db::ExtractionResultId,
+    error_type: &str,
+    message: &str,
+    attempt_count: Option<i64>,
+    image_name: &str,
+    emit: impl Fn(RunEvent),
+) {
+    if let Some(n) = attempt_count {
+        let _ = conn.execute(
+            "UPDATE extraction_results SET status='error', error_type=?2, error_message=?3, attempt_count=?4, updated_at=datetime('now') WHERE id=?1",
+            rusqlite::params![result_id, error_type, message, n],
+        );
+    } else {
+        let _ = conn.execute(
+            "UPDATE extraction_results SET status='error', error_type=?2, error_message=?3, updated_at=datetime('now') WHERE id=?1",
+            rusqlite::params![result_id, error_type, message],
+        );
+    }
+    emit(RunEvent::ImageDone {
+        name: image_name.to_string(),
+        ok: false,
+        laps: 0,
+    });
+    // Server messages can be long JSON blobs; the full text stays in the DB.
+    let short: String = message.chars().take(300).collect();
+    emit(RunEvent::Log(format!("{error_type}: {short}")));
+}
+
+/// Build the finalize stats from the accepted attempt. Pure constructor so
+/// both paths record identical token/timing columns.
+fn build_result_stats<'a>(
+    model: &'a str,
+    accepted: &'a ModelAttemptRecord,
+) -> forza_db::repositories::runs::ResultStats<'a> {
+    forza_db::repositories::runs::ResultStats {
+        model: Some(model),
+        model_instance_id: accepted.model_instance_id.as_deref(),
+        input_tokens: accepted.input_tokens,
+        output_tokens: accepted.output_tokens,
+        reasoning_tokens: accepted.reasoning_tokens,
+        total_tokens: accepted.total_tokens,
+        tokens_per_second: accepted.tokens_per_second,
+        time_to_first_token_s: accepted.time_to_first_token_s,
+        model_load_time_s: accepted.model_load_time_s,
+        duration_ms: accepted.duration_ms,
+    }
+}
+
+/// Persist the success path: finalize row + request-image columns + semantic
+/// name stamp. Single owner so both the sequential loop and the parallel
+/// workers write the same columns (audit lesson: the sequential path once
+/// silently missed the stamping). Returns Err without emitting; the caller
+/// decides how to surface it (`?` abort sequential vs. `finalize` error row
+/// in workers).
+#[allow(clippy::too_many_arguments)]
+fn finalize_ok_stage(
+    conn: &Connection,
+    result_id: &forza_db::ExtractionResultId,
+    accepted_row_id: &forza_db::AttemptId,
+    attempt_count: i64,
+    stats: &forza_db::repositories::runs::ResultStats<'_>,
+    encoded: &forza_pipeline::EncodedImage,
+    image_file_id: &forza_db::ImageFileId,
+    image_path: &std::path::Path,
+) -> Result<(), String> {
+    forza_db::repositories::runs::finalize_result_ok(
+        conn,
+        result_id,
+        accepted_row_id,
+        attempt_count,
+        stats,
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE extraction_results SET request_image_format=?2,
+                request_image_mime_type=?3, request_image_width=?4,
+                request_image_height=?5, request_image_bytes=?6
+         WHERE id=?1",
+        rusqlite::params![
+            result_id,
+            encoded.format,
+            encoded.mime_type,
+            i64::from(encoded.width_px),
+            i64::from(encoded.height_px),
+            i64::try_from(encoded.byte_count).unwrap_or(i64::MAX),
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    stamp_semantic_name(conn, image_file_id, image_path, result_id);
+    Ok(())
+}
+
+/// Persist one backend attempt with the full evidence chain: encoded-image
+/// fields, the run's preflight runtime snapshot, and the canonical request
+/// hash recomputed from exactly the persisted columns. Both the sequential
+/// loop and the parallel workers go through here so the two paths cannot
+/// diverge (audit lesson: the sequential path silently missed the stamping).
+/// Returns the accepted attempt row id when the attempt was accepted.
+#[allow(clippy::too_many_arguments)]
+fn persist_attempt_with_evidence(
+    conn: &Connection,
+    run_id: &forza_db::RunId,
+    image_file_id: &forza_db::ImageFileId,
+    result_id: &forza_db::ExtractionResultId,
+    record: &ModelAttemptRecord,
+    encoded: &forza_pipeline::EncodedImage,
+    prompt_snapshot_id: &str,
+    runtime_snapshot_id: &str,
+    source_file_hash: &str,
+    model: &str,
+    context_length: Option<i64>,
+    reasoning_mode: Option<&str>,
+) -> Option<forza_db::AttemptId> {
+    let mut insert = crate::services::extraction_replay::to_attempt_insert(
+        record,
+        model,
+        context_length,
+        reasoning_mode,
+    );
+    insert.request_image_format = Some(&encoded.format);
+    insert.request_image_mime_type = Some(&encoded.mime_type);
+    insert.request_image_width = Some(i64::from(encoded.width_px));
+    insert.request_image_height = Some(i64::from(encoded.height_px));
+    insert.request_image_bytes = Some(i64::try_from(encoded.byte_count).unwrap_or(i64::MAX));
+    insert.runtime_snapshot_id = Some(runtime_snapshot_id);
+    let request_hash =
+        forza_db::evidence::canonical_request_hash(&forza_db::evidence::RequestFingerprint {
+            request_messages_json: insert.request_messages_json,
+            request_config_json: insert.request_config_json,
+            prompt_snapshot_id: Some(prompt_snapshot_id),
+            model: insert.model,
+            source_file_hash: Some(source_file_hash),
+            request_image_format: insert.request_image_format,
+            request_image_mime_type: insert.request_image_mime_type,
+            request_image_width: insert.request_image_width,
+            request_image_height: insert.request_image_height,
+            request_image_bytes: insert.request_image_bytes,
+        });
+    insert.request_hash = Some(&request_hash);
+    insert_attempt_full_checked(conn, run_id, image_file_id, result_id, &insert)
+        .ok()
+        .filter(|_| record.accepted)
+}
+
+/// Every result retains the immutable prompt snapshot of its run (doctor
+/// check `result_prompt_mismatch`).
+fn stamp_result_prompt(
+    conn: &Connection,
+    result_id: &forza_db::ExtractionResultId,
+    prompt_snapshot_id: &str,
+) {
+    let _ = conn.execute(
+        "UPDATE extraction_results SET prompt_snapshot_id=?2 WHERE id=?1",
+        rusqlite::params![result_id, prompt_snapshot_id],
+    );
+}
+
+/// Stamp file-evidence metadata onto a run input by its row id (never by
+/// `(run_id, input_order)`: input_order is only unique per run when allocated
+/// centrally, and workers must not rely on it as a key).
+fn stamp_input_metadata(
+    conn: &Connection,
+    run_id: &forza_db::RunId,
+    input_id: forza_db::RunInputId,
+    file_hash: &str,
+    name: &str,
+    path: &std::path::Path,
+) {
+    let file_metadata = std::fs::metadata(path).ok();
+    let extension = path
+        .extension()
+        .map(|value| value.to_string_lossy().to_lowercase());
+    let size_bytes = file_metadata
+        .as_ref()
+        .map(|metadata| i64::try_from(metadata.len()).unwrap_or(i64::MAX));
+    let mtime_ns = file_metadata
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos().min(i64::MAX as u128) as i64);
+    let _ = conn.execute(
+        "UPDATE run_inputs SET file_hash=?2, file_name=?3, extension=?4,
+                normalized_path=?5, size_bytes=?6, mtime_ns=?7
+          WHERE id=?1 AND run_id=?8",
+        rusqlite::params![
+            input_id,
+            file_hash,
+            name,
+            extension,
+            path.to_string_lossy().to_string(),
+            size_bytes,
+            mtime_ns,
+            run_id,
+        ],
+    );
+}
+
+/// Stamp the human-readable `semantic_name` ("Track - Class.ext", Python
+/// `build_semantic_name` parity) once laps are known. Readers everywhere
+/// (inventory, detail, export) prefer it over `current_name`, but nothing
+/// wrote it — every runner-created row stayed NULL.
+///
+/// Public so maintenance/sync flows can backfill it without re-running
+/// extraction.
+pub fn stamp_semantic_name(
+    conn: &Connection,
+    image_file_id: &forza_db::ImageFileId,
+    image_path: &std::path::Path,
+    result_id: &forza_db::ExtractionResultId,
+) {
+    let row: Option<(String, String)> = conn
+        .query_row(
+            "SELECT track, race_class FROM lap_records WHERE extraction_result_id = ?1 LIMIT 1",
+            rusqlite::params![result_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok();
+    let Some((track, race_class_raw)) = row else {
+        return;
+    };
+    let race_class: forza_domain::enums::RaceClass = race_class_raw
+        .parse()
+        .unwrap_or(forza_domain::enums::RaceClass::Unknown);
+    let suffix = image_path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    let name = forza_pipeline::semantic_filename(&track, race_class, &suffix);
+    let _ = conn.execute(
+        "UPDATE image_files SET semantic_name = ?2 WHERE id = ?1",
+        rusqlite::params![image_file_id, name],
+    );
+}
+
+/// Link `batch` duplicates to their canonical same-run `process` input.
+/// Runs after all process inputs exist (duplicates are recorded before them).
+fn backfill_batch_duplicate_links(conn: &Connection, run_id: &str) {
+    let _ = conn.execute(
+        "UPDATE run_inputs SET duplicate_of_input_id = (
+            SELECT p.id FROM run_inputs p
+            WHERE p.run_id = run_inputs.run_id
+              AND p.decision = 'process'
+              AND p.file_hash = run_inputs.duplicate_of_hash
+            ORDER BY p.input_order ASC LIMIT 1
+        )
+        WHERE run_id = ?1 AND decision = 'duplicate' AND duplicate_kind = 'batch'
+          AND duplicate_of_input_id IS NULL",
+        rusqlite::params![run_id],
+    );
+}
+
+/// Finalize a run whose LM Studio preflight failed: mark it failed with the
+/// canonical operational error so it never lingers as running (Python
+/// `fail_preflight_run`). Returns the propagated error message.
+fn fail_run_preflight(conn: &Connection, run_id: &str, detail: &str) -> String {
+    let message = format!("lmstudio_preflight_failed: {detail}");
+    let _ = complete_run(conn, run_id, "failed");
+    let _ = conn.execute(
+        "UPDATE extraction_runs SET operational_error_code='lmstudio_preflight_failed',
+                operational_error_message=?2 WHERE id=?1",
+        rusqlite::params![run_id, message],
+    );
+    message
+}
+
+fn insert_attempt_full_checked(
+    conn: &Connection,
+    run_id: &forza_db::RunId,
+    image_file_id: &forza_db::ImageFileId,
+    result_id: &forza_db::ExtractionResultId,
+    insert: &forza_db::repositories::runs::AttemptInsert<'_>,
+) -> Result<forza_db::AttemptId, String> {
+    forza_db::repositories::runs::insert_attempt_full(
+        conn,
+        run_id,
+        image_file_id,
+        result_id,
+        insert,
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Single-worker loop: owns its own SQLite connection and LMStudioBackend,
+/// processes a batch of images sequentially, emits events on `event_tx`.
+/// Model calls take a permit from the run-shared `inference` semaphore
+/// (see `inference_permits`); everything else stays parallel.
+#[allow(clippy::too_many_arguments)]
+async fn worker_loop(
+    _w_idx: usize,
+    conn_path: PathBuf,
+    run_id: &forza_db::RunId,
+    batch: Vec<WorkerImage>,
+    params: &RunParams,
+    control: Arc<RunControl>,
+    event_tx: std::sync::mpsc::Sender<RunEvent>,
+    process_reason: &str,
+    prompt_snapshot_id: &str,
+    runtime_snapshot_id: &str,
+    inference: Arc<tokio::sync::Semaphore>,
+) {
+    let conn = match forza_db::open_connection(&conn_path) {
+        Ok(c) => c,
+        Err(e) => {
+            // Never return silently: the collector finalizes `completed`
+            // from events, so an unreported batch would vanish without any
+            // result row or retry marker.
+            let _ = event_tx.send(RunEvent::Log(format!("worker DB open: {e}")));
+            for image in &batch {
+                let name = image
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let _ = event_tx.send(RunEvent::ImageDone {
+                    name,
+                    ok: false,
+                    laps: 0,
+                });
+            }
+            return;
+        }
+    };
+
+    let mut backend = match LMStudioBackend::new(params.backend_config()) {
+        Ok(b) => b,
+        Err(e) => {
+            let _ = event_tx.send(RunEvent::Log(format!("worker backend: {e}")));
+            for image in &batch {
+                let name = image
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                fail_result(
+                    &conn,
+                    &image.result_id,
+                    "worker_backend",
+                    &e.to_string(),
+                    None,
+                    &name,
+                    |event| {
+                        let _ = event_tx.send(event);
+                    },
+                );
+            }
+            return;
+        }
+    };
+
+    let desired = params.desired_load_config();
+
+    let total = batch.len();
+    let mut done = 0usize;
+
+    for image in batch {
+        if !control.checkpoint() {
+            let _ = event_tx.send(RunEvent::Log(
+                "cancellation requested — stopping between images".into(),
+            ));
+            break;
+        }
+
+        let name = image
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let _ = event_tx.send(RunEvent::ImageStarted { name: name.clone() });
+
+        // Inputs/results/metadata were pre-allocated on the main connection:
+        // resolve the (read-only) image id and process the pre-created result.
+        // (`input_id`/`input_order` ride along for traceability; the worker
+        // never recomputes keys from them.)
+        let _ = (image.input_id, image.input_order);
+        let result_id = image.result_id.clone();
+        let _ = process_reason;
+        let _ = prompt_snapshot_id;
+        let image_file_id =
+            match find_image_id_by_hash(&conn, &image.file_hash).map_err(|e| e.to_string()) {
+                Ok(Some(id)) => forza_db::ImageFileId::new(id),
+                Ok(None) => {
+                    fail_result(
+                        &conn,
+                        &result_id,
+                        "upsert",
+                        "image row missing",
+                        None,
+                        &name,
+                        |event| {
+                            let _ = event_tx.send(event);
+                        },
+                    );
+                    done += 1;
+                    let _ = event_tx.send(RunEvent::Progress { done, total });
+                    continue;
+                }
+                Err(e) => {
+                    let _ = event_tx.send(RunEvent::ImageDone {
+                        name: name.clone(),
+                        ok: false,
+                        laps: 0,
+                    });
+                    let _ = event_tx.send(RunEvent::Log(format!("image lookup: {e}")));
+                    done += 1;
+                    let _ = event_tx.send(RunEvent::Progress { done, total });
+                    continue;
+                }
+            };
+
+        let encoded = match encode_stage(&image.path, params) {
+            Ok(payload) => payload,
+            Err(msg) => {
+                fail_result(&conn, &result_id, "encode", &msg, None, &name, |event| {
+                    let _ = event_tx.send(event);
+                });
+                done += 1;
+                let _ = event_tx.send(RunEvent::Progress { done, total });
+                continue;
+            }
+        };
+
+        // Model calls run under one inference permit (see
+        // `with_inference_permit`); local encode/persist/derive/finalize
+        // stay parallel. The permit releases when the gated future
+        // completes, before derive/finalize below.
+        let gated = with_inference_permit(Arc::clone(&inference), async {
+            // A worker past the top-of-loop checkpoint can wait on the
+            // permit while the run is cancelled: re-check before touching
+            // the model so cancellation stays between-images.
+            if !control.checkpoint() {
+                return GatedModelOutcome::Cancelled;
+            }
+            if let Err(msg) = ensure_loaded_stage(&mut backend, &desired).await {
+                return GatedModelOutcome::LoadFailed(msg);
+            }
+            let mut attempt_count = 0i64;
+            let mut accepted_row: Option<forza_db::AttemptId> = None;
+            let model_name = params.model.clone();
+            let result = backend
+                .extract(
+                    &encoded.data_b64,
+                    &encoded.mime_type,
+                    &name,
+                    &mut |record: &ModelAttemptRecord| {
+                        attempt_count += 1;
+                        if let Some(row_id) = persist_attempt_with_evidence(
+                            &conn,
+                            run_id,
+                            &image_file_id,
+                            &result_id,
+                            record,
+                            &encoded,
+                            prompt_snapshot_id,
+                            runtime_snapshot_id,
+                            &image.file_hash,
+                            &model_name,
+                            Some(params.context_length),
+                            params.reasoning_mode.as_deref(),
+                        ) {
+                            accepted_row = Some(row_id);
+                        }
+                    },
+                )
+                .await;
+            GatedModelOutcome::Extracted(Box::new(GatedExtracted {
+                result: result.map_err(|e| e.to_string()),
+                attempt_count,
+                accepted_row,
+            }))
+        })
+        .await;
+
+        let (extract_result, attempt_count, accepted_row) = match gated {
+            GatedModelOutcome::Cancelled => {
+                let _ = event_tx.send(RunEvent::Log(
+                    "cancellation requested — stopping between images".into(),
+                ));
+                break;
+            }
+            GatedModelOutcome::LoadFailed(e) => {
+                fail_result(&conn, &result_id, "model_load", &e, None, &name, |event| {
+                    let _ = event_tx.send(event);
+                });
+                done += 1;
+                let _ = event_tx.send(RunEvent::Progress { done, total });
+                continue;
+            }
+            GatedModelOutcome::Extracted(boxed) => {
+                let GatedExtracted {
+                    result,
+                    attempt_count,
+                    accepted_row,
+                } = *boxed;
+                (result, attempt_count, accepted_row)
+            }
+        };
+
+        match extract_result {
+            Ok(result) => {
+                let laps = match crate::services::extraction_replay::derive_and_insert_laps(
+                    &conn,
+                    run_id,
+                    &image_file_id,
+                    &result_id,
+                    &result.parsed,
+                    Some(&name),
+                    Some((params.temp_min_f, params.temp_max_f)),
+                ) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        // Never leave the result `running`: a laps failure is
+                        // a per-image error, visible to retry_errors.
+                        fail_result(
+                            &conn,
+                            &result_id,
+                            "laps",
+                            &e.to_string(),
+                            Some(attempt_count),
+                            &name,
+                            |event| {
+                                let _ = event_tx.send(event);
+                            },
+                        );
+                        done += 1;
+                        let _ = event_tx.send(RunEvent::Progress { done, total });
+                        continue;
+                    }
+                };
+                let stats = build_result_stats(&params.model, &result.accepted_attempt);
+                // Never stream ok:true while the DB row is still `running`:
+                // a failed finalize must surface as ok:false + error row.
+                let finalize_outcome: Result<(), String> = (|| {
+                    let Some(row_id) = accepted_row else {
+                        return Err(
+                            "accepted attempt row missing (attempt insert failed)".to_string()
+                        );
+                    };
+                    finalize_ok_stage(
+                        &conn,
+                        &result_id,
+                        &row_id,
+                        attempt_count,
+                        &stats,
+                        &encoded,
+                        &image_file_id,
+                        &image.path,
+                    )
+                })();
+                match finalize_outcome {
+                    Ok(()) => {
+                        if params.verbose {
+                            let _ =
+                                event_tx.send(RunEvent::Log(verbose_image_line(&VerboseImage {
+                                    name: &name,
+                                    result_id: &result_id,
+                                    file_hash: &image.file_hash,
+                                    stats: &stats,
+                                    encoded: &encoded,
+                                    attempt_count,
+                                    attempt_row: None,
+                                    laps,
+                                    worker: true,
+                                })));
+                        }
+                        let _ = event_tx.send(RunEvent::ImageDone {
+                            name: name.clone(),
+                            ok: true,
+                            laps,
+                        });
+                    }
+                    Err(e) => {
+                        fail_result(
+                            &conn,
+                            &result_id,
+                            "finalize",
+                            &e,
+                            Some(attempt_count),
+                            &name,
+                            |event| {
+                                let _ = event_tx.send(event);
+                            },
+                        );
+                    }
+                }
+            }
+            Err(err) => {
+                fail_result(
+                    &conn,
+                    &result_id,
+                    "extraction",
+                    &err.to_string(),
+                    Some(attempt_count),
+                    &name,
+                    |event| {
+                        let _ = event_tx.send(event);
+                    },
+                );
+            }
+        }
+
+        done += 1;
+        let _ = event_tx.send(RunEvent::Progress { done, total });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use super::{VerboseImage, inference_permits, verbose_image_line, with_inference_permit};
+
+    #[test]
+    fn permits_cap_at_workers_and_floor_at_one() {
+        assert_eq!(inference_permits(1, 1), 1);
+        assert_eq!(inference_permits(4, 1), 1);
+        assert_eq!(inference_permits(4, 2), 2);
+        assert_eq!(inference_permits(2, 8), 2);
+        assert_eq!(inference_permits(0, 0), 1);
+    }
+
+    #[test]
+    fn verbose_line_reports_ids_and_stats() {
+        let stats = forza_db::repositories::runs::ResultStats {
+            model: Some("m"),
+            model_instance_id: None,
+            input_tokens: None,
+            output_tokens: None,
+            reasoning_tokens: None,
+            total_tokens: Some(100),
+            tokens_per_second: Some(20.0),
+            time_to_first_token_s: None,
+            model_load_time_s: None,
+            duration_ms: 1500,
+        };
+        let encoded = forza_pipeline::EncodedImage {
+            data_b64: String::new(),
+            mime_type: "image/png".to_string(),
+            format: "png".to_string(),
+            width_px: 1600,
+            height_px: 900,
+            byte_count: 42,
+        };
+        let line = verbose_image_line(&VerboseImage {
+            name: "shot.png",
+            result_id: &forza_db::ExtractionResultId::new("res-1"),
+            file_hash: "h",
+            stats: &stats,
+            encoded: &encoded,
+            attempt_count: 2,
+            attempt_row: Some("att-1"),
+            laps: 3,
+            worker: false,
+        });
+        assert!(line.contains("model=m"), "{line}");
+        assert!(line.contains("duration_ms=1500"), "{line}");
+        assert!(line.contains("1600x900"), "{line}");
+        assert!(line.contains("res-1"), "{line}");
+    }
+
+    /// The wiring `worker_loop` relies on: with one permit, gated sections
+    /// never overlap no matter how many tasks race; with two, they pair up.
+    /// Runs on a current-thread runtime (no `tokio::macros` needed).
+    fn peak_overlap(permits: usize, tasks: usize) -> usize {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let sem = Arc::new(tokio::sync::Semaphore::new(permits));
+            let active = Arc::new(AtomicUsize::new(0));
+            let peak = Arc::new(AtomicUsize::new(0));
+            let mut handles = Vec::with_capacity(tasks);
+            for _ in 0..tasks {
+                let (sem, active, peak) =
+                    (Arc::clone(&sem), Arc::clone(&active), Arc::clone(&peak));
+                handles.push(tokio::spawn(with_inference_permit(sem, async move {
+                    let n = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(n, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    active.fetch_sub(1, Ordering::SeqCst);
+                })));
+            }
+            for handle in handles {
+                handle.await.unwrap();
+            }
+            peak.load(Ordering::SeqCst)
+        })
+    }
+
+    #[test]
+    fn gated_sections_serialize_with_one_permit() {
+        assert_eq!(peak_overlap(1, 8), 1);
+    }
+
+    #[test]
+    fn gated_sections_pair_up_with_two_permits() {
+        assert_eq!(peak_overlap(2, 8), 2);
+    }
+}

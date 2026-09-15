@@ -1,0 +1,71 @@
+# Database
+
+Status: current
+Audience: developer, maintainer, LLM
+Scope: `forza-db` — schema, migration, repositories, doctor, maintenance.
+
+## Schema
+
+- Engine: SQLite via rusqlite (WAL + busy timeout + FK enforcement, see
+  `forza-db/src/connection.rs`).
+- Version marker: `PRAGMA user_version`, currently `SCHEMA_VERSION = 3`
+  (`forza-db/src/schema_ddl.rs`, frozen DDL — do not edit by hand).
+- `migration::upgrade()` builds a fresh database from zero and refuses
+  foreign versions. `migration::migrate()` steps known old versions forward
+  (currently v2 → v3: drop the removed `performance_*` columns, data
+  preserved); unknown versions refuse with `db-reset` guidance. Always back
+  up first (`migration::backup_database()`); test databases are rebuilt.
+- The `frozen_schema_*` doctor checks enforce the baseline at runtime.
+- **Never open one sqlite file with both implementations.** Python and Rust
+  schemas/versions differ; mixing them produces `Incompatible` errors by design.
+
+## Key tables
+
+`extraction_runs` (counters recomputed from rows, never trusted blindly) →
+`run_inputs` (`INTEGER PRIMARY KEY AUTOINCREMENT`; `decision` process/skip/
+duplicate/… with evidence columns) → `extraction_results` (exactly one per
+process input) → `extraction_attempts` (accepted + history, raw evidence) →
+`lap_records` (`is_best_lap` frontier flag) → `review_cases` (open/resolved/
+auto_resolved; outcome pending/confirmed/model_error — no `ignored` state
+anywhere, see `reviews.md`) + `review_corrections` → `image_flags` (one active
+system flag per open case) + `model_runtime_snapshots` (preflight) +
+`reference_tracks/cars` (seeded from compiled assets; confirmed-novel cars
+also append to the shipped `cars.txt`).
+
+## Repositories (`forza-db/src/repositories/`)
+
+`runs` (inputs/results/attempts/counters/reconcile), `laps` (records,
+`add_result`, rain-bucket candidates), `reviews` (candidate detection, upsert
+preserving operator decisions), `corrections` (scoped apply), `flags`
+(flag sync), `best_laps` (transactional frontier recompute), `images`,
+`external_records` (atomic snapshot replace).
+
+Row identities on the attempt/result path are newtypes (`src/ids.rs`:
+`RunId`, `ImageFileId`, `ExtractionResultId`, `AttemptId`, `RunInputId`)
+so swapped ids fail to compile; storage/queries stay text/integer.
+
+`DbError` splits transaction failures (`Transaction`, message carries
+`phase: cause`) from pool acquisition (`Pool(r2d2::Error)`, source kept).
+
+## Doctor (`forza-db/src/doctor/`)
+
+`run_full_doctor` runs the ~70-check battery (integrity, run/input/result/
+attempt evidence chains, images, reviews + flags, best laps, artifacts,
+schema drift). It short-circuits to a `schema_head` failure off-head. Keep it
+green: `forza.exe maintenance db-doctor`.
+
+## History
+
+The Fase-3 schema audit that drove this design lives in git history (and its
+per-crate analysis in `migration/forza-db.md`); its invariants are now
+enforced by the `frozen_schema_*` checks above, not by prose.
+
+## Maintenance CLI
+
+```
+forza.exe maintenance db-status        # schema state + row counts
+forza.exe maintenance db-doctor [--json]
+forza.exe maintenance db-upgrade       # create fresh schema
+forza.exe maintenance db-reset --yes   # delete DB files (refuses without --yes)
+forza.exe maintenance db-heal          # backfill evidence + reconcile + counters
+```

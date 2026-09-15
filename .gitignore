@@ -37,6 +37,10 @@ output/reports/
 # User config
 forza_config.ini
 
+# Local UI state (window geometry, splits, columns) — per-machine, never commit
+ui_state.json
+output/ui_state.json
+
 # Build
 build/
 dist/
@@ -57,3 +61,21 @@ data/forza.sqlite3-wal
 /scripts
 /_code_removed_
 /graphify-out
+
+# Rust migration fixtures: personal/large artifacts stay out of Git (see forza-rust/fixtures/README.md)
+forza-rust/fixtures/images/
+forza-rust/fixtures/model_responses/
+# Local run outputs/telemetry have no place in the public tree (nothing reads
+# them; schema baseline is frozen in code, catalog compiled from assets/).
+forza-rust/fixtures/python_outputs/*
+forza-rust/target/
+/forza-rust/docs/migration
+
+# Runtime logs (Python app writes here when run with cwd=forza/)
+/forza/output/logs/
+
+# ZCode tool session artifacts (plan files etc.)
+.zcode/
+/data
+
+/forza-rust/tools

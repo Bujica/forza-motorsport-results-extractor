@@ -3,7 +3,17 @@
 
 Forza Motorsport Results Extractor extracts lap-time data from Forza Motorsport, 2023 release, post-race Results screen screenshots.
 
-## Source checkout quick start
+## Source checkout quick start (current: Rust)
+
+```cmd
+cd forza-rust
+cargo build -p forza-cli -p forza-gui
+.\target\debug\forza.exe maintenance db-upgrade
+.\target\debug\forza.exe maintenance db-doctor
+.\target\debug\forza-gui.exe
+```
+
+## Source checkout quick start (legacy Python reference)
 
 ```cmd
 pip install -e ".[dev,gui]"
@@ -13,6 +23,14 @@ python -m forza gui
 ```
 
 ## Beta bundle quick start
+
+The shipped beta bundle below is built from the legacy Python line
+(`0.21.0` final — PyInstaller — see `docs/release/beta_packaging.md`).
+A Rust-built bundle (`0.1.0`) is produced by
+`python packaging\build_windows_beta_rust.py`
+(also via the manual `Build Windows Beta (Rust)` workflow); from source,
+run the binaries from `forza-rust/target/debug/` (or `release/`) as shown
+above.
 
 From the unpacked bundle folder:
 
@@ -47,7 +65,14 @@ Not supported as a beta target:
 - Telemetry overlays.
 - Arbitrary racing-game screenshots.
 
-## Common checks
+## Common checks (current: Rust)
+
+```cmd
+.\target\debug\forza.exe --version
+.\target\debug\forza.exe config-check
+```
+
+## Common checks (legacy Python reference)
 
 ```cmd
 python -m forza --version

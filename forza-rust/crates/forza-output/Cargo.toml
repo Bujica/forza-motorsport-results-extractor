@@ -1,0 +1,22 @@
+[package]
+name = "forza-output"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+base64.workspace = true
+thiserror.workspace = true
+forza-domain = { path = "../forza-domain" }
+
+chrono.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
+base64.workspace = true
+
+[lints]
+workspace = true

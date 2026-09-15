@@ -251,7 +251,7 @@ class ImageBrowserView(QWidget):
         self.refresh_requested.emit(
             self.file_filter.currentText(),
             self.best_filter.currentText(),
-            self.inventory_filter.currentText(),
+            _combo_value(self.inventory_filter),
             _combo_value(self.track_filter),
             _combo_value(self.run_filter),
             self.process_filter.currentText(),

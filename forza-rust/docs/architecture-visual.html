@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forza Rust — Documentation Entry Point (visual architecture)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --accent:#38bdf8; --green:#34d399; --amber:#fbbf24; --red:#f87171; --text:#e2e8f0; --muted:#94a3b8; }
+  * { box-sizing:border-box; }
+  body { font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); margin:0; padding:24px; max-width:1200px; }
+  h1 { margin:0 0 4px; } .sub { color:var(--muted); margin-bottom:16px; }
+  .banner { border:1px solid var(--amber); background:#451a0333; border-radius:12px; padding:12px 16px; margin:0 0 16px; font-size:.9rem; }
+  .banner table { margin:8px 0 0; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media(max-width:900px){ .grid{grid-template-columns:1fr;} }
+  .card { background:var(--card); border-radius:12px; padding:16px 18px; border:1px solid #334155; }
+  .card h2 { margin-top:0; font-size:1.05rem; color:var(--accent); }
+  .card h3 { font-size:.9rem; color:var(--green); margin:12px 0 4px; }
+  .tag { display:inline-block; font-size:.72rem; background:#0ea5e933; border:1px solid #0ea5e9; border-radius:20px; padding:1px 10px; margin:2px 4px 2px 0; }
+  .tag.base { background:#34d39922; border-color:var(--green); }
+  .tag.top { background:#fbbf2422; border-color:var(--amber); }
+  .tag.frozen { background:#f8717122; border-color:var(--red); }
+  code { background:#0b1220; padding:1px 6px; border-radius:6px; font-size:.82rem; }
+  pre { background:#0b1220; padding:12px 14px; border-radius:8px; overflow-x:auto; font-size:.82rem; }
+  a { color:var(--accent); }
+  .mermaid { background:#fff; border-radius:12px; padding:16px; margin:16px 0; }
+  table { width:100%; border-collapse:collapse; font-size:.85rem; }
+  th,td { text-align:left; padding:8px; border-bottom:1px solid #334155; vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  .flow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0; }
+  .step { background:#0b1220; border:1px solid var(--accent); border-radius:8px; padding:6px 12px; font-size:.85rem; }
+  .arrow { color:var(--accent); font-weight:bold; }
+  footer { color:var(--muted); font-size:.8rem; margin-top:20px; }
+</style>
+</head>
+<body>
+<h1>🗺️ Forza Rust — Documentation Entry Point</h1>
+<div class="sub">Visual map of the <code>forza-rust/</code> workspace · 9 crates · internal edges only (<code>cargo doc --no-deps</code>) · Last updated: 2026-09-15</div>
+
+<div class="banner">⚠️ <b>Two tracks — do not mix them.</b>
+<table><tr><th>Track</th><th>Version</th><th>State</th><th>Docs</th></tr>
+<tr><td><b>Rust (current — this page)</b></td><td><code>0.1.0</code></td><td>active development</td><td><code>forza-rust/docs/</code> + rustdoc below</td></tr>
+<tr><td>Python (legacy)</td><td><code>0.21.0</code> final</td><td>frozen, reference only</td><td>root <code>docs/</code> + <code>README_BETA.md</code></td></tr>
+</table></div>
+
+<div class="card">
+<h2>🚀 How to use this page + regenerate the rustdoc</h2>
+<pre>cd forza-rust
+cargo doc --no-deps --workspace        # builds target/doc/ without external deps (expect 0 warnings)
+cargo doc --no-deps --workspace --open # opens in the browser
+# Recommended entry points:
+#   1. this page (architecture overview) → 2. target/doc/forza_app/index.html (central API)</pre>
+<p style="color:var(--muted);font-size:.85rem">The "📖 rustdoc" links below point at <code>../target/doc/...</code> and work after a local <code>cargo doc</code> build. The diagram needs internet (Mermaid CDN); everything else works offline. Gates that must stay green: <code>cargo fmt --all --check</code> · <code>cargo clippy --workspace --all-targets -- -D warnings</code> · <code>cargo test --workspace</code>.</p>
+</div>
+
+<div class="mermaid">
+flowchart TB
+  subgraph L0["🧱 Layer 0 — Base (zero internal deps)"]
+    domain["forza-domain<br/>pure rules, no IO"]
+    config["forza-config<br/>INI, defaults, validation"]
+  end
+  subgraph L1["🔧 Layer 1 — Infra"]
+    pipeline["forza-pipeline<br/>discovery, hash, plan"]
+    output["forza-output<br/>CSV + PDF"]
+    lmstudio["forza-lmstudio<br/>LLM client, JSON repair"]
+  end
+  subgraph L2["💾 Layer 2 — Persistence"]
+    db["forza-db<br/>SQLite, repos, doctor"]
+  end
+  subgraph L3["🎛️ Layer 3 — Orchestration"]
+    app["forza-app<br/>use cases (services/)"]
+  end
+  subgraph L4["🖥️ Layer 4 — Entries"]
+    gui["forza-gui<br/>Slint + Tokio worker"]
+    cli["forza-cli (bin: forza)<br/>Clap; depends on the GUI"]
+  end
+  pipeline --> domain
+  output --> domain
+  lmstudio --> domain
+  lmstudio --> pipeline
+  db --> domain
+  db --> pipeline
+  app --> domain
+  app --> pipeline
+  app --> output
+  app --> lmstudio
+  app --> db
+  app --> config
+  gui --> domain
+  gui --> pipeline
+  gui --> output
+  gui --> db
+  gui --> app
+  gui --> config
+  cli --> domain
+  cli --> pipeline
+  cli --> output
+  cli --> db
+  cli --> app
+  cli --> config
+  cli -.->|"launch/reuse (see Cargo.toml)"| gui
+  style domain fill:#134e4a,stroke:#34d399,color:#fff
+  style config fill:#134e4a,stroke:#34d399,color:#fff
+  style app fill:#1e3a5f,stroke:#38bdf8,color:#fff
+  style gui fill:#451a03,stroke:#fbbf24,color:#fff
+  style cli fill:#451a03,stroke:#fbbf24,color:#fff
+</div>
+
+<div class="card">
+<h2>🔄 End-to-end data flow (what the crate graph does not show)</h2>
+<div class="flow">
+<span class="step">📷 screenshots</span><span class="arrow">→</span>
+<span class="step">pipeline::discovery + planning</span><span class="arrow">→</span>
+<span class="step">hashing + encode</span><span class="arrow">→</span>
+<span class="step">lmstudio::backend → response/repair</span><span class="arrow">→</span>
+<span class="step">domain::lap / ordering / frontier</span><span class="arrow">→</span>
+<span class="step">db::repositories</span><span class="arrow">→</span>
+<span class="step">app::services</span><span class="arrow">→</span>
+<span class="step">gui worker / cli</span><span class="arrow">→</span>
+<span class="step">output::csv / pdf</span>
+</div>
+<p style="color:var(--muted);font-size:.85rem">Config (<code>forza-config::AppConfig</code>) is loaded once and injected into the GUI <code>WorkerContext</code> / CLI commands — that is why almost everyone at the top depends on it, and nobody at the base does.</p>
+</div>
+
+<div class="grid" style="margin-top:16px">
+<div class="card"><h2>🧱 forza-domain <span class="tag base">base</span></h2>
+<p>Pure rules, no filesystem/network/GUI/DB. Reference data embedded from <code>assets/</code> (<code>cars.txt</code>, <code>tracks.txt</code>).</p>
+<h3>Modules</h3><div><span class="tag">car_names</span><span class="tag">lap</span><span class="tag">ordering</span><span class="tag">frontier</span><span class="tag">race_class</span><span class="tag">review_rules</span><span class="tag">normalizer</span><span class="tag">enums</span><span class="tag">errors</span></div>
+<h3>Depends on</h3><p><code>— (only regex, unicode-*)</code></p>
+<p><a href="../target/doc/forza_domain/index.html">📖 rustdoc</a></p></div>
+
+<div class="card"><h2>⚙️ forza-config <span class="tag base">base</span></h2>
+<p>Loads/validates the <code>.ini</code>; mirrors the legacy Python contract (<code>forza/config.py</code>).</p>
+<h3>Modules</h3><div><span class="tag">ini</span><span class="tag">keys</span><span class="tag">prompts</span><span class="tag">save</span></div>
+<h3>Central type</h3><p><code>AppConfig</code> — what the GUI keeps in <code>WorkerContext</code> (<code>worker.rs</code>)</p>
+<p><a href="../target/doc/forza_config/index.html">📖 rustdoc</a></p></div>
+
+<div class="card"><h2>🔧 forza-pipeline</h2>
+<p>Filesystem + per-input planning. Decision vocabulary = the <code>run_inputs.decision</code> contract.</p>
+<h3>Modules</h3><div><span class="tag">discovery</span><span class="tag">planning</span><span class="tag">hashing</span><span class="tag">encoding</span><span class="tag">naming</span><span class="tag">metadata</span></div>
+<h3>Depends on</h3><p><code>forza-domain</code></p>
+<p><a href="../target/doc/forza_pipeline/index.html">📖 rustdoc</a></p></div>
+
+<div class="card"><h2>📄 forza-output</h2>
+<p>Final artifacts: best-lap CSV and PDF reports (+ <code>fmt_float</code>, byte-identical to Python).</p>
+<h3>Modules</h3><div><span class="tag">csv</span><span class="tag">pdf</span></div>
+<h3>Depends on</h3><p><code>forza-domain</code></p>
+<p><a href="../target/doc/forza_output/index.html">📖 rustdoc</a></p></div>
+
+<div class="card"><h2>🤖 forza-lmstudio</h2>
+<p>Protocol + runtime client + extraction backend + response parsing/validation/repair.</p>
+<h3>Modules</h3><div><span class="tag">backend</span><span class="tag">client</span><span class="tag">protocol</span><span class="tag">response</span><span class="tag">json_repair</span><span class="tag">url</span></div>
+<h3>Depends on</h3><p><code>forza-domain</code>, <code>forza-pipeline</code></p>
+<p><a href="../target/doc/forza_lmstudio/index.html">📖 rustdoc</a></p></div>
+
+<div class="card"><h2>💾 forza-db</h2>
+<p>SQLite: r2d2 pool, migration (<code>PRAGMA user_version</code>), repositories, GUI queries, and <code>doctor</code>.</p>
+<h3>Modules</h3><div><span class="tag">repositories/* (laps, runs, reviews…)</span><span class="tag">doctor/*</span><span class="tag">gui_queries</span><span class="tag">connection</span><span class="tag">migration</span></div>
+<h3>Depends on</h3><p><code>forza-domain</code>, <code>forza-pipeline</code></p>
+<p><a href="../target/doc/forza_db/index.html">📖 rustdoc</a></p></div>
+
+<div class="card" style="border-color:var(--accent)"><h2>🎛️ forza-app — the hub <span class="tag">rustdoc entry point</span></h2>
+<p>Orchestrates use cases without knowing widgets. Every GUI screen and every CLI subcommand calls into here. Start the rustdoc from this crate.</p>
+<h3>Services</h3><div><span class="tag">best_laps (BestLapRow)</span><span class="tag">extraction_runner</span><span class="tag">review_queue</span><span class="tag">image_inventory/detail/debug</span><span class="tag">rebuild</span><span class="tag">settings</span><span class="tag">run_control/log</span></div>
+<h3>Depends on</h3><p><code>config, db, domain, lmstudio, output, pipeline</code> (6 — the largest fan-in)</p>
+<p><a href="../target/doc/forza_app/index.html">📖 rustdoc</a></p></div>
+
+<div class="card"><h2>🖥️ forza-gui + ⌨️ forza-cli <span class="tag top">top</span></h2>
+<p><b>GUI (Slint):</b> Tokio runtime on a dedicated thread; callbacks only enqueue over <code>mpsc</code>, results come back via <code>invoke_from_event_loop</code>. State in <code>ui_state.rs</code>, handlers in <code>callbacks/*</code>, IO in <code>worker.rs</code>.</p>
+<p><b>CLI (bin <code>forza</code>):</b> Clap; declares a dependency on <code>forza-gui</code> (launch/reuse) — the binary is never lightweight.</p>
+<h3>Depends on</h3><p>GUI: <code>config, db, domain, app, output, pipeline</code> · CLI: all of those + <code>gui</code></p>
+<p><a href="../target/doc/forza_gui/index.html">📖 rustdoc GUI</a> · <a href="../target/doc/forza_cli/index.html">📖 rustdoc CLI</a></p></div>
+</div>
+
+<div class="card" style="margin-top:16px"><h2>⚠️ Reading notes (graph interpretation)</h2>
+<table><tr><th>Signal</th><th>Meaning</th></tr>
+<tr><td><code>forza-app</code> with 6 deps</td><td>Natural hub given the orchestrator role. Changes here affect GUI+CLI together.</td></tr>
+<tr><td><code>forza-cli → forza-gui</code></td><td>The only sideways/upward edge. The CLI is not independent of the GUI — intentional (launch), but it rules out a lightweight CLI binary.</td></tr>
+<tr><td>Dual base (<code>domain</code> + <code>config</code>)</td><td>Correct split: rules (domain) never touch settings (config). No workspace dependency cycles.</td></tr>
+<tr><td><code>BestLapRow</code> in <code>forza-app</code>, trait <code>LapRow</code> in <code>domain::ordering</code></td><td>Domain must not reference the concrete struct (would be a cycle). The trait is the contract, the struct is the implementation.</td></tr>
+</table></div>
+
+<footer>Regenerate: <code>cargo doc --no-deps --workspace</code> in <code>forza-rust/</code> → open <code>target/doc/forza_app/index.html</code>. This file: <code>forza-rust/docs/architecture-visual.html</code> · Rust <code>0.1.0</code> (active) · Python <code>0.21.0</code> final (legacy, root <code>docs/</code>).</footer>
+<script>mermaid.initialize({startOnLoad:true, theme:'neutral'});</script>
+</body>
+</html>

@@ -1,0 +1,313 @@
+// Review queue page: filters, case queue, image preview and the per-reason
+// action panel (Python review_queue_view parity).
+
+import { Button, ComboBox, LineEdit, ListView, TextEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { ReviewItem } from "../models.slint";
+import { Card, EmptyState, SplitterH, SplitterV, TableHeaderCell, TableCell } from "../components/common.slint";
+
+export component ReviewPage inherits Rectangle {
+    background: transparent;
+
+    in property <[ReviewItem]> reviews;
+    in property <[string]> review-reasons;
+    in property <[string]> review-outcomes;
+    in property <[string]> review-runs;
+    in property <[string]> review-tracks;
+    in property <[string]> review-classes;
+    in-out property <string> review-status-filter;
+    in-out property <int> review-reason-index;
+    in-out property <int> review-outcome-index;
+    in-out property <int> review-run-index;
+    in-out property <int> review-selected-index;
+    in-out property <int> review-track-index;
+    in-out property <int> review-class-index;
+    in-out property <string> review-car-text;
+    in-out property <string> review-driver-text;
+    in property <string> review-detail-title;
+    in property <string> review-detail-lines;
+    in property <string> review-reason-note;
+    in property <string> review-suggestions;
+    in property <image> review-preview;
+    in property <bool> review-has-preview;
+    // Layout state (QSplitter parity): left pane width, preview height.
+    in-out property <length> main-split: 760px;
+    in-out property <length> preview-h: 280px;
+    // 13px base: Decision 195 Interactive, Driver 150 Interactive
+    in-out property <length> col-decision-w: 195px;
+    in-out property <length> col-driver-w: 150px;
+
+    callback review-filter-changed(string, string, string, string);
+    callback review-selected(int);
+    callback review-apply(int, string, string);
+    callback review-reopen(int);
+    callback review-open-detail(int);
+
+    function reason-note(reason: string) -> string {
+        return reason == "dirty_lap"
+            ? "The model detected a dirty lap. Confirm the detection or mark the lap clean."
+            : reason == "weather"
+                ? "Pick the corrected weather condition."
+                : reason == "track"
+                    ? "Pick the corrected track from the reference list."
+                    : reason == "race_class"
+                        ? "Pick the corrected class."
+                        : reason == "car"
+                            ? "Type the corrected car name and apply."
+                            : reason == "driver_name"
+                                ? "Type the corrected driver name and apply."
+                                : "No semantic action available for this reason. Inspect the image.";
+    }
+
+    function selected-reason() -> string {
+        return root.review-selected-index >= 0 && root.reviews.length > root.review-selected-index
+            ? root.reviews[root.review-selected-index].reason
+            : "";
+    }
+
+    function selected-number() -> int {
+        return root.review-selected-index >= 0 && root.reviews.length > root.review-selected-index
+            ? root.reviews[root.review-selected-index].number
+            : -1;
+    }
+
+    VerticalLayout {
+        spacing: 6px;
+
+        // Filter bar
+        HorizontalLayout {
+            height: 32px;
+            spacing: 8px;
+            Text { text: "Review"; color: Theme.text; font-weight: 700; min-width: 52px; vertical-alignment: center; }
+            Text { text: "Status:"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+            ComboBox {
+                min-width: 100px;
+                model: ["open", "resolved", "all"];
+                current-index: 0;
+                selected => {
+                    root.review-status-filter = self.current-value;
+                    root.review-filter-changed(root.review-status-filter,
+                        root.review-reasons[root.review-reason-index],
+                        root.review-outcomes[root.review-outcome-index],
+                        root.review-runs[root.review-run-index]);
+                }
+            }
+            Text { text: "Reason:"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+            ComboBox {
+                min-width: 110px;
+                model: root.review-reasons;
+                current-index <=> root.review-reason-index;
+                selected => { root.review-filter-changed(root.review-status-filter, root.review-reasons[root.review-reason-index], root.review-outcomes[root.review-outcome-index], root.review-runs[root.review-run-index]); }
+            }
+            Text { text: "Outcome:"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+            ComboBox {
+                min-width: 100px;
+                model: root.review-outcomes;
+                current-index <=> root.review-outcome-index;
+                selected => { root.review-filter-changed(root.review-status-filter, root.review-reasons[root.review-reason-index], root.review-outcomes[root.review-outcome-index], root.review-runs[root.review-run-index]); }
+            }
+            Text { text: "Run:"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+            ComboBox {
+                min-width: 150px; horizontal-stretch: 1;
+                model: root.review-runs;
+                current-index <=> root.review-run-index;
+                selected => { root.review-filter-changed(root.review-status-filter, root.review-reasons[root.review-reason-index], root.review-outcomes[root.review-outcome-index], root.review-runs[root.review-run-index]); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        // Preview + queue | details — draggable split (Python QSplitter 58/42).
+        Rectangle {
+            vertical-stretch: 1;
+
+            // ── Left: preview (top) + case queue (bottom) ──
+            VerticalLayout {
+                x: 0;
+                width: root.main-split;
+                height: 100%;
+                spacing: 6px;
+                Rectangle {
+                    clip: true;
+                    height: root.preview-h;
+                    Card {
+                        width: 100%;
+                        height: 100%;
+                        if root.review-has-preview: Image {
+                            width: parent.width;
+                            height: parent.height;
+                            source: root.review-preview;
+                            image-fit: contain;
+                        }
+                        if !root.review-has-preview: EmptyState {
+                            text: "Select a case to preview the image.";
+                        }
+                    }
+                }
+                // Drag handle: preview ↔ case queue (Python 60/40).
+                SplitterV {
+                    split <=> root.preview-h;
+                    min-split: 120px;
+                    max-split: parent.height - 220px;
+                }
+                Card {
+                    clip: true;
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        padding: 4px;
+                        spacing: 4px;
+                        // Column headers (Python ReviewTableModel widths).
+                        Rectangle {
+                            height: 26px;
+                            background: Theme.header-bg;
+                            border-radius: 4px;
+                            clip: true;
+                            HorizontalLayout {
+                                TableHeaderCell { label: "#"; width-pref: 48px; }
+                                TableHeaderCell { label: "Outcome"; width-pref: 100px; }
+                                TableHeaderCell { label: "Reason"; width-pref: 105px; }
+                                TableHeaderCell { label: "Trigger"; width-pref: 160px; }
+                                TableHeaderCell { label: "Decision"; width-pref <=> root.col-decision-w; resizable: true; }
+                                TableHeaderCell { label: "Driver"; width-pref <=> root.col-driver-w; resizable: true; }
+                                TableHeaderCell { label: "Lap"; width-pref: 115px; flexible: true; resizable: true; }
+                            }
+                        }
+                        qlv := ListView {
+                            vertical-stretch: 1;
+                            for case[index] in root.reviews: TouchArea {
+                                height: Theme.row-h;
+                                width: qlv.width;
+                                clicked => {
+                                    root.review-selected-index = index;
+                                    root.review-selected(index);
+                                }
+                                Rectangle {
+                                    x: 1px; y: 1px;
+                                    width: parent.width - 2px;
+                                    height: parent.height - 2px;
+                                    border-radius: 4px;
+                                    background: index == root.review-selected-index ? Theme.selection-bg
+                                        : (Math.mod(index, 2) == 1 ? Theme.card-alt : transparent);
+                                    HorizontalLayout {
+                                        TableCell { text: "#" + case.number; width-pref: 48px; text-color: Theme.text-muted; }
+                                        TableCell { text: case.outcome; width-pref: 100px; text-color: Theme.text-faint; }
+                                        TableCell { text: case.reason; width-pref: 105px; text-color: Theme.warn; }
+                                        TableCell { text: case.trigger; width-pref: 160px; text-color: Theme.text-faint; }
+                                        TableCell { text: case.decision; width-pref: root.col-decision-w; text-color: Theme.text-muted; }
+                                        TableCell { text: case.driver; width-pref: root.col-driver-w; text-color: Theme.text-muted; }
+                                        TableCell { text: case.lap; width-pref: 115px; flexible: true;
+                                            text-color: case.lap-dirty ? Theme.danger : Theme.text-muted; grid-line: false; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if root.reviews.length == 0: EmptyState { width: parent.width - 24px; text: "Review queue is clear."; }
+                }
+            }
+
+            // Drag handle: left pane ↔ details.
+            SplitterH {
+                x: root.main-split;
+                height: 100%;
+                split <=> root.main-split;
+                min-split: 480px;
+                max-split: parent.width - 320px;
+            }
+
+            // ── Right: details + actions ──
+            VerticalLayout {
+                x: root.main-split + 6px;
+                width: parent.width - root.main-split - 6px;
+                height: 100%;
+                spacing: 6px;
+                FocusScope {
+                    key-pressed(event) => {
+                        if event.text == Key.UpArrow && root.review-selected-index > 0 {
+                            root.review-selected-index -= 1;
+                            root.review-selected(root.review-selected-index);
+                            accept
+                        } else if event.text == Key.DownArrow && root.review-selected-index + 1 < root.reviews.length {
+                            root.review-selected-index += 1;
+                            root.review-selected(root.review-selected-index);
+                            accept
+                        } else if event.text == Key.Return && root.selected-reason() == "dirty_lap" {
+                            root.review-apply(root.selected-number(), "dirty", "true");
+                            accept
+                        } else if event.text == "d" && root.selected-reason() == "dirty_lap" {
+                            root.review-apply(root.selected-number(), "dirty", "true");
+                            accept
+                        } else if event.text == "c" && root.selected-reason() == "dirty_lap" {
+                            root.review-apply(root.selected-number(), "dirty", "false");
+                            accept
+                        } else {
+                            reject
+                        }
+                    }
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text { text: root.review-detail-title; color: Theme.text; font-weight: 700; }
+                        Card {
+                            vertical-stretch: 1;
+                            clip: true;
+                            TextEdit {
+                                x: 8px; y: 6px;
+                                width: parent.width - 16px;
+                                height: parent.height - 12px;
+                                read-only: true;
+                                font-size: Theme.font-md;
+                                wrap: word-wrap;
+                                text: root.review-detail-lines;
+                            }
+                        }
+                        Text { text: root.reason-note(root.selected-reason()); color: Theme.text-muted; font-size: Theme.font-sm; wrap: word-wrap; }
+                        // Per-reason action stack
+                        if root.selected-reason() == "dirty_lap": HorizontalLayout {
+                            spacing: 6px;
+                            Button { text: "Dirty"; clicked => { root.review-apply(root.selected-number(), "dirty", "true"); } }
+                            Button { text: "Clean"; clicked => { root.review-apply(root.selected-number(), "dirty", "false"); } }
+                        }
+                        if root.selected-reason() == "track": HorizontalLayout {
+                            spacing: 6px;
+                            ComboBox {
+                                min-width: 170px; horizontal-stretch: 1;
+                                model: root.review-tracks;
+                                current-index <=> root.review-track-index;
+                            }
+                            Button { text: "Apply track"; clicked => { root.review-apply(root.selected-number(), "track", root.review-tracks[root.review-track-index]); } }
+                        }
+                        if root.selected-reason() == "weather": HorizontalLayout {
+                            spacing: 6px;
+                            Button { text: "Rain"; clicked => { root.review-apply(root.selected-number(), "weather", "rain"); } }
+                            Button { text: "Dry"; clicked => { root.review-apply(root.selected-number(), "weather", "dry"); } }
+                        }
+                        if root.selected-reason() == "race_class": HorizontalLayout {
+                            spacing: 6px;
+                            ComboBox {
+                                min-width: 170px; horizontal-stretch: 1;
+                                model: root.review-classes;
+                                current-index <=> root.review-class-index;
+                            }
+                            Button { text: "Apply class"; clicked => { root.review-apply(root.selected-number(), "race_class", root.review-classes[root.review-class-index]); } }
+                        }
+                        if root.selected-reason() == "car": HorizontalLayout {
+                            spacing: 6px;
+                            LineEdit { placeholder-text: "Correct car"; horizontal-stretch: 1; text <=> root.review-car-text; }
+                            Button { text: "Apply car"; clicked => { root.review-apply(root.selected-number(), "car", root.review-car-text); } }
+                        }
+                        if root.selected-reason() == "driver_name": HorizontalLayout {
+                            spacing: 6px;
+                            LineEdit { placeholder-text: "Correct driver name"; horizontal-stretch: 1; text <=> root.review-driver-text; }
+                            Button { text: "Apply driver"; clicked => { root.review-apply(root.selected-number(), "driver_name", root.review-driver-text); } }
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Button { text: "Reopen case"; enabled: root.selected-number() >= 0 && root.reviews[root.review-selected-index].status != "open"; clicked => { root.review-reopen(root.selected-number()); } }
+                            Button { text: "Image details"; enabled: root.selected-number() >= 0; clicked => { root.review-open-detail(root.selected-number()); } }
+                        }
+                        if root.review-suggestions != "": Text { text: "Suggestions: " + root.review-suggestions; color: Theme.text-faint; font-size: Theme.font-sm; wrap: word-wrap; }
+                    }
+                }
+            }
+        }
+    }
+}

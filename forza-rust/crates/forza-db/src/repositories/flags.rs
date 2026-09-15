@@ -1,0 +1,332 @@
+//! System review flags mirroring open review cases.
+//!
+//! Port of Python `ImageFlagRepository.add_flag` plus the flag-sync half of
+//! `ReviewService.refresh_review_cases_in_session`: every open case with an
+//! image target owns one active `system` flag (reactivated when resolved),
+//! and active system flags whose case disappeared resolve. Key format matches
+//! Python exactly (`lap:{img}:{type}:{idx}:{drv}:{trk}:{cls}` /
+//! `image:{img}:{type}`) so `flag_key` never embeds a volatile lap id.
+//!
+//! Without this, `open_reviews_missing_active_flag` fails on any database
+//! with open cases — the writer/checker drift the crate audit flagged.
+
+use std::collections::HashSet;
+
+use rusqlite::{Connection, OptionalExtension, params};
+
+use super::reviews::{IMAGE_SCOPED, LAP_SCOPED};
+use crate::error::DbError;
+
+/// Review reasons that own system flags (Python `ReviewReason` vocabulary and
+/// the doctor's `stale_active_review_flags` list).
+pub const REVIEW_FLAG_TYPES: &[&str] = &[
+    "dirty_lap",
+    "track",
+    "weather",
+    "race_class",
+    "car",
+    "driver_name",
+];
+
+fn nanos_id(prefix: &str, counter: usize) -> String {
+    format!("{prefix}-{}-{counter}", uuid::Uuid::new_v4().simple())
+}
+
+fn flag_key_lap(
+    image_file_id: &str,
+    flag_type: &str,
+    lap_index: i64,
+    driver_normalized: &str,
+    track_normalized: &str,
+    race_class: &str,
+) -> String {
+    format!(
+        "lap:{image_file_id}:{flag_type}:{lap_index}:{driver_normalized}:{track_normalized}:{race_class}"
+    )
+}
+
+fn flag_key_image(image_file_id: &str, flag_type: &str) -> String {
+    format!("image:{image_file_id}:{flag_type}")
+}
+
+struct OpenCase {
+    run_id: Option<String>,
+    extraction_result_id: Option<String>,
+    lap_record_id: Option<String>,
+    reason: String,
+    lap_index: Option<i64>,
+    image_file_id: String,
+}
+
+struct LapHint {
+    id: String,
+    run_id: String,
+    extraction_result_id: Option<String>,
+    lap_index: i64,
+    driver_normalized: Option<String>,
+    track_normalized: Option<String>,
+    race_class: String,
+}
+
+/// Resolved flag identity + columns for one open case (kept as a struct —
+/// a 6-tuple trips `clippy::type_complexity` under the CI `-D warnings`).
+struct ResolvedFlag {
+    flag_key: String,
+    scope: &'static str,
+    lap_index: Option<i64>,
+    driver_normalized: Option<String>,
+    track_normalized: Option<String>,
+    race_class: Option<String>,
+    lap_record_id: Option<String>,
+    extraction_result_id: Option<String>,
+    run_id: Option<String>,
+}
+
+fn resolve_flag(case: &OpenCase, lap: Option<&LapHint>, image_scoped: bool) -> ResolvedFlag {
+    match lap {
+        Some(l) if !image_scoped => ResolvedFlag {
+            flag_key: flag_key_lap(
+                &case.image_file_id,
+                &case.reason,
+                l.lap_index,
+                l.driver_normalized.as_deref().unwrap_or(""),
+                l.track_normalized.as_deref().unwrap_or(""),
+                &l.race_class,
+            ),
+            scope: "lap",
+            lap_index: Some(l.lap_index),
+            driver_normalized: l.driver_normalized.clone(),
+            track_normalized: l.track_normalized.clone(),
+            race_class: Some(l.race_class.clone()),
+            lap_record_id: Some(l.id.clone()),
+            extraction_result_id: l.extraction_result_id.clone(),
+            run_id: case.run_id.clone().or(Some(l.run_id.clone())),
+        },
+        // The doctor matches flags to cases on `COALESCE(lap_index,-1)`: an
+        // image-scoped case (lap_index NULL) maps to an image key with
+        // lap_index NULL even when the case row carries a lap_record_id.
+        _ => ResolvedFlag {
+            flag_key: flag_key_image(&case.image_file_id, &case.reason),
+            scope: "image",
+            lap_index: None,
+            driver_normalized: None,
+            track_normalized: None,
+            race_class: None,
+            lap_record_id: None,
+            extraction_result_id: case.extraction_result_id.clone(),
+            run_id: case.run_id.clone(),
+        },
+    }
+}
+
+fn find_lap(conn: &Connection, lap_id: &str) -> Result<Option<LapHint>, DbError> {
+    conn.query_row(
+        "SELECT id, run_id, extraction_result_id, lap_index,
+                driver_normalized, track_normalized, race_class
+         FROM lap_records WHERE id = ?1",
+        params![lap_id],
+        |r| {
+            Ok(LapHint {
+                id: r.get(0)?,
+                run_id: r.get(1)?,
+                extraction_result_id: r.get(2)?,
+                lap_index: r.get(3)?,
+                driver_normalized: r.get(4)?,
+                track_normalized: r.get(5)?,
+                race_class: r.get(6)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(DbError::from)
+}
+
+/// Ensure one active system flag per open case; resolve stale system flags.
+/// Returns `(ensured, resolved)`.
+pub fn sync_review_flags(conn: &Connection) -> Result<(usize, usize), DbError> {
+    let cases: Vec<OpenCase> = {
+        let mut stmt = conn.prepare(
+            "SELECT run_id, extraction_result_id, lap_record_id, reason,
+                    lap_index, image_file_id
+             FROM review_cases
+             WHERE status = 'open' AND image_file_id IS NOT NULL
+             ORDER BY case_number",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(OpenCase {
+                run_id: r.get(0)?,
+                extraction_result_id: r.get(1)?,
+                lap_record_id: r.get(2)?,
+                reason: r.get(3)?,
+                lap_index: r.get(4)?,
+                image_file_id: r.get(5)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)?
+    };
+
+    let mut desired: HashSet<String> = HashSet::new();
+    let mut ensured = 0usize;
+    let mut counter = 0usize;
+
+    for case in &cases {
+        // Unknown reasons are the doctor's `review_cases_invalid_reason`
+        // territory; no flag vocabulary covers them.
+        if !REVIEW_FLAG_TYPES.contains(&case.reason.as_str()) {
+            continue;
+        }
+        let image_scoped = IMAGE_SCOPED.contains(&case.reason.as_str());
+        debug_assert!(image_scoped || LAP_SCOPED.contains(&case.reason.as_str()));
+
+        // Resolve the lap link for lap-scoped cases (fallback: any lap with
+        // the same image + lap_index; then key/columns degrade gracefully).
+        let lap: Option<LapHint> = if image_scoped {
+            None
+        } else if let Some(ref lap_id) = case.lap_record_id {
+            match find_lap(conn, lap_id)? {
+                Some(l) => Some(l),
+                None => fallback_lap(conn, &case.image_file_id, case.lap_index)?,
+            }
+        } else {
+            fallback_lap(conn, &case.image_file_id, case.lap_index)?
+        };
+
+        let resolved = resolve_flag(case, lap.as_ref(), image_scoped);
+
+        desired.insert(resolved.flag_key.clone());
+        counter += 1;
+        let fid = nanos_id("flg", counter);
+        conn.execute(
+            "INSERT INTO image_flags
+                (id, image_file_id, run_id, extraction_result_id, lap_record_id,
+                 flag_key, flag_scope, lap_index, driver_normalized, track_normalized,
+                 race_class, flag_type, status, created_by, reason, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                     'active', 'system', ?13, datetime('now'))
+             ON CONFLICT(flag_key) DO UPDATE SET
+                 status = 'active',
+                 resolved_at = NULL,
+                 run_id = COALESCE(excluded.run_id, run_id),
+                 extraction_result_id = COALESCE(excluded.extraction_result_id, extraction_result_id),
+                 lap_record_id = COALESCE(excluded.lap_record_id, lap_record_id),
+                 lap_index = excluded.lap_index,
+                 driver_normalized = COALESCE(excluded.driver_normalized, driver_normalized),
+                 track_normalized = COALESCE(excluded.track_normalized, track_normalized),
+                 race_class = COALESCE(excluded.race_class, race_class),
+                 reason = excluded.reason",
+            params![
+                fid,
+                case.image_file_id,
+                resolved.run_id,
+                resolved.extraction_result_id,
+                resolved.lap_record_id,
+                resolved.flag_key,
+                resolved.scope,
+                resolved.lap_index,
+                resolved.driver_normalized,
+                resolved.track_normalized,
+                resolved.race_class,
+                case.reason,
+                case.reason,
+            ],
+        )?;
+        ensured += 1;
+    }
+
+    // Resolve active system review flags with no matching open case (Python
+    // parity: by flag_key; operator-owned flags are never touched).
+    let resolved: usize = if desired.is_empty() {
+        conn.execute(
+            "UPDATE image_flags SET status = 'resolved', resolved_at = datetime('now')
+             WHERE status = 'active' AND created_by = 'system'
+               AND flag_type IN ('dirty_lap','track','weather','race_class','car','driver_name')",
+            [],
+        )?
+    } else {
+        let placeholders = crate::placeholders(desired.len());
+        let sql = format!(
+            "UPDATE image_flags SET status = 'resolved', resolved_at = datetime('now')
+             WHERE status = 'active' AND created_by = 'system'
+               AND flag_type IN ('dirty_lap','track','weather','race_class','car','driver_name')
+               AND flag_key NOT IN ({placeholders})"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let refs: Vec<&dyn rusqlite::types::ToSql> = desired
+            .iter()
+            .map(|k| k as &dyn rusqlite::types::ToSql)
+            .collect();
+        stmt.execute(refs.as_slice())?
+    };
+
+    // Duplicate-file flags (Python `_ensure_active_duplicate_flag` parity):
+    // every image pointing at a canonical owns one active `duplicate` flag.
+    // The doctor's review-flag checks scope to the six review reasons, so
+    // these neither satisfy nor violate them.
+    let dup_ids: Vec<String> = {
+        let mut stmt = conn
+            .prepare("SELECT id FROM image_files WHERE duplicate_of_image_file_id IS NOT NULL")?;
+        stmt.query_map([], |r| r.get(0))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(DbError::from)?
+    };
+    let mut dup_ensured = 0usize;
+    for image_id in &dup_ids {
+        let flag_key = format!("image:{image_id}:duplicate");
+        let fid = super::new_id("flg");
+        conn.execute(
+            "INSERT INTO image_flags
+                (id, image_file_id, flag_key, flag_scope, flag_type,
+                 status, created_by, reason, created_at)
+             VALUES (?1, ?2, ?3, 'image', 'duplicate',
+                     'active', 'system', 'duplicate_file_hash', datetime('now'))
+             ON CONFLICT(flag_key) DO UPDATE SET
+                 status = 'active',
+                 resolved_at = NULL,
+                 reason = excluded.reason",
+            params![fid, image_id, flag_key],
+        )?;
+        dup_ensured += 1;
+    }
+    // Resolve duplicate flags whose image lost its canonical link (Python
+    // `_resolve_active_duplicate_flags` parity). Images deleted outright
+    // take their flags via the worker's flag cleanup (FK RESTRICT).
+    let dup_resolved = conn.execute(
+        "UPDATE image_flags SET status = 'resolved', resolved_at = datetime('now')
+         WHERE status = 'active' AND created_by = 'system' AND flag_type = 'duplicate'
+           AND image_file_id NOT IN (
+               SELECT id FROM image_files WHERE duplicate_of_image_file_id IS NOT NULL
+           )",
+        [],
+    )?;
+
+    Ok((ensured + dup_ensured, resolved + dup_resolved))
+}
+
+fn fallback_lap(
+    conn: &Connection,
+    image_file_id: &str,
+    lap_index: Option<i64>,
+) -> Result<Option<LapHint>, DbError> {
+    let Some(idx) = lap_index else {
+        return Ok(None);
+    };
+    conn.query_row(
+        "SELECT id, run_id, extraction_result_id, lap_index,
+                driver_normalized, track_normalized, race_class
+         FROM lap_records WHERE image_file_id = ?1 AND lap_index = ?2 LIMIT 1",
+        params![image_file_id, idx],
+        |r| {
+            Ok(LapHint {
+                id: r.get(0)?,
+                run_id: r.get(1)?,
+                extraction_result_id: r.get(2)?,
+                lap_index: r.get(3)?,
+                driver_normalized: r.get(4)?,
+                track_normalized: r.get(5)?,
+                race_class: r.get(6)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(DbError::from)
+}

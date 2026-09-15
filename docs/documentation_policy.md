@@ -26,6 +26,25 @@ Documentation is organized into the following layers.
 | Plans | `docs/plans/` | Approved or proposed work that is not complete yet. |
 | History | `docs/history/` | Completed work, audits, run postmortems, and handoff evidence. |
 
+## Two implementation trees
+
+Since the 0.21.0-beta.1 baseline the project has two codebases with
+different currencies:
+
+- `forza/` (Python) is **frozen legacy**. Root `docs/` describes it and stays
+  untouched except to fix provably wrong historical statements. Its plans and
+  history are closed records.
+- `forza-rust/` (Rust) is **current**. It mirrors the same layering under
+  `forza-rust/docs/`: topic docs plus its own `plans/` (approved future Rust
+  work) and `history/` (completed Rust work, audits, postmortems).
+
+Every rule in this policy applies to both trees with their roots substituted
+(`docs/` ↔ `forza-rust/docs/`, `../QUICK_GUIDE.md` ↔ `../README.md` entry
+points as mapped in each tree's index). In particular: required headers,
+550-line active-document limit, plans/history never cited as contracts,
+update-in-the-same-change, changelog discipline, and the LLM orientation
+order (substituting `forza-rust/docs/` paths and `forza.exe` commands).
+
 Top-level documentation is limited to navigation and project-wide policy/state:
 
 | Document | Purpose |

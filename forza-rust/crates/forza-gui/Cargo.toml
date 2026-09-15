@@ -1,0 +1,54 @@
+[package]
+name = "forza-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "forza-gui"
+path = "src/main.rs"
+
+[dependencies]
+rfd = "0.15"
+serde.workspace = true
+serde_json.workspace = true
+slint = "1"
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+forza-config = { path = "../forza-config" }
+forza-db = { path = "../forza-db" }
+forza-domain = { path = "../forza-domain" }
+forza-app = { path = "../forza-app" }
+forza-output = { path = "../forza-output" }
+forza-pipeline = { path = "../forza-pipeline" }
+opener.workspace = true
+rusqlite.workspace = true
+
+[build-dependencies]
+slint-build = "1"
+
+# Primary-display work-area metrics for the computed first-launch window size.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+# Slint-generated code emits #[allow(unsafe_code)] and is full of unwraps,
+# which conflicts with the workspace-level policy. The GUI crate opts out of
+# the inherited table; hand-written code still avoids unwraps where practical,
+# and any hand-written `unsafe` needs a `// SAFETY:` comment justifying it
+# (currently a single trivial win32 metric query).
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+unwrap_used = "allow"
+expect_used = "allow"

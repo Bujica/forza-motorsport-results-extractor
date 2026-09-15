@@ -1,0 +1,159 @@
+// Process page: run configuration, progress with rate/ETA, and the event log.
+
+import { Button, CheckBox, ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Card, EmptyState, SplitterV } from "../components/common.slint";
+
+export component ProcessPage inherits Rectangle {
+    background: transparent;
+
+    in property <bool> run-running;
+    in property <bool> run-paused;
+    in property <float> run-percent;
+    in property <int> run-done;
+    in property <int> run-total;
+    in property <string> run-rate;
+    in property <string> run-eta;
+    in property <[string]> run-log;
+    in property <string> run-info;
+    in-out property <bool> dry-run-checked;
+    in-out property <bool> force-checked;
+    in-out property <bool> retry-checked;
+    in-out property <bool> debug-checked;
+    // Two-step cancel (Python `_confirm_cancel` parity): the first click arms
+    // the confirmation inline; "Confirm" stops after the current image.
+    in-out property <bool> confirm-cancel: false;
+    in-out property <length> progress-h: 90px;
+
+    callback start-run(bool, bool, bool, bool);
+    callback select-in-images();
+    callback cancel-run();
+    callback toggle-pause();
+
+    VerticalLayout {
+        spacing: 8px;
+
+        // Run Config card
+        Card {
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 10px;
+                VerticalLayout {
+                    spacing: 6px;
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: start;
+                        CheckBox { text: "Dry-run"; checked <=> root.dry-run-checked; }
+                        CheckBox {
+                            text: "Force";
+                            checked <=> root.force-checked;
+                            toggled => { if self.checked { root.retry-checked = false; } }
+                        }
+                        CheckBox {
+                            text: "Retry errors";
+                            checked <=> root.retry-checked;
+                            toggled => { if self.checked { root.force-checked = false; } }
+                        }
+                        CheckBox {
+                            text: "Verbose log";
+                            checked <=> root.debug-checked;
+                        }
+                    }
+                    Text { text: root.run-info; color: Theme.text-muted; font-size: Theme.font-sm; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: end;
+                    Button {
+                        text: root.run-running ? "Running…" : "Run All";
+                        enabled: !root.run-running;
+                        clicked => { root.confirm-cancel = false; root.start-run(root.dry-run-checked, root.force-checked, root.retry-checked, root.debug-checked); }
+                    }
+                    Button {
+                        text: "Select in Images";
+                        enabled: !root.run-running;
+                        clicked => { root.select-in-images(); }
+                    }
+                    Button {
+                        text: root.run-paused ? "Resume" : "Pause";
+                        enabled: root.run-running;
+                        clicked => { root.toggle-pause(); }
+                    }
+                    Button {
+                        text: "Cancel";
+                        enabled: root.run-running;
+                        clicked => { root.confirm-cancel = true; }
+                    }
+                    if root.confirm-cancel && root.run-running: Button {
+                        text: "Confirm cancel?";
+                        clicked => { root.confirm-cancel = false; root.cancel-run(); }
+                    }
+                }
+            }
+        }
+
+        // Progress card — compact (was equal to log), now 90px + resizable
+        Card {
+            height: root.progress-h;
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 10px;
+                VerticalLayout {
+                    spacing: 6px;
+                    Text { text: "Progress"; color: Theme.text; font-weight: 700; }
+                    Rectangle {
+                        height: 14px;
+                        background: Theme.header-bg;
+                        border-radius: 7px;
+                        Rectangle {
+                            x: 0; y: 0;
+                            height: parent.height;
+                            border-radius: 7px;
+                            background: Theme.progress;
+                            width: parent.width * root.run-percent / 100;
+                        }
+                    }
+                    HorizontalLayout {
+                        Text { text: root.run-paused ? "Paused" : root.run-running ? "Running" : "Ready";
+                               color: root.run-paused ? Theme.warn : Theme.text-muted; horizontal-stretch: 1; }
+                        Text { text: root.run-done + " / " + root.run-total; color: Theme.text-muted; horizontal-stretch: 1; horizontal-alignment: center; }
+                        Text { text: "Rate: " + (root.run-rate == "" ? "—" : root.run-rate); color: Theme.text-muted; horizontal-stretch: 1; horizontal-alignment: center; overflow: elide; }
+                        Text { text: "ETA: " + (root.run-eta == "" ? "—" : root.run-eta); color: Theme.text-muted; horizontal-stretch: 1; horizontal-alignment: right; overflow: elide; }
+                    }
+                }
+            }
+        }
+
+        SplitterV {
+            split <=> root.progress-h;
+            min-split: 60px;
+            max-split: parent.height - 200px;
+        }
+
+        // Event Log card
+        Card {
+            vertical-stretch: 1;
+            clip: true;
+            elv := ListView {
+                x: 6px; y: 6px;
+                width: parent.width - 12px;
+                height: parent.height - 12px;
+                for line in root.run-log: Text {
+                    // Row height follows the scalable font (18px fixed clipped
+                    // glyphs at ui-scale >= 1.25).
+                    height: Math.max(18px, Theme.font-sm * 1.5);
+                    width: elv.width;
+                    text: line;
+                    color: Theme.text-muted;
+                    font-size: Theme.font-sm;
+                    overflow: elide;
+                }
+            }
+            if root.run-log.length == 0: EmptyState {
+                width: parent.width - 24px;
+                text: "Run events and logs will appear here.";
+            }
+        }
+    }
+}

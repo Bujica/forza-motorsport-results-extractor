@@ -1,0 +1,26 @@
+[package]
+name = "forza-pipeline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+base64.workspace = true
+sha2.workspace = true
+walkdir = "2"
+forza-domain = { path = "../forza-domain" }
+image.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+# Test fixtures exercise fallible filesystem/image helpers directly, so the
+# unwraps live in test code only (covered by `cfg_attr(test, ...)` allows).
+[lints]
+workspace = true

@@ -1,6 +1,8 @@
 # Windows Beta Packaging
 
-Status: current
+Status: current — Python line (`0.21.0` final, legacy). A Rust (`0.1.0`)
+bundle policy does not exist yet; when created, it must mirror the
+one-folder + explicit allow-list rules below.
 Target game: Forza Motorsport, 2023 release.
 Target screenshot type: post-race Results screen.
 
@@ -64,3 +66,38 @@ fmre-cli.exe maintenance db-doctor --json
 ## Notes
 
 The beta uses PyInstaller one-folder packaging. This is deliberate: PySide6, SQLite/Alembic data files, and troubleshooting are easier to validate before attempting a one-file executable.
+
+## Rust bundle (current line, `0.1.0`)
+
+Policy: same one-folder + explicit allow-list rules as above. The Rust
+bundle is built by `packaging/build_windows_beta_rust.py` (validated by
+`tests/test_beta_packaging_rust_static.py`, released by
+`.github/workflows/build-windows-beta-rust.yml`):
+
+```cmd
+python packaging\build_windows_beta_rust.py
+```
+
+Expected artifact:
+
+```text
+dist\ForzaMotorsportResultsExtractor-rust-0.1.0-beta.1-windows-x64.zip
+```
+
+Contents: `forza.exe` + `forza-gui.exe` (release), starter
+`forza_config.ini.example`, `cars.txt`, `tracks.txt`,
+`data/external/track_aliases.json`, empty `data/input` and `output/`
+folders, launch `.bat` helpers, generated `RUST_BUNDLE_NOTES.md` and
+`build_info.json`. No Alembic migrations ship: the Rust schema lives in
+code (`forza-db`) and `forza.exe maintenance db-upgrade` creates/migrates
+the database. The forbidden name/file lists are imported from
+`tools/build_windows_beta.py`, so both lines obey one policy.
+
+Smoke test from the unpacked bundle:
+
+```cmd
+forza.exe --version
+forza.exe maintenance db-upgrade
+forza.exe maintenance db-doctor --json
+forza-gui.exe
+```
