@@ -36,6 +36,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   assets (sorted, deduplicated) in addition to the `reference_cars` catalog,
   so regenerated databases stop redetecting them. Best-effort: never fails
   the decision.
+- Rust Windows beta bundle: `packaging/build_windows_beta_rust.py` builds a
+  one-folder distribution (`forza.exe` + `forza-gui.exe` release binaries,
+  INI template, reference data, empty runtime folders, launch `.bat`
+  helpers, generated `build_info.json`) under the same exclusion policy as
+  the Python bundle (forbidden lists imported from
+  `tools/build_windows_beta.py`); released by the manual
+  `Build Windows Beta (Rust)` workflow as
+  `ForzaMotorsportResultsExtractor-rust-0.1.0-beta.1-windows-x64.zip`.
+  Guarded by `tests/test_beta_packaging_rust_static.py`.
 - Review outcome filter understands `auto_resolved` (and `pending` now means
   actionable `open` rows); the outcome column and detail panel show the
   lifecycle truth for system-resolved cases.

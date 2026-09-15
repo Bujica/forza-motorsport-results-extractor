@@ -45,6 +45,17 @@ The beta does not target Forza Horizon, older Forza Motorsport layouts, leaderbo
 The beta bundle is a one-folder Windows distribution intended for testers,
 built from the legacy Python line. It includes the GUI executable, CLI maintenance executable, migrations, runtime reference data, and starter configuration templates. A Rust-built bundle does not exist yet (see `QUICK_GUIDE.md`).
 
+## Windows beta bundle (Rust line, `0.1.0`, current)
+
+Built by `python packaging\build_windows_beta_rust.py` (or the manual
+`Build Windows Beta (Rust)` workflow). One folder with `forza.exe` +
+`forza-gui.exe` (release), starter configuration template, reference data
+(`cars.txt`, `tracks.txt`, `data/external/track_aliases.json`), empty
+runtime folders, launch `.bat` helpers, and a generated `build_info.json`.
+Same exclusion policy as the Python bundle (see
+`docs/release/beta_packaging.md`); no Alembic migrations ship — the schema
+lives in code and `forza.exe maintenance db-upgrade` creates/migrates it.
+
 Expected artifact name:
 
 ```text
