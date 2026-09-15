@@ -33,7 +33,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Launch the graphical interface (PySide6 desktop app).
+    /// Launch the graphical interface (Slint desktop app).
+    ///
+    /// Same entry point as the `forza-gui` binary (`forza_gui::run`); the
+    /// CLI depends on `forza-gui` only for this subcommand.
     Gui,
     /// Process screenshots through the live extraction pipeline.
     ///

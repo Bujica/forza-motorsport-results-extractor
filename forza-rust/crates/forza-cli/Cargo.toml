@@ -16,6 +16,8 @@ anyhow.workspace = true
 forza-config = { path = "../forza-config" }
 forza-db = { path = "../forza-db" }
 forza-app = { path = "../forza-app" }
+# Only for the `gui` subcommand (same `forza_gui::run` entry as the
+# `forza-gui` binary); every other subcommand is GUI-free.
 forza-gui = { path = "../forza-gui" }
 forza-output = { path = "../forza-output" }
 forza-pipeline = { path = "../forza-pipeline" }
