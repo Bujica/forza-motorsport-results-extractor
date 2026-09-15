@@ -85,15 +85,18 @@ dist\ForzaMotorsportResultsExtractor-rust-0.1.0-beta.1-windows-x64.zip
 ```
 
 Contents: `forza.exe` + `forza-gui.exe` (release), starter
-`forza_config.ini.example`, `cars.txt`, `tracks.txt`,
-`data/external/track_aliases.json`, empty `data/input` and `output/`
-folders, launch `.bat` helpers, generated `RUST_BUNDLE_NOTES.md` and
-`build_info.json`. No Alembic migrations ship: the Rust schema lives in
+`forza_config.ini.example`, `RUST_BETA.md` (the single operator manual),
+`cars.txt`, `tracks.txt`, `data/external/track_aliases.json`, empty
+`data/input` and `output/` folders, and a generated `build_info.json`.
+No `.bat` helpers ship: first launch is self-sufficient (the app creates
+the config from the example, the database, and missing folders itself).
+No Alembic migrations ship: the Rust schema lives in
 code (`forza-db`) and `forza.exe maintenance db-upgrade` creates/migrates
 the database. The forbidden name/file lists are imported from
 `tools/build_windows_beta.py`, so both lines obey one policy.
 
-Smoke test from the unpacked bundle:
+Smoke test from the unpacked bundle (or just open the GUI — setup is
+automatic):
 
 ```cmd
 forza.exe --version

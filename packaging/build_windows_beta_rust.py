@@ -47,9 +47,12 @@ FORBIDDEN_BUNDLE_FILES = _TOOLS.FORBIDDEN_BUNDLE_FILES
 BINARIES = ("forza.exe", "forza-gui.exe")
 
 # Explicit allow-list: relative source -> bundle destination. Anything not
-# listed here never enters the bundle.
+# listed here never enters the bundle. No .bat helpers ship: first launch is
+# self-sufficient (config/database/folders are created by the app itself),
+# and RUST_BETA.md is the single operator manual.
 RUNTIME_FILES = (
     "forza_config.ini.example",
+    "RUST_BETA.md",
     "cars.txt",
     "tracks.txt",
     "data/external/track_aliases.json",
@@ -62,28 +65,6 @@ RUNTIME_DIRS = (
     "output/logs",
     "output/exports",
 )
-
-BATS = {
-    "Initialize Database.bat": '"%~dp0forza.exe" maintenance db-upgrade',
-    "DB Doctor.bat": '"%~dp0forza.exe" maintenance db-doctor --json',
-    "Config Check.bat": '"%~dp0forza.exe" config-check',
-}
-
-RUST_BUNDLE_NOTES = """\
-Forza Motorsport Results Extractor — Windows beta bundle (Rust line).
-
-Binaries:
-  ForzaMotorsportResultsExtractor-Rust\\forza-gui.exe  desktop app (primary surface)
-  ForzaMotorsportResultsExtractor-Rust\\forza.exe      CLI (maintenance + controlled runs)
-
-First run:
-  1. Double-click "Initialize Database.bat" (runs: forza.exe maintenance db-upgrade).
-  2. Copy forza_config.ini.example to forza_config.ini and set your LM Studio endpoint.
-  3. Launch forza-gui.exe.
-
-This bundle was built from the Rust line (forza-rust/). The legacy Python
-bundle is a separate artifact; do not mix the two.
-"""
 
 
 def _rust_version() -> str:
@@ -139,9 +120,6 @@ def _create_bundle_tree() -> None:
         shutil.copy2(source, destination)
     for relative_path in RUNTIME_FILES:
         _copy_into_bundle(relative_path)
-    for name, command in BATS.items():
-        _write_text(BUNDLE_DIR / name, f"@echo off\r\n{command}\r\npause\r\n", crlf=True)
-    _write_text(BUNDLE_DIR / "RUST_BUNDLE_NOTES.md", RUST_BUNDLE_NOTES)
 
 
 def _write_build_info() -> None:

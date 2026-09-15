@@ -5,13 +5,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 
 fn resolve_db_path(config_path: &Path, configured: PathBuf) -> PathBuf {
-    if configured.is_absolute() {
-        return configured;
-    }
-    match config_path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent.join(configured),
-        _ => configured,
-    }
+    forza_config::resolve_path(config_path, &configured)
 }
 
 pub(crate) fn database_file(config_path: &Path) -> PathBuf {
@@ -42,7 +36,11 @@ pub(crate) fn load_validated_config(
     config_path: &Path,
     strict: bool,
 ) -> anyhow::Result<forza_config::AppConfig> {
-    let (cfg, warnings) = forza_config::load_config(config_path, strict)?;
+    let (mut cfg, warnings) = forza_config::load_config(config_path, strict)?;
+    // One rule everywhere: relative [paths] resolve against the INI folder,
+    // so `run`/`rebuild`/`export` can never disagree with `maintenance`
+    // about which database or input folder a config means.
+    forza_config::resolve_paths(config_path, &mut cfg);
     for warning in &warnings {
         eprintln!("warning: {warning}");
     }

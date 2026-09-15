@@ -18,16 +18,28 @@ def test_rust_bundle_script_uses_release_binaries_and_allowlist() -> None:
     assert "FORBIDDEN_BUNDLE_NAMES" in text
     assert "FORBIDDEN_BUNDLE_FILES" in text
     assert "_assert_clean_bundle()" in text
-    assert '"Initialize Database.bat"' in text
-    assert '"DB Doctor.bat"' in text
-    assert '"Config Check.bat"' in text
-    assert '"%~dp0forza.exe" maintenance db-upgrade' in text
-    assert '"%~dp0forza.exe" maintenance db-doctor --json' in text
-    assert '"%~dp0forza.exe" config-check' in text
+    assert '"RUST_BETA.md"' in text
     assert "Alembic" in text  # documents why no migrations ship
     assert "ForzaMotorsportResultsExtractor-rust-" in text
-    assert "RUST_BUNDLE_NOTES.md" in text
     assert "fmre-cli" not in text  # Python bundle binary must not leak in
+    # No .bat helpers are generated: first launch is self-sufficient.
+    assert "BATS" not in text
+    assert '"Initialize Database.bat"' not in text
+    assert '"DB Doctor.bat"' not in text
+
+
+def test_rust_beta_manual_covers_first_run() -> None:
+    text = _read("RUST_BETA.md")
+    for token in (
+        "forza-gui.exe",
+        "data/input/",
+        "database_file",
+        "LM Studio",
+        "user.gamertag",
+        "maintenance db-doctor",
+        "config-check",
+    ):
+        assert token in text
 
 
 def test_rust_bundle_workflow_is_manual_and_artifact_based() -> None:

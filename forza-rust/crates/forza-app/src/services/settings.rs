@@ -129,6 +129,18 @@ fn path_rows(cfg: &AppConfig) -> Vec<SettingRow> {
                 GROUP_PATHS,
             )
         },
+        SettingRow {
+            // The database in use (resolved absolute path). Shown first-class
+            // so there is never doubt about which file the app reads/writes.
+            status: parent_status(&cfg.database_file),
+            ..row(
+                keys::PATHS_DATABASE_FILE,
+                "database_file",
+                cfg.database_file.to_string_lossy().to_string(),
+                "text",
+                GROUP_PATHS,
+            )
+        },
     ]
 }
 

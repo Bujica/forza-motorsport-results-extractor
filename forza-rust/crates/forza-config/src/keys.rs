@@ -63,6 +63,7 @@ pub const ALL_EDITABLE: &[&str] = &[
     PATHS_INPUT_DIR,
     PATHS_PDF_FILE,
     PATHS_LOG_FILE,
+    PATHS_DATABASE_FILE,
     LLM_URL,
     LLM_MODEL,
     PROMPT_ACTIVE,

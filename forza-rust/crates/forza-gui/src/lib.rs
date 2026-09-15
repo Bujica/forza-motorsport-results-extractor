@@ -211,6 +211,18 @@ fn ensure_database(db_path: &Path) -> anyhow::Result<Option<DbReady>> {
 
 /// Launch the GUI. Blocks until the window closes.
 pub fn run(config_path: &Path) -> anyhow::Result<()> {
+    // First launch must be self-sufficient: a missing INI is bootstrapped
+    // from the shipped example next to it (bundle layout), so a fresh
+    // tester never has to hand-copy files before opening the app.
+    if !config_path.exists()
+        && let Some(dir) = config_path.parent()
+        && !dir.as_os_str().is_empty()
+    {
+        let example = dir.join("forza_config.ini.example");
+        if example.exists() {
+            std::fs::copy(&example, config_path)?;
+        }
+    }
     let (mut cfg, warnings) = forza_config::load_config(config_path, false)?;
     for warning in warnings {
         eprintln!("config warning: {warning}");
@@ -218,73 +230,25 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     forza_config::validate_config(&cfg)
         .map_err(|errors| anyhow::anyhow!("configuration invalid: {}", errors.join("; ")))?;
 
-    // Robust DB path: `load_config` already resolves relative to the ini file,
-    // but when the GUI is launched from `target/debug` the ini there points to
-    // `target/debug/data/forza.sqlite3` (4.9 MB) while the Python CLI uses
-    // `data/forza.sqlite3` at the workspace root (15 MB, 693 images). Try
-    // workspace candidates so both front-ends share the same DB.
-    let mut db_path: PathBuf = cfg.database_file.clone();
-    if !db_path.exists() {
-        let candidates: Vec<PathBuf> = {
-            let mut v = Vec::new();
-            // Relative to cwd
-            v.push(PathBuf::from("data/forza.sqlite3"));
-            v.push(PathBuf::from("../data/forza.sqlite3"));
-            v.push(PathBuf::from("../../data/forza.sqlite3"));
-            // Relative to ini file
-            if let Some(dir) = config_path.parent() {
-                v.push(dir.join("data/forza.sqlite3"));
-                v.push(dir.join("../data/forza.sqlite3"));
-                v.push(dir.join("../../data/forza.sqlite3"));
-            }
-            // Walk up from exe location
-            if let Ok(exe) = std::env::current_exe() {
-                let mut cur = exe.parent().map(Path::to_path_buf).unwrap_or_default();
-                for _ in 0..5 {
-                    v.push(cur.join("data/forza.sqlite3"));
-                    v.push(cur.join("../data/forza.sqlite3"));
-                    if let Some(p) = cur.parent() {
-                        cur = p.to_path_buf();
-                    } else {
-                        break;
-                    }
-                }
-            }
-            v
-        };
-        for cand in candidates {
-            if cand.exists() {
-                db_path = cand;
-                cfg.database_file = db_path.clone();
-                break;
-            }
-        }
-    } else {
-        // Even if the configured path exists, prefer the workspace DB when the
-        // configured one is the tiny `target/debug/data` copy and the workspace
-        // one is larger (Python parity). This keeps the GUI and CLI in sync.
-        let workspace_cand = PathBuf::from("data/forza.sqlite3");
-        // Only switch if the workspace DB exists and is larger
-        if workspace_cand.exists()
-            && db_path
-                .canonicalize()
-                .ok()
-                .and_then(|p| {
-                    p.parent().map(|d| {
-                        d.ends_with("target/debug/data") || d.ends_with("target\\debug\\data")
-                    })
-                })
-                .unwrap_or(false)
-            && let Ok(ws_meta) = std::fs::metadata(&workspace_cand)
-            && let Ok(cur_meta) = std::fs::metadata(&db_path)
-            && ws_meta.len() > cur_meta.len()
+    // One rule everywhere (same as the CLI): relative [paths] resolve
+    // against the INI folder, never against the working directory and never
+    // by hunting the filesystem for some other database. What Settings
+    // shows is what the app uses.
+    forza_config::resolve_paths(config_path, &mut cfg);
+
+    // Fresh installs must not greet the tester with "missing" badges: the
+    // input folder and the output/database parents are created idempotently.
+    // (Exports and logs still create their own parents on demand.)
+    std::fs::create_dir_all(&cfg.input_dir)?;
+    for file_path in [&cfg.pdf_file, &cfg.log_file, &cfg.database_file] {
+        if let Some(parent) = file_path.parent()
+            && !parent.as_os_str().is_empty()
         {
-            db_path = workspace_cand
-                .canonicalize()
-                .unwrap_or(workspace_cand.clone());
-            cfg.database_file = db_path.clone();
+            std::fs::create_dir_all(parent)?;
         }
     }
+
+    let db_path: PathBuf = cfg.database_file.clone();
     // Missing/empty databases are created from zero with no prompt (there is
     // nothing to destroy). Incompatible schemas open a native recovery dialog
     // (migrate / recreate-from-backup / quit) instead of exiting silently —
@@ -464,7 +428,11 @@ pub fn run(config_path: &Path) -> anyhow::Result<()> {
     main.set_logs_status("".into());
 
     // Context header values.
-    main.set_context_db(db_path.display().to_string().into());
+    // Surface the exact database file in use (absolute): with no more
+    // silent fallbacks, this line is the single source of truth and must
+    // never show a surprising path.
+    let db_display = db_path.canonicalize().unwrap_or_else(|_| db_path.clone());
+    main.set_context_db(db_display.display().to_string().into());
     main.set_context_gamertag(cfg.gamertag.clone().into());
 
     // Worker thread owns the receiver; responses marshal back to this loop.

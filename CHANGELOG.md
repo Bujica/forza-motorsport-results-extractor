@@ -38,13 +38,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   the decision.
 - Rust Windows beta bundle: `packaging/build_windows_beta_rust.py` builds a
   one-folder distribution (`forza.exe` + `forza-gui.exe` release binaries,
-  INI template, reference data, empty runtime folders, launch `.bat`
-  helpers, generated `build_info.json`) under the same exclusion policy as
-  the Python bundle (forbidden lists imported from
+  INI template, `RUST_BETA.md` operator manual, reference data, empty
+  runtime folders, generated `build_info.json`) under the same exclusion
+  policy as the Python bundle (forbidden lists imported from
   `tools/build_windows_beta.py`); released by the manual
   `Build Windows Beta (Rust)` workflow as
   `ForzaMotorsportResultsExtractor-rust-0.1.0-beta.1-windows-x64.zip`.
+  No `.bat` helpers ship: first launch is self-sufficient (config,
+  database, and folders are created by the app itself).
   Guarded by `tests/test_beta_packaging_rust_static.py`.
+- First-run simplification: relative `[paths]` resolve against the INI
+  folder in every front-end (GUI, CLI, worker), so all commands agree on
+  which files a config means; the GUI bootstraps a missing INI from the
+  shipped example, creates input/output/database folders idempotently, and
+  no longer hunts the filesystem for alternative databases. Settings shows
+  the resolved `paths.database_file`, and the footer displays its absolute
+  path.
 - Review outcome filter understands `auto_resolved` (and `pending` now means
   actionable `open` rows); the outcome column and detail panel show the
   lifecycle truth for system-resolved cases.

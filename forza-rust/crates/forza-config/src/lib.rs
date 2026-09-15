@@ -467,6 +467,38 @@ pub fn load_config(path: &Path, strict: bool) -> Result<(AppConfig, Warnings), C
     Ok((app, warnings))
 }
 
+/// Resolve a configured path against the INI file's directory.
+///
+/// Single rule for every front-end (GUI, CLI, worker): absolute paths pass
+/// through untouched; relative paths resolve against the folder containing
+/// `config_path`, never against the process working directory. A bare
+/// filename with no parent directory resolves as-is (cwd-relative), matching
+/// the historical behavior for `forza_config.ini` in the cwd.
+///
+/// This exists so `forza.exe maintenance db-doctor`, `forza.exe run`, and
+/// the GUI can never disagree about *which* database (or input folder) a
+/// config file means just because they were launched from different folders.
+/// Call it once right after [`load_config`]; never go hunting the filesystem
+/// for alternative databases.
+#[must_use]
+pub fn resolve_path(config_path: &Path, configured: &Path) -> PathBuf {
+    if configured.is_absolute() {
+        return configured.to_path_buf();
+    }
+    match config_path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.join(configured),
+        _ => configured.to_path_buf(),
+    }
+}
+
+/// Apply [`resolve_path`] to the four `[paths]` entries in place.
+pub fn resolve_paths(config_path: &Path, cfg: &mut AppConfig) {
+    cfg.input_dir = resolve_path(config_path, &cfg.input_dir);
+    cfg.pdf_file = resolve_path(config_path, &cfg.pdf_file);
+    cfg.log_file = resolve_path(config_path, &cfg.log_file);
+    cfg.database_file = resolve_path(config_path, &cfg.database_file);
+}
+
 /// Validate a loaded configuration, returning every failure found.
 pub fn validate_config(cfg: &AppConfig) -> Result<(), Vec<String>> {
     let mut errors: Vec<String> = Vec::new();

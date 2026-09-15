@@ -443,8 +443,11 @@ pub fn handle_request(
         Request::DeleteImages { image_ids } => Response::DeleteDone(delete_images(ctx, image_ids)),
         Request::LoadSettings => {
             let outcome = (|| -> Result<SettingsOutcome, String> {
-                let (cfg, _) =
+                let (mut cfg, _) =
                     forza_config::load_config(&ctx.config_path, false).map_err(|e| e.message)?;
+                // Same rule as startup: [paths] resolve against the INI
+                // folder, so the snapshot matches what the app actually uses.
+                forza_config::resolve_paths(&ctx.config_path, &mut cfg);
                 *ctx.cfg.lock().map_err(|e| e.to_string())? = cfg.clone();
                 let snapshot = settings_snapshot(&cfg, &BTreeMap::new(), false, None);
                 Ok(SettingsOutcome {
