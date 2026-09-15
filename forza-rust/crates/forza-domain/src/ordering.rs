@@ -6,7 +6,7 @@ use crate::race_class::class_order;
 
 /// Minimal lap-row projection shared by ordering and frontier calculation.
 ///
-/// One trait (not one per consumer): every lap row — [`BestLapRow`](crate::),
+/// One trait (not one per consumer): every lap row — `BestLapRow`,
 /// repository exports, test rows — implements this, and both
 /// [`ordered_lap_key`] and the frontier functions take `&impl LapRow`.
 /// SQLite/CSV/Slint edges keep their own `String` DTOs and convert once.

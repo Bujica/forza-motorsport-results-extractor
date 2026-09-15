@@ -4,7 +4,7 @@
 //! types — responses are plain data, so request handling is testable
 //! headlessly.
 //!
-//! The worker owns the live [`AppConfig`] (settings saves update it in
+//! The worker owns the live [`AppConfig`](forza_config::AppConfig) (settings saves update it in
 //! place) plus the INI path, so every handler observes the current
 //! configuration — the Rust counterpart of the Python `GuiConfigState`
 //! live-provider rule.
