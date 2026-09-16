@@ -57,6 +57,13 @@ pub fn placeholders(n: usize) -> String {
 
 /// Utilities for building reproducible test databases. Not intended for
 /// production paths.
+///
+/// Hidden from the public docs (but still compiled): integration tests in
+/// this package and in `forza-gui` link against it, so `#[cfg(test)]` would
+/// not reach them and a cargo feature would force every `cargo test`
+/// invocation to opt in. `doc(hidden)` keeps it out of the documented API
+/// surface without changing the build matrix.
+#[doc(hidden)]
 pub mod test_support {
     pub use crate::repositories::seed_demo_database;
 }
